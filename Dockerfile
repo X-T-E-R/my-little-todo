@@ -36,10 +36,10 @@ RUN cargo build --release -p mlt-server-bin
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libssl3 && \
+    ca-certificates libssl3 gosu && \
     rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -s /bin/bash mlt
+RUN useradd -u 1000 -m -s /bin/bash mlt
 
 WORKDIR /app
 
@@ -54,9 +54,13 @@ ENV PORT=3001 \
     DATA_DIR=/app/data \
     STATIC_DIR=/app/static
 
+RUN mkdir -p /app/data && chown mlt:mlt /app/data
+
 VOLUME /app/data
 EXPOSE 3001
 
-USER mlt
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["mlt-server"]
