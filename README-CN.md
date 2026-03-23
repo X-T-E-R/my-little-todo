@@ -165,7 +165,9 @@ pnpm build:pwa
 
 ## MCP 集成
 
-My Little Todo 内置原生 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) 服务器，让 AI Agent（Cursor、Claude Desktop 等）直接与你的任务交互。
+My Little Todo 内置原生 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) 服务器，让 AI Agent（Cursor、Claude Desktop 等）直接与你的任务系统交互。
+
+详细的 AI 调用指南见 [`skills/`](skills/) 目录。
 
 ### 配置方式
 
@@ -188,23 +190,15 @@ My Little Todo 内置原生 [MCP (Model Context Protocol)](https://modelcontextp
 
 | 工具 | 说明 |
 |------|------|
-| `list_tasks` | 列出所有任务（可按角色/状态筛选） |
-| `get_task` | 获取单个任务详情 |
-| `create_task` | 创建任务（标题 + 可选 DDL/角色/标签） |
-| `update_task` | 更新任务（修改状态/标题/DDL/角色） |
-| `complete_task` | 标记任务完成 |
-| `list_roles` | 列出所有角色 |
-| `add_stream_entry` | 向流中添加一条记录 |
+| `get_overview` | 全局概览：任务计数、紧急DDL、角色列表、日程时段、今日流记录数 |
+| `list_tasks` | 列出任务（可按状态/角色筛选，内联角色名，不含正文） |
+| `get_task` | 获取单个任务完整详情（含正文、提交/延期记录） |
+| `create_task` | 创建任务（标题 + 可选 DDL/角色/标签/父任务） |
+| `update_task` | 更新任务属性或状态（含完成/取消/延期，可附备注） |
+| `delete_task` | 删除任务 |
+| `add_stream` | 添加一条流记录（想法/笔记/进展） |
 | `list_stream` | 列出最近的流记录 |
-| `search` | 全文搜索任务和流记录 |
-
-### 可用资源
-
-| URI | 说明 |
-|-----|------|
-| `tasks://active` | 当前活跃任务摘要 |
-| `tasks://today` | 今日到期任务 |
-| `roles://list` | 角色列表 |
+| `search` | 全文搜索任务和流记录（可限定搜索范围） |
 
 ## 项目结构
 

@@ -165,7 +165,9 @@ pnpm build:pwa
 
 ## MCP Integration
 
-My Little Todo includes a native [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, enabling AI agents (Cursor, Claude Desktop, etc.) to interact with your tasks directly.
+My Little Todo includes a native [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server, enabling AI agents (Cursor, Claude Desktop, etc.) to interact with your task system directly.
+
+For detailed AI integration guidance, see the [`skills/`](skills/) directory.
 
 ### Configuration
 
@@ -188,23 +190,15 @@ Add to your MCP client configuration:
 
 | Tool | Description |
 |------|-------------|
-| `list_tasks` | List all tasks (filter by role/status) |
-| `get_task` | Get task details |
-| `create_task` | Create a task (title + optional DDL/role/tags) |
-| `update_task` | Update task (status/title/DDL/role) |
-| `complete_task` | Mark a task as completed |
-| `list_roles` | List all roles |
-| `add_stream_entry` | Add a stream entry |
+| `get_overview` | Dashboard: task counts, urgent DDLs, roles, schedule blocks, today's stream count |
+| `list_tasks` | List tasks (filter by status/role, includes role_name, excludes body) |
+| `get_task` | Get full task details (body, submissions, postponements) |
+| `create_task` | Create a task (title + optional DDL/role/tags/parent) |
+| `update_task` | Update task properties or status (complete/cancel/postpone with note) |
+| `delete_task` | Delete a task |
+| `add_stream` | Add a stream entry (idea/note/progress) |
 | `list_stream` | List recent stream entries |
-| `search` | Full-text search across tasks and stream |
-
-### Available Resources
-
-| URI | Description |
-|-----|-------------|
-| `tasks://active` | Currently active tasks summary |
-| `tasks://today` | Tasks due today |
-| `roles://list` | List of all roles |
+| `search` | Full-text search across tasks and stream (with scope filter) |
 
 ## API Reference
 

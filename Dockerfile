@@ -14,7 +14,7 @@ RUN pnpm install --frozen-lockfile
 COPY packages/core packages/core
 COPY packages/web packages/web
 COPY packages/admin packages/admin
-COPY biome.json tsconfig.json ./
+COPY biome.json tsconfig.base.json ./
 
 RUN pnpm --filter @my-little-todo/web build:vite && \
     pnpm --filter @my-little-todo/admin build
