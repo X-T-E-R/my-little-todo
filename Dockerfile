@@ -61,8 +61,10 @@ RUN mkdir -p /app/data && chown mlt:mlt /app/data
 VOLUME /app/data
 EXPOSE 3001
 
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Inline entrypoint (avoids CRLF issues from Windows-created .sh files)
+RUN printf '#!/bin/sh\nset -e\ndir="${DATA_DIR:-/app/data}"\nmkdir -p "$dir"\nchown -R mlt:mlt "$dir"\nexec gosu mlt "$@"\n' \
+    > /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/docker-entrypoint.sh
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["mlt-server"]
