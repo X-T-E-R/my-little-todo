@@ -16,7 +16,8 @@ COPY packages/web packages/web
 COPY packages/admin packages/admin
 COPY biome.json tsconfig.base.json ./
 
-RUN pnpm --filter @my-little-todo/web build:vite && \
+RUN pnpm --filter @my-little-todo/core build && \
+    pnpm --filter @my-little-todo/web build:vite && \
     pnpm --filter @my-little-todo/admin build
 
 # ── Stage 2: Build Rust server ───────────────────────────────────
