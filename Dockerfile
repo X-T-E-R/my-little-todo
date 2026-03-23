@@ -20,7 +20,7 @@ RUN pnpm --filter @my-little-todo/web build:vite && \
     pnpm --filter @my-little-todo/admin build
 
 # ── Stage 2: Build Rust server ───────────────────────────────────
-FROM rust:1.83-bookworm AS rust-builder
+FROM rust:1.86-bookworm AS rust-builder
 
 WORKDIR /app
 COPY crates crates
