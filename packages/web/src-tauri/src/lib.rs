@@ -65,7 +65,7 @@ async fn start_embedded_server(
     state.config = Some(config.clone());
 
     let join = tokio::spawn(async move {
-        if let Err(e) = mlt_server::start(config).await {
+        if let Err(e) = mlt_server::start(config, env!("CARGO_PKG_VERSION"), "dev").await {
             eprintln!("[Embedded Server] Error: {}", e);
         }
     });

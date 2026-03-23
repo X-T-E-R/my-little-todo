@@ -23,6 +23,8 @@ RUN pnpm --filter @my-little-todo/core build && \
 # ── Stage 2: Build Rust server ───────────────────────────────────
 FROM rust:1-bookworm AS rust-builder
 
+ARG GIT_HASH=unknown
+
 WORKDIR /app
 COPY crates crates
 COPY Cargo.lock ./
@@ -30,7 +32,7 @@ COPY Cargo.lock ./
 # Create a server-only workspace (excludes Tauri desktop crate)
 RUN printf '[workspace]\nresolver = "2"\nmembers = ["crates/server", "crates/server-bin"]\n' > Cargo.toml
 
-RUN cargo build --release -p mlt-server-bin
+RUN GIT_HASH=${GIT_HASH} cargo build --release -p mlt-server-bin
 
 # ── Stage 3: Runtime ─────────────────────────────────────────────
 FROM debian:bookworm-slim

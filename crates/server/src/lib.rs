@@ -22,13 +22,22 @@ use tower_http::services::{ServeDir, ServeFile};
 pub struct AppState {
     pub db: Arc<dyn DatabaseProvider>,
     pub config: Arc<ServerConfig>,
+    pub version: &'static str,
+    pub git_hash: &'static str,
 }
 
-pub fn create_app(db: Arc<dyn DatabaseProvider>, config: ServerConfig) -> Router {
+pub fn create_app(
+    db: Arc<dyn DatabaseProvider>,
+    config: ServerConfig,
+    version: &'static str,
+    git_hash: &'static str,
+) -> Router {
     let config = Arc::new(config);
     let state = AppState {
         db,
         config: config.clone(),
+        version,
+        git_hash,
     };
 
     let cors = CorsLayer::new()
@@ -152,6 +161,8 @@ pub fn create_app(db: Arc<dyn DatabaseProvider>, config: ServerConfig) -> Router
             get(move || async move {
                 Json(serde_json::json!({
                     "status": "ok",
+                    "version": health_state.version,
+                    "git_hash": health_state.git_hash,
                     "db": format!("{:?}", health_state.config.db_type),
                     "auth": format!("{:?}", health_state.config.auth_mode),
                     "timestamp": timestamp_now(),
@@ -169,7 +180,11 @@ pub fn create_app(db: Arc<dyn DatabaseProvider>, config: ServerConfig) -> Router
     }
 }
 
-pub async fn start(config: ServerConfig) -> anyhow::Result<()> {
+pub async fn start(
+    config: ServerConfig,
+    version: &'static str,
+    git_hash: &'static str,
+) -> anyhow::Result<()> {
     let db = providers::create_provider(&config).await?;
 
     // Auto-create default admin for single-user mode
@@ -195,7 +210,7 @@ pub async fn start(config: ServerConfig) -> anyhow::Result<()> {
         .put_setting("_system", "_l0_config_backup", &toml_backup)
         .await;
 
-    let app = create_app(db, config.clone());
+    let app = create_app(db, config.clone(), version, git_hash);
     let bind_addr = format!("{}:{}", config.host, config.port);
 
     println!(
