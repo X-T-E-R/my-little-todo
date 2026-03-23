@@ -1,33 +1,37 @@
 services:
   mlt:
-    build: .
+    image: ghcr.io/x-t-e-r/my-little-todo:latest
+    # build: .    # Uncomment to build from source instead
     ports:
       - "3001:3001"
     volumes:
-      - mlt-data:/app/data
+      - ./data:/app/data
     environment:
       - PORT=3001
       - AUTH_MODE=multi
       - DB_TYPE=sqlite
-      - JWT_SECRET=change-me-to-a-random-string
+      - JWT_SECRET=${JWT_SECRET:-please-change-me}
       # - DEFAULT_ADMIN_PASSWORD=admin123
     restart: unless-stopped
 
   # ── Optional: PostgreSQL backend ──────────────────────────────
-  # Uncomment below and set DB_TYPE=postgres + DATABASE_URL to use PostgreSQL
+  # To use PostgreSQL instead of SQLite:
+  #   1. Uncomment the postgres service below
+  #   2. Change DB_TYPE to postgres
+  #   3. Uncomment DATABASE_URL
   #
   # mlt:
-  #   build: .
+  #   image: ghcr.io/x-t-e-r/my-little-todo:latest
   #   ports:
   #     - "3001:3001"
   #   volumes:
-  #     - mlt-data:/app/data
+  #     - ./data:/app/data
   #   environment:
   #     - PORT=3001
   #     - AUTH_MODE=multi
   #     - DB_TYPE=postgres
   #     - DATABASE_URL=postgres://mlt:mlt_password@postgres:5432/mylittletodo
-  #     - JWT_SECRET=change-me-to-a-random-string
+  #     - JWT_SECRET=${JWT_SECRET:-please-change-me}
   #   depends_on:
   #     postgres:
   #       condition: service_healthy
@@ -40,14 +44,10 @@ services:
   #     POSTGRES_PASSWORD: mlt_password
   #     POSTGRES_DB: mylittletodo
   #   volumes:
-  #     - pg-data:/var/lib/postgresql/data
+  #     - ./pg-data:/var/lib/postgresql/data
   #   healthcheck:
   #     test: ["CMD-SHELL", "pg_isready -U mlt"]
   #     interval: 5s
   #     timeout: 5s
   #     retries: 5
   #   restart: unless-stopped
-
-volumes:
-  mlt-data:
-  # pg-data:

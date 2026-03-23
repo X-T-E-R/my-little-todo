@@ -58,20 +58,43 @@
 
 ## 快速开始
 
-### Docker 部署（推荐用于服务器）
+### Docker 部署（推荐）
+
+无需克隆仓库，直接在服务器上创建 `docker-compose.yml`：
+
+```yaml
+services:
+  mlt:
+    image: ghcr.io/x-t-e-r/my-little-todo:latest
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - AUTH_MODE=multi
+      - JWT_SECRET=change-me-to-a-random-string
+    restart: unless-stopped
+```
+
+然后执行：
 
 ```bash
-# 克隆仓库
-git clone <repo-url>
-cd my-little-todo
+# 生成安全的 JWT 密钥
+echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
 
-# 使用 Docker Compose 一键启动
+# 启动
 docker compose up -d
 
 # 访问 http://localhost:3001
 ```
 
-默认使用 SQLite 存储。如需使用 PostgreSQL，编辑 `docker-compose.yml` 取消注释 PostgreSQL 相关配置。
+数据存储在主机的 `./data/` 目录中，方便备份和查看。
+
+#### 更新到最新版本
+
+```bash
+docker compose pull && docker compose up -d
+```
 
 #### Docker 环境变量
 
@@ -88,6 +111,11 @@ docker compose up -d
 | `STATIC_DIR` | `/app/static` | 前端静态文件目录 |
 
 ### 从源码构建
+
+```bash
+git clone https://github.com/X-T-E-R/my-little-todo.git
+cd my-little-todo
+```
 
 #### 环境准备
 
@@ -285,19 +313,16 @@ pnpm typecheck   # 类型检查
 pnpm test        # 运行测试
 ```
 
-## 版本管理与提交规范
+## 贡献
 
-- **每次完成一个新功能或修复后**，都应该 `git commit` 并更新版本号
-- 版本号遵循语义化版本 (SemVer)：`MAJOR.MINOR.PATCH`
-  - `PATCH`: bug 修复、小调整
-  - `MINOR`: 新功能、非破坏性变更
-  - `MAJOR`: 破坏性变更
-- 需要更新版本号的位置：
-  - `packages/web/package.json` → `version`
-  - `packages/web/src-tauri/tauri.conf.json` → `version`
-  - `crates/server/Cargo.toml` → `version`
-  - `packages/web/src/views/SettingsView.tsx` → `APP_VERSION` 常量
-- 提交信息格式：`feat: 简要描述` / `fix: 简要描述` / `refactor: 简要描述`
+欢迎 PR 和 Issue！提交前请：
+
+```bash
+pnpm lint        # 确保通过 lint 检查
+pnpm typecheck   # 确保类型正确
+```
+
+提交信息格式：`feat: 简要描述` / `fix: 简要描述` / `refactor: 简要描述`
 
 ## 路线图
 

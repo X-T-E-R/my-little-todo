@@ -58,20 +58,43 @@ Traditional todo apps are "ledgers" that faithfully record your debts. My Little
 
 ## Quick Start
 
-### Docker (Recommended for servers)
+### Docker Deploy (Recommended)
+
+No need to clone the repo. Create a `docker-compose.yml` on your server:
+
+```yaml
+services:
+  mlt:
+    image: ghcr.io/x-t-e-r/my-little-todo:latest
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - AUTH_MODE=multi
+      - JWT_SECRET=change-me-to-a-random-string
+    restart: unless-stopped
+```
+
+Then run:
 
 ```bash
-# Clone the repository
-git clone <repo-url>
-cd my-little-todo
+# Generate a secure JWT secret
+echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
 
-# Start with Docker Compose
+# Start
 docker compose up -d
 
 # Access at http://localhost:3001
 ```
 
-Default configuration uses SQLite. To use PostgreSQL, edit `docker-compose.yml` and uncomment the PostgreSQL section.
+Data is stored in `./data/` on the host — easy to backup and inspect.
+
+#### Update to Latest Version
+
+```bash
+docker compose pull && docker compose up -d
+```
 
 #### Docker Environment Variables
 
@@ -88,6 +111,11 @@ Default configuration uses SQLite. To use PostgreSQL, edit `docker-compose.yml` 
 | `STATIC_DIR` | `/app/static` | Frontend static files directory |
 
 ### Build from Source
+
+```bash
+git clone https://github.com/X-T-E-R/my-little-todo.git
+cd my-little-todo
+```
 
 #### Prerequisites
 
@@ -240,6 +268,15 @@ pnpm lint        # Lint
 pnpm format      # Format
 pnpm typecheck   # Type check
 pnpm test        # Test
+```
+
+## Contributing
+
+PRs and issues are welcome! Before submitting, please run:
+
+```bash
+pnpm lint        # Lint check
+pnpm typecheck   # Type check
 ```
 
 ## Roadmap
