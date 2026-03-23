@@ -1,0 +1,16 @@
+target/
+node_modules/
+.git/
+*.md
+.gitignore
+.dockerignore
+docker-compose.yml
+参考资料/
+packages/web/src-tauri/gen/
+packages/web/src-tauri/icons/
+packages/web/dist/
+packages/admin/dist/
+packages/mobile/
+agent-transcripts/
+terminals/
+*.plan.md

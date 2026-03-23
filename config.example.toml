@@ -1,0 +1,33 @@
+# My Little Todo — Server Configuration (L0)
+# Copy this file to `config.toml` and edit as needed.
+# Environment variables override TOML values when set.
+
+port = 3001
+
+# Bind address: "127.0.0.1" (local only) | "0.0.0.0" (all interfaces, for LAN sharing)
+#   PC Tauri default: "127.0.0.1"
+#   Standalone server default: "0.0.0.0"
+host = "0.0.0.0"
+
+# Auth mode: "none" | "single" | "multi"
+#   none   — no authentication (local PC mode, default for Tauri)
+#   single — single user, auto-creates admin account
+#   multi  — multi-user registration enabled (default for server)
+auth_mode = "multi"
+
+# Storage backend: "sqlite" | "postgres" | "mysql" | "mongodb"
+#   sqlite — embedded SQLite database (default, recommended)
+db_type = "sqlite"
+
+# Data directory (used by sqlite backend)
+data_dir = "./data"
+
+# Database URL (required for postgres/mysql/mongodb, optional for sqlite)
+# database_url = "sqlite:./data/my-little-todo.db?mode=rwc"
+# database_url = "postgres://user:pass@localhost/mlt"
+
+# JWT secret for authentication tokens (auto-generated if not set)
+# jwt_secret = "change-me-to-a-secure-random-string"
+
+# Default admin password for single-user mode (only used on first startup)
+# default_admin_password = "admin123"

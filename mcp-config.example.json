@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "my-little-todo": {
+      "url": "http://localhost:3001/api/mcp",
+      "headers": {
+        "Authorization": "Bearer <your-jwt-token>"
+      }
+    }
+  }
+}

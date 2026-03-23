@@ -1,0 +1,16 @@
+{
+  "All": "全部",
+  "Uncategorized": "未分类",
+  "Role name": "角色名",
+  "Add role": "添加角色",
+  "No role": "无角色",
+  "Last: {{summary}}": "上次：{{summary}}",
+  "{{count}} pending tasks": "{{count}} 件待办",
+  "{{count}} due today": "{{count}} 件今天到期",
+  "Rename": "重命名",
+  "Change color": "更改颜色",
+  "Move to top": "移到顶部",
+  "Move to bottom": "移到底部",
+  "Delete": "删除",
+  "Delete role \"{{name}}\"? Tasks will become uncategorized.": "删除角色 \"{{name}}\"？相关任务将变为未分类。"
+}

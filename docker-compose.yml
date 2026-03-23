@@ -1,0 +1,53 @@
+services:
+  mlt:
+    build: .
+    ports:
+      - "3001:3001"
+    volumes:
+      - mlt-data:/app/data
+    environment:
+      - PORT=3001
+      - AUTH_MODE=multi
+      - DB_TYPE=sqlite
+      - JWT_SECRET=change-me-to-a-random-string
+      # - DEFAULT_ADMIN_PASSWORD=admin123
+    restart: unless-stopped
+
+  # ── Optional: PostgreSQL backend ──────────────────────────────
+  # Uncomment below and set DB_TYPE=postgres + DATABASE_URL to use PostgreSQL
+  #
+  # mlt:
+  #   build: .
+  #   ports:
+  #     - "3001:3001"
+  #   volumes:
+  #     - mlt-data:/app/data
+  #   environment:
+  #     - PORT=3001
+  #     - AUTH_MODE=multi
+  #     - DB_TYPE=postgres
+  #     - DATABASE_URL=postgres://mlt:mlt_password@postgres:5432/mylittletodo
+  #     - JWT_SECRET=change-me-to-a-random-string
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: mlt
+  #     POSTGRES_PASSWORD: mlt_password
+  #     POSTGRES_DB: mylittletodo
+  #   volumes:
+  #     - pg-data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U mlt"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+  #   restart: unless-stopped
+
+volumes:
+  mlt-data:
+  # pg-data:

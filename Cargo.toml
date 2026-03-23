@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+  "packages/web/src-tauri",
+  "crates/server",
+  "crates/server-bin",
+]

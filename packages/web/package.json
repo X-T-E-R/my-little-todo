@@ -1,0 +1,45 @@
+{
+  "name": "@my-little-todo/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:vite": "vite",
+    "dev:pwa": "vite --config vite.pwa.config.ts",
+    "build": "tauri build",
+    "build:vite": "vite build",
+    "build:pwa": "vite build --config vite.pwa.config.ts",
+    "preview": "vite preview",
+    "preview:pwa": "vite preview --config vite.pwa.config.ts --port 4173"
+  },
+  "dependencies": {
+    "@my-little-todo/core": "workspace:*",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-fs": "^2",
+    "@tauri-apps/plugin-sql": "^2",
+    "framer-motion": "^12.0.0",
+    "i18next": "^25.0.0",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.577.0",
+    "marked": "^17.0.5",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-i18next": "^15.0.0",
+    "react-router": "^7.0.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "autoprefixer": "^10.4.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.1",
+    "vite-plugin-pwa": "^1.2.0"
+  }
+}

@@ -1,0 +1,12 @@
+[package]
+name = "mlt-server-bin"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "mlt-server"
+path = "src/main.rs"
+
+[dependencies]
+mlt-server = { path = "../server" }
+tokio = { version = "1", features = ["full"] }

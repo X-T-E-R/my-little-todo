@@ -1,0 +1,16 @@
+{
+  "File not found": "文件未找到",
+  "Invalid token": "令牌无效或已过期",
+  "Authentication required": "需要登录",
+  "Username and password are required": "请输入用户名和密码",
+  "Username already taken": "用户名已被占用",
+  "Invalid username or password": "用户名或密码错误",
+  "Single-user mode: registration disabled": "单用户模式：注册已禁用",
+  "User not found": "用户不存在",
+  "Current password is incorrect": "当前密码不正确",
+  "Admin access required": "需要管理员权限",
+  "Cannot delete yourself": "不能删除自己",
+  "Backup provider not configured": "备份提供商未配置",
+  "Username or password too long": "用户名或密码过长",
+  "Entry not found": "条目未找到"
+}

@@ -1,0 +1,54 @@
+{
+  "shortcuts": {
+    "New Task": "新建任务",
+    "Switch to Now": "切换到「此刻」",
+    "Switch to Stream": "切换到「流」",
+    "Switch to Tasks": "切换到「任务」",
+    "Open Settings": "打开设置",
+    "Submit": "发送 / 提交",
+    "Bold": "粗体",
+    "Italic": "斜体",
+    "Underline": "下划线",
+    "Strikethrough": "删除线",
+    "Inline Code": "行内代码",
+    "Code Block": "代码块",
+    "Hyperlink": "超链接",
+    "Quote": "引用",
+    "Ordered List": "有序列表",
+    "Unordered List": "无序列表",
+    "Table": "表格",
+    "Clear Format": "清除格式",
+    "Heading 1": "标题 1",
+    "Heading 2": "标题 2",
+    "Heading 3": "标题 3",
+    "Heading 4": "标题 4"
+  },
+  "notifications": {
+    "Reminder: {{title}}": "提醒: {{title}}",
+    "You set a task reminder": "你设置了一个任务提醒"
+  },
+  "markdown": {
+    "Header": "标题",
+    "Link text": "链接文字"
+  },
+  "dates": {
+    "Today": "今天",
+    "Yesterday": "昨天",
+    "Tomorrow": "明天",
+    "Sun": "日",
+    "Mon": "一",
+    "Tue": "二",
+    "Wed": "三",
+    "Thu": "四",
+    "Fri": "五",
+    "Sat": "六",
+    "weekday_prefix": "周",
+    "Expired ({{dayOfWeek}})": "已过期 ({{dayOfWeek}})",
+    "{{dayOfWeek}} ({{days}} days and {{hours}} hours left)": "{{dayOfWeek}} (还剩 {{days}} 天 {{hours}} 小时)",
+    "{{dayOfWeek}} ({{days}} days left)": "{{dayOfWeek}} (还剩 {{days}} 天)",
+    "{{month}}/{{date}} ({{days}} days left)": "{{month}}月{{date}}日 (还剩 {{days}} 天)"
+  },
+  "roles": {
+    "Role limit reached ({{max}})": "角色数量已达上限 ({{max}})"
+  }
+}

@@ -1,0 +1,245 @@
+@import "tailwindcss";
+@source "../";
+
+:root {
+  --color-bg: #fdfbf7;
+  --color-bg-elevated: #ffffff;
+  --color-surface: #ffffff;
+  --color-text: #2c2a29;
+  --color-text-secondary: #7a7673;
+  --color-text-tertiary: #a8a39f;
+  --color-accent: #6b8cce;
+  --color-accent-hover: #5a7ab8;
+  --color-accent-soft: #f0f4f8;
+  --color-success: #5eb376;
+  --color-success-soft: #eaf5ec;
+  --color-warning: #e8a05c;
+  --color-warning-soft: #fdf3ea;
+  --color-danger: #d96c6c;
+  --color-danger-soft: #fceeee;
+  --color-border: #eae6e1;
+  --color-border-hover: #d6d1cb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #1e1c1b;
+    --color-bg-elevated: #262423;
+    --color-surface: #2c2a29;
+    --color-text: #f0edea;
+    --color-text-secondary: #a8a39f;
+    --color-text-tertiary: #7a7673;
+    --color-accent: #7c9edb;
+    --color-accent-hover: #8baae3;
+    --color-accent-soft: #2c3545;
+    --color-success: #6cc285;
+    --color-success-soft: #253d2c;
+    --color-warning: #f0ad6e;
+    --color-warning-soft: #4a3623;
+    --color-danger: #e67e7e;
+    --color-danger-soft: #4a2828;
+    --color-border: #3d3a38;
+    --color-border-hover: #4f4c4a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-bg: #1e1c1b;
+  --color-bg-elevated: #262423;
+  --color-surface: #2c2a29;
+  --color-text: #f0edea;
+  --color-text-secondary: #a8a39f;
+  --color-text-tertiary: #7a7673;
+  --color-accent: #7c9edb;
+  --color-accent-hover: #8baae3;
+  --color-accent-soft: #2c3545;
+  --color-success: #6cc285;
+  --color-success-soft: #253d2c;
+  --color-warning: #f0ad6e;
+  --color-warning-soft: #4a3623;
+  --color-danger: #e67e7e;
+  --color-danger-soft: #4a2828;
+  --color-border: #3d3a38;
+  --color-border-hover: #4f4c4a;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Safe area insets for notched devices */
+:root {
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}
+
+button:focus,
+[role="button"]:focus {
+  outline: none;
+}
+
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Mobile-specific touch targets */
+@media (max-width: 639px) {
+  button, [role="button"], a {
+    min-height: 36px;
+  }
+
+  input, textarea, select {
+    font-size: 16px !important; /* Prevent iOS zoom on input focus */
+  }
+
+  /* Hide scrollbars on mobile for cleaner look */
+  ::-webkit-scrollbar {
+    display: none;
+  }
+
+  * {
+    scrollbar-width: none;
+  }
+}
+
+/* Standalone PWA mode adjustments */
+@media all and (display-mode: standalone) {
+  body {
+    user-select: none;
+    -webkit-user-select: none;
+    overscroll-behavior: none;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-hover);
+}
+
+/* Markdown preview styling */
+.markdown-preview h1 {
+  font-size: 1.5em;
+  font-weight: 700;
+  margin: 0.8em 0 0.4em;
+}
+.markdown-preview h2 {
+  font-size: 1.3em;
+  font-weight: 700;
+  margin: 0.7em 0 0.3em;
+}
+.markdown-preview h3 {
+  font-size: 1.15em;
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
+.markdown-preview h4 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0.5em 0 0.2em;
+}
+.markdown-preview p {
+  margin: 0.4em 0;
+  line-height: 1.7;
+}
+.markdown-preview ul,
+.markdown-preview ol {
+  padding-left: 1.5em;
+  margin: 0.3em 0;
+}
+.markdown-preview li {
+  margin: 0.15em 0;
+  line-height: 1.6;
+}
+.markdown-preview li input[type="checkbox"] {
+  margin-right: 0.4em;
+  accent-color: var(--color-accent);
+}
+.markdown-preview blockquote {
+  border-left: 3px solid var(--color-accent);
+  padding: 0.3em 0.8em;
+  margin: 0.5em 0;
+  color: var(--color-text-secondary);
+  background: var(--color-accent-soft);
+  border-radius: 0 8px 8px 0;
+}
+.markdown-preview code {
+  background: var(--color-bg);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: "Fira Code", "JetBrains Mono", "Consolas", monospace;
+}
+.markdown-preview pre {
+  background: var(--color-bg);
+  padding: 0.8em 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+  border: 1px solid var(--color-border);
+}
+.markdown-preview pre code {
+  background: none;
+  padding: 0;
+}
+.markdown-preview a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+  font-size: 0.9em;
+}
+.markdown-preview th,
+.markdown-preview td {
+  border: 1px solid var(--color-border);
+  padding: 0.4em 0.6em;
+  text-align: left;
+}
+.markdown-preview th {
+  background: var(--color-bg);
+  font-weight: 600;
+}
+.markdown-preview hr {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 1em 0;
+}
+.markdown-preview mark,
+.markdown-preview em em {
+  background: var(--color-warning-soft);
+  padding: 0.1em 0.2em;
+  border-radius: 2px;
+}

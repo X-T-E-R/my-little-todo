@@ -1,0 +1,33 @@
+{
+  "name": "my-little-todo",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "biome check .",
+    "dev:pwa": "pnpm --filter @my-little-todo/web dev:pwa",
+    "build:pwa": "pnpm --filter @my-little-todo/web build:pwa",
+    "build:mobile": "pnpm --filter @my-little-todo/mobile build",
+    "cap:sync": "pnpm --filter @my-little-todo/mobile exec npx cap sync",
+    "cap:open:android": "pnpm --filter @my-little-todo/mobile exec npx cap open android",
+    "build:admin": "pnpm --filter @my-little-todo/admin build",
+    "dev:admin": "pnpm --filter @my-little-todo/admin dev",
+    "dev:web": "concurrently -n rust,vite -c blue,green \"cargo run -p mlt-server-bin\" \"pnpm --filter @my-little-todo/web dev:vite\"",
+    "typecheck": "pnpm --filter @my-little-todo/core exec tsc --noEmit && pnpm --filter @my-little-todo/web exec tsc -b --noEmit",
+    "format": "biome format --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "concurrently": "^9.2.1",
+    "turbo": "^2.4.0",
+    "typescript": "^5.8.0"
+  },
+  "packageManager": "pnpm@10.32.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@biomejs/biome",
+      "esbuild"
+    ]
+  }
+}

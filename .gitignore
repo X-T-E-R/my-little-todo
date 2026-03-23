@@ -1,0 +1,29 @@
+node_modules/
+dist/
+dist-pwa/
+.turbo/
+*.tsbuildinfo
+
+# Rust / Cargo
+target/
+packages/web/src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Local data
+data/
+import-legacy-data.json
+
+# Internal docs (not for public release)
+参考资料/
+plans/
