@@ -8,7 +8,7 @@ export function serializeStreamFile(entries: StreamEntry[], dateKey: string): st
   const sorted = [...entries].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
   for (const entry of sorted) {
-    const typeTag = entry.entryType === 'task' ? '[task] ' : '';
+    const typeTag = entry.entryType !== 'spark' ? `[${entry.entryType}] ` : '';
     let line = `- ${formatTimeStorage(entry.timestamp)} | ${typeTag}${entry.content}`;
     if (entry.roleId) {
       line += ` @role:${entry.roleId}`;

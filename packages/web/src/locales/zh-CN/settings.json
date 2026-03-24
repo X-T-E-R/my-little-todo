@@ -240,5 +240,6 @@
   "Max file size (MB)": "最大文件大小 (MB)",
   "Storage backend": "存储后端",
   "Image host URL": "图床地址",
-  "Attachment settings saved": "附件设置已保存"
+  "Attachment settings saved": "附件设置已保存",
+  "Auto check updates": "自动检查更新"
 }

@@ -21,7 +21,14 @@ interface StreamState {
   addEntry: (
     content: string,
     saveAsTask?: boolean,
-    meta?: { ddl?: Date; ddlType?: DdlType; tags?: string[]; body?: string; roleId?: string },
+    meta?: {
+      ddl?: Date;
+      ddlType?: DdlType;
+      tags?: string[];
+      body?: string;
+      roleId?: string;
+      entryType?: StreamEntryType;
+    },
   ) => Promise<StreamEntry>;
   updateEntry: (entry: StreamEntry) => Promise<void>;
   deleteEntry: (entryId: string) => Promise<void>;
@@ -61,37 +68,62 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   addEntry: async (
     content: string,
     saveAsTask = false,
-    meta?: { ddl?: Date; ddlType?: DdlType; tags?: string[]; body?: string; roleId?: string },
+    meta?: {
+      ddl?: Date;
+      ddlType?: DdlType;
+      tags?: string[];
+      body?: string;
+      roleId?: string;
+      entryType?: StreamEntryType;
+    },
   ) => {
     const { useRoleStore } = await import('./roleStore');
     const roleId = meta?.roleId ?? useRoleStore.getState().currentRoleId ?? undefined;
-    const entryType: StreamEntryType = saveAsTask ? 'task' : 'spark';
-    const entry = await addStreamEntry(content, roleId, entryType);
-    set((state) => ({
-      entries: [...state.entries, entry],
-    }));
+    const entryType: StreamEntryType = meta?.entryType ?? (saveAsTask ? 'task' : 'spark');
 
-    if (saveAsTask) {
-      const task = await createTask(content.slice(0, 80).trim(), {
-        sourceStreamId: entry.id,
-        tags: meta?.tags ?? entry.tags,
-        roleId: entry.roleId,
-        body: meta?.body ?? content,
-        ddl: meta?.ddl,
-        ddlType: meta?.ddlType,
-      });
-      const dateKey = formatDateKey(entry.timestamp);
-      await linkEntryToTask(entry.id, dateKey, task.id);
+    const tempId = `_temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const optimistic: StreamEntry = {
+      id: tempId,
+      content,
+      timestamp: new Date(),
+      tags: content.match(/#[^\s]+/g)?.map((t) => t.slice(1)) ?? [],
+      entryType,
+      roleId,
+      attachments: [],
+    };
+    set((state) => ({ entries: [...state.entries, optimistic] }));
+
+    try {
+      const entry = await addStreamEntry(content, roleId, entryType);
       set((state) => ({
-        entries: state.entries.map((e) =>
-          e.id === entry.id ? { ...e, extractedTaskId: task.id, entryType: 'task' } : e,
-        ),
+        entries: state.entries.map((e) => (e.id === tempId ? entry : e)),
       }));
-      const { useTaskStore } = await import('./taskStore');
-      await useTaskStore.getState().load();
-    }
 
-    return entry;
+      if (saveAsTask) {
+        const task = await createTask(content.slice(0, 80).trim(), {
+          sourceStreamId: entry.id,
+          tags: meta?.tags ?? entry.tags,
+          roleId: entry.roleId,
+          body: meta?.body ?? content,
+          ddl: meta?.ddl,
+          ddlType: meta?.ddlType,
+        });
+        const dateKey = formatDateKey(entry.timestamp);
+        await linkEntryToTask(entry.id, dateKey, task.id);
+        set((state) => ({
+          entries: state.entries.map((e) =>
+            e.id === entry.id ? { ...e, extractedTaskId: task.id, entryType: 'task' } : e,
+          ),
+        }));
+        const { useTaskStore } = await import('./taskStore');
+        await useTaskStore.getState().load();
+      }
+
+      return entry;
+    } catch (err) {
+      set((state) => ({ entries: state.entries.filter((e) => e.id !== tempId) }));
+      throw err;
+    }
   },
 
   updateEntry: async (entry: StreamEntry) => {
@@ -104,16 +136,23 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   deleteEntry: async (entryId: string) => {
     const entry = get().entries.find((e) => e.id === entryId);
     if (!entry) return;
-    const dateKey = formatDateKey(entry.timestamp);
-    const dayEntries = get().entries.filter(
-      (e) => formatDateKey(e.timestamp) === dateKey && e.id !== entryId,
-    );
-    const { serializeStreamFile } = await import('@my-little-todo/core');
-    const { writeFile } = await import('../storage/adapter');
-    const { STREAM_DIR } = await import('@my-little-todo/core');
-    const serialized = serializeStreamFile(dayEntries, dateKey);
-    await writeFile(serialized, STREAM_DIR, `${dateKey}.md`);
+
+    const prevEntries = get().entries;
     set((state) => ({ entries: state.entries.filter((e) => e.id !== entryId) }));
+
+    try {
+      const dateKey = formatDateKey(entry.timestamp);
+      const dayEntries = prevEntries.filter(
+        (e) => formatDateKey(e.timestamp) === dateKey && e.id !== entryId,
+      );
+      const { serializeStreamFile } = await import('@my-little-todo/core');
+      const { writeFile } = await import('../storage/adapter');
+      const { STREAM_DIR } = await import('@my-little-todo/core');
+      const serialized = serializeStreamFile(dayEntries, dateKey);
+      await writeFile(serialized, STREAM_DIR, `${dateKey}.md`);
+    } catch {
+      set({ entries: prevEntries });
+    }
   },
 
   enrichEntry: async (entryId: string) => {

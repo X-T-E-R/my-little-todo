@@ -1,8 +1,8 @@
 /** Stream entry line format: `- HH:MM:SS | [type] content` or legacy `- HH:MM | content` */
 export const STREAM_LINE_REGEX = /^- (\d{2}:\d{2}(?::\d{2})?) \| (.+)$/;
 
-/** Optional entry type marker at start of content: `[spark]` or `[task]` */
-export const ENTRY_TYPE_REGEX = /^\[(spark|task)\]\s*/;
+/** Optional entry type marker at start of content: `[spark]`, `[task]`, `[note]`, `[journal]`, `[log]` */
+export const ENTRY_TYPE_REGEX = /^\[(spark|task|note|journal|log)\]\s*/;
 
 /** Extract tags from text: `#tagName` */
 export const TAG_REGEX = /#([\w\u4e00-\u9fff]+)/g;

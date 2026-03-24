@@ -39,7 +39,7 @@
 - **代码复用最大化**：PC 内嵌和独立服务器共享 100% 后端代码（`crates/server` 库）
 - **性能卓越**：Rust 的内存安全和零成本抽象，Axum 异步 HTTP 性能极高
 - **跨平台一致**：Tauri 2 本身就是 Rust，后端 crate 自然集成无 FFI 开销
-- **数据库灵活性**：通过 `DatabaseProvider` trait 抽象，支持 SQLite/PG/MySQL/MongoDB
+- **数据库灵活性**：通过 `DatabaseProvider` trait 抽象，支持 SQLite/PostgreSQL/MySQL
 - **安全性**：类型系统在编译期捕获错误，JWT + Argon2 认证
 
 ### 为什么不用 Node.js 后端？
@@ -71,15 +71,15 @@ Tokio 团队出品的异步 Web 框架。类型安全的路由提取器、Tower 
 ```rust
 #[async_trait]
 pub trait DatabaseProvider: Send + Sync {
-    async fn list_files(&self, user_id: &str, prefix: &str) -> Result<Vec<String>>;
-    async fn get_file(&self, user_id: &str, path: &str) -> Result<Option<String>>;
-    async fn put_file(&self, user_id: &str, path: &str, content: &str) -> Result<()>;
-    async fn delete_file(&self, user_id: &str, path: &str) -> Result<()>;
-    // + 用户管理、设置 CRUD
+    async fn get_file(&self, path: &str) -> Result<Option<String>>;
+    async fn put_file(&self, path: &str, content: &str) -> Result<()>;
+    async fn delete_file(&self, path: &str) -> Result<()>;
+    async fn list_files(&self, dir: &str) -> Result<Vec<String>>;
+    // + 用户管理、设置 CRUD、Blob 元数据
 }
 ```
 
-统一抽象所有存储操作，SQLite/PG/MySQL/MongoDB 各自实现。业务路由只依赖 trait，不关心底层数据库。
+统一抽象所有存储操作，SQLite/PostgreSQL/MySQL 各自实现。业务路由只依赖 trait，不关心底层数据库。
 
 ### JWT + Argon2 认证
 
@@ -93,7 +93,7 @@ pub trait DatabaseProvider: Send + Sync {
 支持 TOML 配置文件 + 环境变量（env 覆盖 TOML）：
 
 ```toml
-port = 23019
+port = 3001
 host = "0.0.0.0"
 auth_mode = "multi"
 db_type = "sqlite"
@@ -203,7 +203,7 @@ Rust 编写的 lint + format 工具，速度极快。
 
 - `tauri build` 生成安装包 (MSI/EXE/DMG/AppImage)
 - 内嵌 Rust 后端，零外部依赖
-- 默认监听 `127.0.0.1:23019`，可选开放局域网
+- 默认监听 `127.0.0.1:3001`，可选开放局域网
 
 ### 纯服务器
 

@@ -91,7 +91,6 @@ pub async fn migrate_data(
         "sqlite" => DbType::Sqlite,
         "postgres" | "postgresql" => DbType::Postgres,
         "mysql" => DbType::Mysql,
-        "mongodb" => DbType::Mongodb,
         other => return Err(bad_request(&format!("Unknown db_type: {}", other))),
     };
 

@@ -6,7 +6,6 @@ import {
   ArrowUpCircle,
   Calendar,
   Check,
-  CheckSquare2,
   Clock,
   Filter,
   ListPlus,
@@ -17,7 +16,6 @@ import {
   Trash2,
   UserCircle,
   X,
-  Zap,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
@@ -36,6 +34,7 @@ import {
   useStreamStore,
 } from '../stores';
 import { useTaskStore } from '../stores';
+import { ENTRY_TYPE_KEYS, ENTRY_TYPE_META } from '../utils/entryTypeUtils';
 import {
   clearFormat,
   insertLink,
@@ -114,7 +113,8 @@ function EntryCard({
   onChangeRole,
   onContextMenu,
   onToggleSelect,
-  onPromote,
+  onChangeType,
+  onMarkComplete,
 }: {
   entry: StreamEntry;
   linkedTask?: Task;
@@ -130,7 +130,8 @@ function EntryCard({
   onChangeRole: (entry: StreamEntry, roleId: string | undefined) => void;
   onContextMenu: (e: React.MouseEvent, entry: StreamEntry) => void;
   onToggleSelect: (entryId: string) => void;
-  onPromote: (entry: StreamEntry) => void;
+  onChangeType: (entry: StreamEntry, type: StreamEntryType) => void;
+  onMarkComplete?: (entry: StreamEntry) => void;
 }) {
   const { t } = useTranslation('stream');
   const roles = useRoleStore((s) => s.roles);
@@ -153,6 +154,7 @@ function EntryCard({
   }, [isEditing, entry.content]);
 
   const isTask = entry.entryType === 'task';
+  const typeMeta = ENTRY_TYPE_META[entry.entryType] ?? ENTRY_TYPE_META.spark;
 
   const renderContent = (content: string) => {
     let offset = 0;
@@ -217,25 +219,44 @@ function EntryCard({
         >
           {formatTime(entry.timestamp)}
         </span>
-        {/* Timeline dot: circle for spark, square for task */}
-        <div
-          className="mt-1"
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: isTask ? 2 : '50%',
-            background: isTask ? 'var(--color-accent)' : 'var(--color-border)',
-          }}
-        />
+        {isTask && linkedTask ? (
+          <button
+            type="button"
+            className="mt-0.5 flex items-center justify-center rounded-full transition-colors"
+            style={{
+              width: 14,
+              height: 14,
+              border: `2px solid ${linkedTask.status === 'completed' ? 'var(--color-success, #22c55e)' : 'var(--color-accent)'}`,
+              background: linkedTask.status === 'completed' ? 'var(--color-success, #22c55e)' : 'transparent',
+            }}
+            title={linkedTask.status === 'completed' ? t('Completed') : t('Mark complete')}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onMarkComplete && linkedTask.status !== 'completed') onMarkComplete(entry);
+            }}
+          >
+            {linkedTask.status === 'completed' && (
+              <Check size={8} className="text-white" strokeWidth={3} />
+            )}
+          </button>
+        ) : (
+          <div
+            className="mt-1"
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: typeMeta.dotRadius,
+              background: typeMeta.dotColor,
+            }}
+          />
+        )}
       </div>
 
       <div
         className="relative flex-1 rounded-xl p-3 shadow-sm transition-shadow hover:shadow-md cursor-pointer outline-none"
         style={{
           background: selected ? 'var(--color-accent-soft)' : 'var(--color-surface)',
-          border: isTask
-            ? '1px solid color-mix(in srgb, var(--color-accent) 40%, transparent)'
-            : '1px solid var(--color-border)',
+          border: `1px solid ${typeMeta.borderColor}`,
         }}
         onClick={handleClick}
         onKeyDown={(e) => {
@@ -303,7 +324,7 @@ function EntryCard({
         ) : (
           <>
             <p
-              className="text-[14px] leading-relaxed whitespace-pre-wrap"
+              className={`text-[14px] leading-relaxed whitespace-pre-wrap${linkedTask?.status === 'completed' ? ' line-through opacity-60' : ''}`}
               style={{ color: 'var(--color-text)' }}
             >
               {renderContent(entry.content)}
@@ -387,7 +408,7 @@ function EntryCard({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onPromote(entry);
+                    onChangeType(entry, 'task');
                   }}
                   className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)]"
                   style={{ color: 'var(--color-text-tertiary)' }}
@@ -564,8 +585,11 @@ function StreamFilterBar({
       >
         {[
           { key: 'all' as const, label: t('All'), icon: null },
-          { key: 'spark' as const, label: t('Inspiration'), icon: Sparkles },
-          { key: 'task' as const, label: t('Task'), icon: CheckSquare2 },
+          ...ENTRY_TYPE_KEYS.map((k) => ({
+            key: k as const,
+            label: t(ENTRY_TYPE_META[k].labelKey),
+            icon: ENTRY_TYPE_META[k].icon,
+          })),
         ].map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -659,6 +683,7 @@ function loadDraft() {
     return JSON.parse(raw) as {
       input?: string;
       saveAsTask?: boolean;
+      selectedEntryType?: StreamEntryType;
       metaDdlDate?: string;
       metaDdlType?: 'soft' | 'commitment' | 'hard';
       metaTags?: string;
@@ -674,7 +699,9 @@ export function StreamView() {
   const draft = useRef(loadDraft()).current;
   const [input, setInput] = useState(draft.input ?? '');
   const [isFocused, setIsFocused] = useState(false);
-  const [saveAsTask, setSaveAsTask] = useState(draft.saveAsTask ?? false);
+  const [selectedEntryType, setSelectedEntryType] = useState<StreamEntryType>(
+    draft.selectedEntryType ?? (draft.saveAsTask ? 'task' : 'spark'),
+  );
   const [metaDdlDate, setMetaDdlDate] = useState(draft.metaDdlDate ?? '');
   const [metaDdlType, setMetaDdlType] = useState<'soft' | 'commitment' | 'hard'>(
     draft.metaDdlType ?? 'soft',
@@ -708,7 +735,7 @@ export function StreamView() {
     addSubtaskToEntry,
     setEntryDdl,
   } = useStreamStore();
-  const { tasks, load: loadTasks, selectTask } = useTaskStore();
+  const { tasks, load: loadTasks, selectTask, updateStatus } = useTaskStore();
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const roles = useRoleStore((s) => s.roles);
   const currentRole = currentRoleId ? roles.find((r) => r.id === currentRoleId) : undefined;
@@ -769,13 +796,13 @@ export function StreamView() {
   }, []);
 
   useEffect(() => {
-    const data = { input, saveAsTask, metaDdlDate, metaDdlType, metaTags };
-    if (!input && !saveAsTask && !metaDdlDate && !metaTags) {
+    const data = { input, selectedEntryType, metaDdlDate, metaDdlType, metaTags };
+    if (!input && selectedEntryType === 'spark' && !metaDdlDate && !metaTags) {
       localStorage.removeItem(DRAFT_KEY);
     } else {
       localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
     }
-  }, [input, saveAsTask, metaDdlDate, metaDdlType, metaTags]);
+  }, [input, selectedEntryType, metaDdlDate, metaDdlType, metaTags]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resize on input change
   useEffect(() => {
@@ -848,19 +875,21 @@ export function StreamView() {
   const handleSubmit = async () => {
     if (!input.trim() || isSubmitting) return;
     setIsSubmitting(true);
+    const isTask = selectedEntryType === 'task';
     try {
-      const meta = saveAsTask
-        ? {
-            ddl: metaDdlDate ? new Date(metaDdlDate) : undefined,
-            ddlType: metaDdlDate ? metaDdlType : undefined,
-            tags:
-              metaTags
-                .split(/[\s,]+/)
-                .map((t) => t.trim())
-                .filter(Boolean) || undefined,
-          }
-        : undefined;
-      await addEntry(input.trim(), saveAsTask, meta);
+      const meta: Parameters<typeof addEntry>[2] = {
+        entryType: selectedEntryType,
+        ...(isTask && {
+          ddl: metaDdlDate ? new Date(metaDdlDate) : undefined,
+          ddlType: metaDdlDate ? metaDdlType : undefined,
+          tags:
+            metaTags
+              .split(/[\s,]+/)
+              .map((t) => t.trim())
+              .filter(Boolean) || undefined,
+        }),
+      };
+      await addEntry(input.trim(), isTask, meta);
       setInput('');
       setMetaDdlDate('');
       setMetaDdlType('soft');
@@ -901,9 +930,9 @@ export function StreamView() {
     await updateEntry({ ...entry, roleId: newRoleId });
   };
 
-  const handlePromote = async (entry: StreamEntry) => {
-    await setEntryType(entry.id, 'task');
-    await loadTasks();
+  const handleChangeType = async (entryId: string, newType: StreamEntryType) => {
+    await setEntryType(entryId, newType);
+    if (newType === 'task') await loadTasks();
   };
 
   const handleContextMenu = (e: React.MouseEvent, entry: StreamEntry) => {
@@ -1038,7 +1067,14 @@ export function StreamView() {
                       onChangeRole={handleChangeRole}
                       onContextMenu={handleContextMenu}
                       onToggleSelect={handleToggleSelect}
-                      onPromote={handlePromote}
+                      onChangeType={(e, type) => handleChangeType(e.id, type)}
+                      onMarkComplete={
+                        entry.entryType === 'task' && entry.extractedTaskId
+                          ? (e) => {
+                              if (e.extractedTaskId) updateStatus(e.extractedTaskId, 'completed');
+                            }
+                          : undefined
+                      }
                     />
                     {subtaskEntryId === entry.id && (
                       <div className="ml-14 mt-1">
@@ -1198,23 +1234,29 @@ export function StreamView() {
                 >
                   {t('{{count}} characters', { count: input.length })}
                 </span>
-                <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={saveAsTask}
-                    onChange={(e) => setSaveAsTask(e.target.checked)}
-                    className="h-3.5 w-3.5 rounded accent-[var(--color-accent)]"
-                  />
-                  <span
-                    className="text-[11px] font-medium"
-                    style={{
-                      color: saveAsTask ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
-                    }}
-                  >
-                    <Zap size={10} className="inline mr-0.5" />
-                    {t('Save directly as task')}
-                  </span>
-                </label>
+                <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ background: 'var(--color-bg)' }}>
+                  {ENTRY_TYPE_KEYS.map((k) => {
+                    const meta = ENTRY_TYPE_META[k];
+                    const TypeIcon = meta.icon;
+                    const active = selectedEntryType === k;
+                    return (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setSelectedEntryType(k)}
+                        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors"
+                        style={{
+                          background: active ? 'var(--color-accent-soft)' : 'transparent',
+                          color: active ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+                        }}
+                        title={t(meta.labelKey)}
+                      >
+                        <TypeIcon size={10} />
+                        {active && <span>{t(meta.labelKey)}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               <button
                 type="button"
@@ -1230,7 +1272,7 @@ export function StreamView() {
 
             {/* Collapsible task metadata panel */}
             <AnimatePresence>
-              {saveAsTask && (
+              {selectedEntryType === 'task' && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
@@ -1307,15 +1349,12 @@ export function StreamView() {
           onBatchSelect={() => {
             handleToggleSelect(contextMenu.entry.id);
           }}
-          onPromote={
-            contextMenu.entry.entryType !== 'task'
-              ? () => handlePromote(contextMenu.entry)
-              : undefined
-          }
-          onDemote={
-            contextMenu.entry.entryType === 'task'
-              ? async () => {
-                  await setEntryType(contextMenu.entry.id, 'spark');
+          onChangeType={(type) => handleChangeType(contextMenu.entry.id, type)}
+          onMarkComplete={
+            contextMenu.entry.entryType === 'task' && contextMenu.entry.extractedTaskId
+              ? () => {
+                  const taskId = contextMenu.entry.extractedTaskId;
+                  if (taskId) updateStatus(taskId, 'completed');
                 }
               : undefined
           }

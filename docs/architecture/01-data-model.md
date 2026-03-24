@@ -30,22 +30,56 @@ interface Role {
 ### StreamEntry（流条目）
 
 ```typescript
+interface Attachment {
+  type: 'image' | 'link' | 'file';
+  url: string;
+  title?: string;
+}
+
+type StreamEntryType = 'spark' | 'task' | 'note' | 'journal' | 'log';
+
 interface StreamEntry {
-  id: string;                    // 如 "se-20260320-153200-abc"
+  id: string;                    // 如 "se-20260320-153200"
   content: string;               // 原始文本 (Markdown)
   timestamp: Date;
   tags: string[];
-  type?: StreamEntryType;        // 'note' | 'task' | 'idea' | 'log'
+  attachments: Attachment[];     // 图片/链接/文件附件
+  extractedTaskId?: string;      // 如果被提取为任务，关联的任务 ID
   roleId?: string;               // 所属角色
-  subtasks?: SubTask[];          // 子任务列表
-  ddl?: Date;                    // 截止日期
-  parentId?: string;             // 父条目 ID
+  entryType: StreamEntryType;    // 条目类型
 }
 ```
+
+**entryType 说明**：
+
+| 值 | 含义 | 用途 |
+|---|---|---|
+| `spark` | 灵感/随想（默认） | 快速记录，零摩擦输入 |
+| `task` | 已提取为任务 | 系统设置，关联 extractedTaskId |
+| `note` | 长笔记/参考 | 用户主动标记的结构化笔记 |
+| `journal` | 日记/反思 | 日常总结、心情、复盘 |
+| `log` | 进展记录 | 任务/项目的进度更新 |
 
 ### Task（任务）
 
 ```typescript
+type TaskStatus = 'inbox' | 'active' | 'today' | 'completed' | 'archived';
+type DdlType = 'hard' | 'commitment' | 'soft';
+
+interface TaskResource {
+  type: 'link' | 'file' | 'note';
+  url?: string;
+  title: string;
+  addedAt: Date;
+}
+
+interface TaskReminder {
+  id: string;
+  time: Date;
+  notified: boolean;
+  label?: string;
+}
+
 interface Task {
   id: string;
   title: string;
@@ -56,23 +90,30 @@ interface Task {
   completedAt?: Date;
 
   ddl?: Date;
-  ddlType?: 'hard' | 'commitment' | 'soft';
+  ddlType?: DdlType;
+  plannedAt?: Date;               // 计划执行时间（实施意向）
 
   roleId?: string;
   tags: string[];
-  priority?: number;             // 内部优先级分
+  priority?: number;              // AI 计算的内部优先级分
 
-  body: string;                  // 自由正文 (Markdown)
-  subtasks?: SubTask[];          // 子任务
-  parentId?: string;             // 父任务 ID
-  sourceStreamId?: string;       // 来源流条目
+  body: string;                   // 自由正文 (Markdown)
+  subtaskIds: string[];           // 子任务 ID 列表（引用其他 Task）
+  parentId?: string;              // 父任务 ID
+  sourceStreamId?: string;        // 来源流条目
 
+  resources: TaskResource[];      // 关联资源（链接/文件/笔记）
+  reminders: TaskReminder[];      // 提醒列表
   submissions: Submission[];
   postponements: Postponement[];
 }
-
-type TaskStatus = 'inbox' | 'active' | 'today' | 'completed' | 'archived';
 ```
+
+### 其他模型
+
+- **ScheduleBlock** (`schedule.ts`) — 日程时段：名称、时间范围、重复规则、角色关联
+- **BehaviorEvent** (`behavior.ts`) — 行为事件：推荐接受/拒绝、专注开始/完成/放弃、DDL 达标/错过等
+- **AiOperation** (`ai-operation.ts`) — AI 操作记录：可审计、可撤销
 
 ---
 
@@ -83,10 +124,10 @@ type TaskStatus = 'inbox' | 'active' | 'today' | 'completed' | 'archived';
 存储位置：TOML 文件 (`config.toml`) + 环境变量 (env 覆盖 TOML)
 
 ```toml
-port = 23019
+port = 3001
 host = "127.0.0.1"        # PC 默认 127.0.0.1, 服务器默认 0.0.0.0
 auth_mode = "none"         # none | single | multi
-db_type = "sqlite"         # sqlite | postgres | mysql | mongodb
+db_type = "sqlite"         # sqlite | postgres | mysql
 data_dir = "./data"
 jwt_secret = "auto-generated"
 ```
@@ -157,6 +198,15 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (user_id, key)
 );
+
+CREATE TABLE IF NOT EXISTS blobs (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+    size INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
 ```
 
 ### DatabaseProvider trait
@@ -164,26 +214,36 @@ CREATE TABLE IF NOT EXISTS settings (
 ```rust
 #[async_trait]
 pub trait DatabaseProvider: Send + Sync {
-    // 文件操作
-    async fn list_files(&self, user_id: &str, prefix: &str) -> Result<Vec<String>>;
-    async fn get_file(&self, user_id: &str, path: &str) -> Result<Option<String>>;
-    async fn put_file(&self, user_id: &str, path: &str, content: &str) -> Result<()>;
-    async fn delete_file(&self, user_id: &str, path: &str) -> Result<()>;
-    async fn list_all_files(&self, user_id: &str) -> Result<Vec<String>>;
+    // 文件操作 (L2)
+    async fn get_file(&self, path: &str) -> Result<Option<String>>;
+    async fn put_file(&self, path: &str, content: &str) -> Result<()>;
+    async fn delete_file(&self, path: &str) -> Result<()>;
+    async fn list_files(&self, dir: &str) -> Result<Vec<String>>;
+    async fn list_all_files(&self, prefix: &str) -> Result<Vec<String>>;
 
     // 用户管理
-    async fn create_user(&self, id: &str, username: &str, hash: &str, admin: bool) -> Result<()>;
-    async fn get_user_by_username(&self, username: &str) -> Result<Option<UserRecord>>;
-    async fn list_users(&self) -> Result<Vec<UserRecord>>;
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>>;
+    async fn get_user_by_id(&self, id: &str) -> Result<Option<User>>;
+    async fn create_user(&self, user: &NewUser) -> Result<User>;
+    async fn update_user_password(&self, id: &str, hash: &str) -> Result<()>;
     async fn delete_user(&self, id: &str) -> Result<()>;
-    async fn update_password(&self, id: &str, new_hash: &str) -> Result<()>;
+    async fn list_users(&self) -> Result<Vec<User>>;
     async fn count_users(&self) -> Result<i64>;
 
-    // 设置管理
+    // 设置管理 (L1)
     async fn get_setting(&self, user_id: &str, key: &str) -> Result<Option<String>>;
     async fn put_setting(&self, user_id: &str, key: &str, value: &str) -> Result<()>;
     async fn delete_setting(&self, user_id: &str, key: &str) -> Result<()>;
     async fn list_settings(&self, user_id: &str) -> Result<Vec<(String, String)>>;
+
+    // Blob 元数据
+    async fn put_blob_meta(&self, id: &str, owner: &str, filename: &str, mime: &str, size: i64) -> Result<()>;
+    async fn get_blob_meta(&self, id: &str) -> Result<Option<BlobMeta>>;
+    async fn delete_blob_meta(&self, id: &str) -> Result<()>;
+    async fn list_blob_metas(&self, owner: &str) -> Result<Vec<BlobMeta>>;
+
+    // 生命周期
+    async fn close(&self) -> Result<()>;
 }
 ```
 
@@ -195,20 +255,20 @@ pub trait DatabaseProvider: Send + Sync {
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/auth/login` | 登录，返回 JWT |
+| GET | `/api/auth/mode` | 获取认证模式 + needs_setup |
 | POST | `/api/auth/register` | 注册 |
+| POST | `/api/auth/login` | 登录，返回 JWT |
 | GET | `/api/auth/me` | 获取当前用户 |
 | POST | `/api/auth/change-password` | 修改密码 |
-| GET | `/api/auth/mode` | 获取认证模式 |
 
 ### 文件 (L2)
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/files?path=xxx` | 读取文件内容 |
-| GET | `/api/files?prefix=xxx` | 列出文件 |
 | PUT | `/api/files` | 写入/更新文件 |
 | DELETE | `/api/files?path=xxx` | 删除文件 |
+| GET | `/api/files/list` | 列出文件（按目录） |
 
 ### 设置 (L1)
 
@@ -219,17 +279,6 @@ pub trait DatabaseProvider: Send + Sync {
 | PUT | `/api/settings` | 写入设置 |
 | DELETE | `/api/settings?key=xxx` | 删除设置 |
 
-### 管理员
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/admin/users` | 用户列表 |
-| DELETE | `/api/admin/users/:id` | 删除用户 |
-| POST | `/api/admin/reset-password` | 重置密码 |
-| GET | `/api/admin/stats` | 系统统计 |
-| GET | `/api/admin/storage-info` | 存储信息 |
-| POST | `/api/admin/migrate` | 数据迁移 |
-
 ### 导出/导入
 
 | 方法 | 路径 | 说明 |
@@ -238,6 +287,57 @@ pub trait DatabaseProvider: Send + Sync {
 | GET | `/api/export/markdown` | 导出 Markdown |
 | POST | `/api/export/disk` | 导出到磁盘目录 |
 | POST | `/api/import/json` | 从 JSON 导入 |
+
+### 管理员
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/users` | 用户列表 |
+| DELETE | `/api/admin/users/:id` | 删除用户 |
+| POST | `/api/admin/users/:id/password` | 重置用户密码 |
+| GET | `/api/admin/stats` | 系统统计 |
+| GET | `/api/admin/storage` | 存储信息 |
+| POST | `/api/admin/migrate` | 数据迁移 |
+
+> 管理员功能在主 Web 应用的设置页 AdminTab 中也可访问，无需单独打开 `/admin` 面板。
+
+### Blob / 附件
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/blobs/upload` | 上传附件 |
+| GET | `/api/blobs/list` | 列出当前用户附件 |
+| GET | `/api/blobs/:id` | 获取附件内容 |
+| DELETE | `/api/blobs/:id` | 删除附件 |
+| GET | `/api/blobs/config` | 获取附件配置（大小限制等） |
+
+### 云备份
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/backup/config` | 获取备份配置 |
+| PUT | `/api/backup/config` | 更新备份配置 |
+| POST | `/api/backup/run` | 执行备份 |
+| GET | `/api/backup/list` | 列出备份记录 |
+| POST | `/api/backup/restore` | 从备份恢复 |
+
+### AI
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/ai/shared-config` | 获取管理员共享的 AI 配置（endpoint/model） |
+
+### MCP
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/mcp` | MCP (Model Context Protocol) 端点 |
+
+### 健康检查
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/health` | 服务状态、版本、DB 类型、认证模式 |
 
 ---
 
@@ -262,8 +362,7 @@ DatabaseProvider (trait)
    │
    ├──→ SQLite (默认)
    ├──→ PostgreSQL
-   ├──→ MySQL
-   └──→ MongoDB
+   └──→ MySQL
            │
            ▼
       数据持久化
@@ -302,6 +401,9 @@ App 启动
   │           ├── 有 token → 验证 (/api/auth/me) → 进入 or 登录页
   │           │
   │           └── 无 token → 显示登录页
+  │                 │
+  │                 ├── Tauri + needs_setup → 直接显示注册表单
+  │                 └── 非 Tauri + needs_setup → 引导到 /admin 创建管理员
   │
   ├── 检查 onboarding-completed 设置
   │     │

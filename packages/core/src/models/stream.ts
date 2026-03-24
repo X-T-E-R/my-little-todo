@@ -4,7 +4,7 @@ export interface Attachment {
   title?: string;
 }
 
-export type StreamEntryType = 'spark' | 'task';
+export type StreamEntryType = 'spark' | 'task' | 'note' | 'journal' | 'log';
 
 export interface StreamEntry {
   id: string;

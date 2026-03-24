@@ -56,14 +56,16 @@ crates/server/
     │   ├── mod.rs                   #   create_provider() 工厂
     │   ├── traits.rs                #   DatabaseProvider trait 定义
     │   ├── sqlite.rs                #   SQLite 实现
-    │   └── postgres.rs              #   PostgreSQL 实现
+    │   ├── postgres.rs              #   PostgreSQL 实现
+    │   └── mysql.rs                 #   MySQL 实现
     │
     └── routes/                      # API 路由
         ├── mod.rs
         ├── files.rs                 #   /api/files CRUD
         ├── auth.rs                  #   /api/auth (login, register, me)
-        ├── admin.rs                 #   /api/admin (用户管理、统计)
+        ├── admin.rs                 #   /api/admin (用户管理、统计、AI 共享配置)
         ├── data.rs                  #   /api/settings, /api/export, /api/import
+        ├── blobs.rs                 #   /api/blobs (附件上传/下载)
         ├── backup.rs               #   /api/backup (云备份配置)
         └── mcp.rs                   #   /api/mcp (MCP 协议端点)
 ```
@@ -76,6 +78,8 @@ crates/server/
 | `AppState` | lib.rs | 共享状态 (db: DatabaseProvider, config) |
 | `DatabaseProvider` | providers/traits.rs | 数据库操作 trait |
 | `SqliteProvider` | providers/sqlite.rs | SQLite 实现 |
+| `PostgresProvider` | providers/postgres.rs | PostgreSQL 实现 |
+| `MysqlProvider` | providers/mysql.rs | MySQL 实现 |
 | `Claims` / `auth_middleware` | auth/ | JWT 认证 |
 
 ---
@@ -101,9 +105,12 @@ crates/server-bin/
 packages/core/
 ├── src/
 │   ├── models/                      # 领域类型定义
-│   │   ├── stream.ts                #   StreamEntry, SubTask, StreamEntryType
-│   │   ├── task.ts                  #   Task, TaskStatus, Submission, Postponement
+│   │   ├── stream.ts                #   StreamEntry, Attachment, StreamEntryType
+│   │   ├── task.ts                  #   Task, TaskStatus, TaskResource, TaskReminder
 │   │   ├── role.ts                  #   Role
+│   │   ├── schedule.ts              #   ScheduleBlock, RecurrenceType
+│   │   ├── behavior.ts              #   BehaviorEvent, UserProfile
+│   │   ├── ai-operation.ts          #   AI 操作记录
 │   │   └── index.ts                 #   统一导出
 │   │
 │   ├── markdown/                    # MD ↔ 领域对象 转换

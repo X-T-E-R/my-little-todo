@@ -1,19 +1,19 @@
-import type { StreamEntry } from '@my-little-todo/core';
+import type { StreamEntry, StreamEntryType } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
-  ArrowDownCircle,
-  ArrowUpCircle,
   Calendar,
   CheckSquare,
   ClipboardCopy,
   ListPlus,
   Pencil,
+  RefreshCw,
   Trash2,
   UserCircle,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRoleStore } from '../stores';
+import { ENTRY_TYPE_KEYS, ENTRY_TYPE_META } from '../utils/entryTypeUtils';
 
 export interface ContextMenuAction {
   label: string;
@@ -36,8 +36,8 @@ interface ContextMenuProps {
   onCopy: () => void;
   onDelete: () => void;
   onBatchSelect: () => void;
-  onPromote?: () => void;
-  onDemote?: () => void;
+  onChangeType?: (type: StreamEntryType) => void;
+  onMarkComplete?: () => void;
 }
 
 export function ConfirmableDeleteItem({
@@ -81,6 +81,7 @@ export function ConfirmableDeleteItem({
 export function ContextMenu({
   x,
   y,
+  entry,
   onClose,
   onEdit,
   onOpenDetail,
@@ -90,11 +91,13 @@ export function ContextMenu({
   onCopy,
   onDelete,
   onBatchSelect,
-  onPromote,
-  onDemote,
+  onChangeType,
+  onMarkComplete,
 }: ContextMenuProps) {
   const { t } = useTranslation('task');
+  const { t: tStream } = useTranslation('stream');
   const [roleSubmenu, setRoleSubmenu] = useState(false);
+  const [typeSubmenu, setTypeSubmenu] = useState(false);
   const roles = useRoleStore((s) => s.roles);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -167,11 +170,49 @@ export function ContextMenu({
 
         <MenuItem icon={ListPlus} label={t('Add subtask')} onClick={onAddSubtask} />
         <MenuItem icon={Calendar} label={t('Set due date')} onClick={onSetDdl} />
-        {onPromote && (
-          <MenuItem icon={ArrowUpCircle} label={t('Promote to task')} onClick={onPromote} />
+
+        {onMarkComplete && (
+          <MenuItem icon={CheckSquare} label={tStream('Mark complete')} onClick={onMarkComplete} />
         )}
-        {onDemote && (
-          <MenuItem icon={ArrowDownCircle} label={t('Demote to spark')} onClick={onDemote} />
+
+        {onChangeType && (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setTypeSubmenu(!typeSubmenu)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
+              style={{ color: 'var(--color-text)' }}
+            >
+              <RefreshCw size={14} />
+              <span className="flex-1">{tStream('Change type')}</span>
+              <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                {typeSubmenu ? '▲' : '▼'}
+              </span>
+            </button>
+            {typeSubmenu && (
+              <div className="ml-5 py-0.5">
+                {ENTRY_TYPE_KEYS.filter((k) => k !== entry.entryType).map((k) => {
+                  const meta = ENTRY_TYPE_META[k];
+                  const TypeIcon = meta.icon;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => {
+                        onChangeType(k);
+                        onClose();
+                      }}
+                      className="flex w-full items-center gap-2 px-2 py-1 text-left text-[12px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      <TypeIcon size={12} />
+                      {tStream(meta.labelKey)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Role submenu */}

@@ -39,5 +39,6 @@
   "Recently completed": "最近完成",
   "{{month}}/{{day}}": "{{month}}月{{day}}日",
   "Enter subtask title, press Enter to add...": "输入子任务标题，回车添加...",
-  "Select deadline": "选择截止日期"
+  "Select deadline": "选择截止日期",
+  "Mark complete": "标记完成"
 }

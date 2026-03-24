@@ -58,7 +58,7 @@ echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
 docker compose up -d
 ```
 
-**First-time setup**: Visit `http://localhost:3001/admin` to create the first admin account. Once done, users can access the web app at `http://localhost:3001`.
+**First-time setup**: Visit `http://localhost:3001/admin` to create the first admin account. Once done, users can access the web app at `http://localhost:3001`. After initial setup, admin tasks (user management, stats) can also be accessed from the Settings page within the main app.
 
 Data is stored in `./data/` on the host — easy to backup and inspect.
 
@@ -76,8 +76,8 @@ docker compose pull && docker compose up -d
 | `PORT` | `3001` | Server port |
 | `HOST` | `0.0.0.0` | Bind address |
 | `AUTH_MODE` | `multi` | `none` / `single` / `multi` |
-| `DB_TYPE` | `sqlite` | `sqlite` / `postgres` / `mysql` |
-| `DATABASE_URL` | — | Database connection string (for PG/MySQL) |
+| `DB_TYPE` | `sqlite` | `sqlite` / `postgres` / `mysql` (see [docker-compose.yml](docker-compose.yml) for PG/MySQL examples) |
+| `DATABASE_URL` | — | Database connection string (required for PG/MySQL) |
 | `JWT_SECRET` | random | Secret key for JWT tokens (**set this in production!**) |
 | `DEFAULT_ADMIN_PASSWORD` | — | Initial admin password |
 | `DATA_DIR` | `/app/data` | Data storage directory |
@@ -99,7 +99,7 @@ For standalone binary deployment without Docker, see [docs/deployment/binary.md]
 ## First-Time Usage
 
 1. **PC users**: Launch the app — the onboarding wizard will guide you through role setup and preferences
-2. **Server users**: Visit `http://your-host:3001/admin` to create the first admin account, then open `http://your-host:3001` to start using
+2. **Server users**: Visit `http://your-host:3001/admin` to create the first admin account, then open `http://your-host:3001` to start using. After setup, you can manage users directly from Settings > Admin in the main app
 3. Open the **Stream** view, type whatever's on your mind, and the system helps you organize it into tasks
 
 ## MCP Integration
@@ -151,7 +151,7 @@ PRs and issues are welcome!
 
 For development setup, build instructions, and contribution guidelines, see:
 
-- [Development Getting Started](docs/development/getting-started.md) — Environment setup, dev commands
+- [Development Getting Started](docs/development/getting-started.md) — Environment setup, dev commands, project overview
 - [Build Guide](docs/development/building.md) — Building desktop, PWA, mobile, and server
 
 Before submitting a PR:

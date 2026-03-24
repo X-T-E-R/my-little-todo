@@ -689,7 +689,7 @@ export function BoardView() {
   const [postponingTask, setPostponingTask] = useState<Task | null>(null);
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
-  const [showNoDdl, setShowNoDdl] = useState(false);
+  const [showNoDdl, setShowNoDdl] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [contextMenu, setContextMenu] = useState<{
@@ -966,6 +966,22 @@ export function BoardView() {
                             onContextMenu={(e) => handleContextMenu(e, task)}
                           >
                             <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                className="flex shrink-0 items-center justify-center rounded-full transition-colors"
+                                style={{
+                                  width: 18,
+                                  height: 18,
+                                  border: '2px solid var(--color-accent)',
+                                  background: 'transparent',
+                                }}
+                                title={t('Mark complete')}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  updateStatus(task.id, 'completed');
+                                  setShowConfetti(true);
+                                }}
+                              />
                               <div className="flex-1 min-w-0">
                                 <p
                                   className="text-sm font-medium truncate"

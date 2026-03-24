@@ -2386,6 +2386,124 @@ function AttachmentSettingsSection() {
   );
 }
 
+function UpdateDialog({
+  version,
+  notes,
+  status,
+  progress,
+  onDownload,
+  onRelaunch,
+  onClose,
+}: {
+  version: string;
+  notes: string;
+  status: 'available' | 'downloading' | 'ready';
+  progress: number;
+  onDownload: () => void;
+  onRelaunch: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation('settings');
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}
+      onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+      role="presentation"
+    >
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="w-full max-w-md rounded-2xl p-6 shadow-2xl"
+        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+        role="presentation"
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
+            {t('New version available: v{{version}}', { version })}
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1 transition-colors hover:bg-[var(--color-bg)]"
+            style={{ color: 'var(--color-text-tertiary)' }}
+          >
+            <XCircle size={18} />
+          </button>
+        </div>
+
+        {notes && (
+          <div
+            className="mb-4 max-h-60 overflow-y-auto rounded-lg p-3 text-[13px] leading-relaxed whitespace-pre-wrap"
+            style={{
+              background: 'var(--color-bg)',
+              color: 'var(--color-text-secondary)',
+              border: '1px solid var(--color-border)',
+            }}
+          >
+            {notes}
+          </div>
+        )}
+
+        {status === 'downloading' && (
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                {t('Downloading update... {{progress}}%', { progress })}
+              </span>
+              <Loader2 size={12} className="animate-spin" style={{ color: 'var(--color-accent)' }} />
+            </div>
+            <div className="w-full h-2 rounded-full" style={{ background: 'var(--color-border)' }}>
+              <div
+                className="h-full rounded-full transition-all duration-300"
+                style={{ width: `${progress}%`, background: 'var(--color-accent)' }}
+              />
+            </div>
+          </div>
+        )}
+
+        {status === 'ready' && (
+          <div className="mb-4 flex items-center gap-2 rounded-lg p-2.5" style={{ background: 'color-mix(in srgb, var(--color-success, #22c55e) 10%, transparent)' }}>
+            <CheckCircle size={16} style={{ color: 'var(--color-success, #22c55e)' }} />
+            <span className="text-sm font-medium" style={{ color: 'var(--color-success, #22c55e)' }}>
+              {t('Update installed successfully')}
+            </span>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          {status === 'available' && (
+            <button
+              type="button"
+              onClick={onDownload}
+              className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white transition-all hover:scale-[1.02] active:scale-95"
+              style={{ background: 'var(--color-accent)' }}
+            >
+              <HardDriveDownload size={14} />
+              {t('Download and Install')}
+            </button>
+          )}
+          {status === 'ready' && (
+            <button
+              type="button"
+              onClick={onRelaunch}
+              className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white transition-all hover:scale-[1.02] active:scale-95"
+              style={{ background: 'var(--color-accent)' }}
+            >
+              <RefreshCw size={14} />
+              {t('Restart Now')}
+            </button>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 function AboutTab() {
   const { t } = useTranslation('settings');
   const showToast = useToastStore((s) => s.showToast);
@@ -2396,11 +2514,16 @@ function AboutTab() {
   const [updateVersion, setUpdateVersion] = useState('');
   const [updateNotes, setUpdateNotes] = useState('');
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const [autoCheck, setAutoCheck] = useState(() => {
+    return localStorage.getItem('mlt-auto-check-update') !== 'false';
+  });
   const updateRef = useRef<Awaited<
     ReturnType<typeof import('@tauri-apps/plugin-updater').check>
   > | null>(null);
+  const autoCheckDone = useRef(false);
 
-  const handleCheckUpdate = useCallback(async () => {
+  const handleCheckUpdate = useCallback(async (silent = false) => {
     setUpdateStatus('checking');
     try {
       const { check } = await import('@tauri-apps/plugin-updater');
@@ -2410,17 +2533,21 @@ function AboutTab() {
         setUpdateVersion(update.version);
         setUpdateNotes(update.body ?? '');
         setUpdateStatus('available');
+        setShowUpdateDialog(true);
       } else {
         setUpdateStatus('idle');
-        showToast({ type: 'info', message: t('Already up to date') });
+        if (!silent) showToast({ type: 'info', message: t('Already up to date') });
       }
     } catch (e: unknown) {
       setUpdateStatus('error');
-      showToast({
-        type: 'error',
-        message: t('Update check failed: {{message}}', { message: String(e) }),
-      });
+      if (!silent) {
+        showToast({
+          type: 'error',
+          message: t('Update check failed: {{message}}', { message: String(e) }),
+        });
+      }
     }
+    localStorage.setItem('mlt-last-update-check', String(Date.now()));
   }, [showToast, t]);
 
   const handleDownloadAndInstall = useCallback(async () => {
@@ -2444,6 +2571,7 @@ function AboutTab() {
       setUpdateStatus('ready');
     } catch (e: unknown) {
       setUpdateStatus('error');
+      setShowUpdateDialog(false);
       showToast({
         type: 'error',
         message: t('Update download failed: {{message}}', { message: String(e) }),
@@ -2455,6 +2583,21 @@ function AboutTab() {
     const { relaunch } = await import('@tauri-apps/plugin-process');
     await relaunch();
   }, []);
+
+  const handleToggleAutoCheck = useCallback((enabled: boolean) => {
+    setAutoCheck(enabled);
+    localStorage.setItem('mlt-auto-check-update', String(enabled));
+  }, []);
+
+  useEffect(() => {
+    if (!tauri || !autoCheck || autoCheckDone.current) return;
+    autoCheckDone.current = true;
+    const lastCheck = Number(localStorage.getItem('mlt-last-update-check') ?? '0');
+    const fourHours = 4 * 60 * 60 * 1000;
+    if (Date.now() - lastCheck > fourHours) {
+      handleCheckUpdate(true);
+    }
+  }, [tauri, autoCheck, handleCheckUpdate]);
 
   return (
     <div className="flex flex-col gap-4 text-sm text-[var(--color-text-secondary)]">
@@ -2487,100 +2630,65 @@ function AboutTab() {
 
       {tauri && (
         <div
-          className="flex flex-col gap-3 mt-2 p-3 rounded-lg"
-          style={{ background: 'var(--color-surface)' }}
+          className="flex flex-col gap-3 mt-2 p-4 rounded-xl"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
         >
-          <div className="flex items-center gap-2 text-xs font-medium text-[var(--color-text-primary)]">
-            <Download size={14} />
-            {t('Auto Update')}
-          </div>
-
-          {updateStatus === 'idle' && (
-            <button
-              type="button"
-              onClick={handleCheckUpdate}
-              className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors"
-              style={{ background: 'var(--color-primary)', color: '#fff' }}
-            >
-              <RefreshCw size={12} />
-              {t('Check for Updates')}
-            </button>
-          )}
-
-          {updateStatus === 'checking' && (
-            <div className="flex items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
-              <Loader2 size={14} className="animate-spin" />
-              {t('Checking for updates...')}
-            </div>
-          )}
-
-          {updateStatus === 'available' && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs">
-                {t('New version available: v{{version}}', { version: updateVersion })}
-              </p>
-              {updateNotes && (
-                <p className="text-xs text-[var(--color-text-tertiary)] whitespace-pre-wrap">
-                  {updateNotes}
-                </p>
-              )}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleDownloadAndInstall}
-                className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors"
-                style={{ background: 'var(--color-primary)', color: '#fff' }}
+                onClick={() => handleCheckUpdate(false)}
+                disabled={updateStatus === 'checking'}
+                className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                style={{ background: 'var(--color-accent)', color: '#fff' }}
               >
-                <HardDriveDownload size={12} />
-                {t('Download and Install')}
+                {updateStatus === 'checking' ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={12} />
+                )}
+                {updateStatus === 'checking' ? t('Checking for updates...') : t('Check for Updates')}
               </button>
             </div>
-          )}
 
-          {updateStatus === 'downloading' && (
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
-                <Loader2 size={14} className="animate-spin" />
-                {t('Downloading update... {{progress}}%', { progress: downloadProgress })}
-              </div>
-              <div
-                className="w-full h-1.5 rounded-full"
-                style={{ background: 'var(--color-border)' }}
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                {t('Auto check updates')}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoCheck}
+                onClick={() => handleToggleAutoCheck(!autoCheck)}
+                className="relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200"
+                style={{
+                  background: autoCheck ? 'var(--color-accent)' : 'var(--color-border)',
+                }}
               >
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{ width: `${downloadProgress}%`, background: 'var(--color-primary)' }}
+                <span
+                  className="inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200"
+                  style={{
+                    transform: autoCheck ? 'translate(17px, 2px)' : 'translate(2px, 2px)',
+                  }}
                 />
-              </div>
-            </div>
-          )}
-
-          {updateStatus === 'ready' && (
-            <div className="flex flex-col gap-2">
-              <p className="text-xs text-green-600">{t('Update installed successfully')}</p>
-              <button
-                type="button"
-                onClick={handleRelaunch}
-                className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors"
-                style={{ background: 'var(--color-primary)', color: '#fff' }}
-              >
-                <RefreshCw size={12} />
-                {t('Restart Now')}
               </button>
-            </div>
-          )}
-
-          {updateStatus === 'error' && (
-            <button
-              type="button"
-              onClick={handleCheckUpdate}
-              className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors"
-              style={{ background: 'var(--color-primary)', color: '#fff' }}
-            >
-              <RefreshCw size={12} />
-              {t('Retry')}
-            </button>
-          )}
+            </label>
+          </div>
         </div>
+      )}
+
+      {showUpdateDialog && (updateStatus === 'available' || updateStatus === 'downloading' || updateStatus === 'ready') && (
+        <UpdateDialog
+          version={updateVersion}
+          notes={updateNotes}
+          status={updateStatus}
+          progress={downloadProgress}
+          onDownload={handleDownloadAndInstall}
+          onRelaunch={handleRelaunch}
+          onClose={() => {
+            if (updateStatus !== 'downloading') setShowUpdateDialog(false);
+          }}
+        />
       )}
     </div>
   );

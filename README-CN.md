@@ -58,7 +58,7 @@ echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
 docker compose up -d
 ```
 
-**首次使用**：访问 `http://localhost:3001/admin` 创建第一个管理员账户。管理员创建完成后，用户即可通过 `http://localhost:3001` 访问 Web 端登录使用。
+**首次使用**：访问 `http://localhost:3001/admin` 创建第一个管理员账户。管理员创建完成后，用户即可通过 `http://localhost:3001` 访问 Web 端登录使用。初始化后的管理功能（用户管理、统计）也可在主应用的设置页面中操作。
 
 数据存储在主机的 `./data/` 目录中，方便备份和查看。
 
@@ -76,8 +76,8 @@ docker compose pull && docker compose up -d
 | `PORT` | `3001` | 服务器端口 |
 | `HOST` | `0.0.0.0` | 绑定地址 |
 | `AUTH_MODE` | `multi` | `none` / `single` / `multi` |
-| `DB_TYPE` | `sqlite` | `sqlite` / `postgres` / `mysql` |
-| `DATABASE_URL` | — | 数据库连接字符串 (PG/MySQL) |
+| `DB_TYPE` | `sqlite` | `sqlite` / `postgres` / `mysql`（详见 [docker-compose.yml](docker-compose.yml)） |
+| `DATABASE_URL` | — | 数据库连接字符串（PG/MySQL 必须设置） |
 | `JWT_SECRET` | 随机 | JWT 密钥（**生产环境请务必设置！**） |
 | `DEFAULT_ADMIN_PASSWORD` | — | 初始管理员密码 |
 | `DATA_DIR` | `/app/data` | 数据存储目录 |
@@ -99,7 +99,7 @@ docker compose pull && docker compose up -d
 ## 首次使用
 
 1. **PC 用户**：启动应用后，引导向导会带你设置角色和偏好
-2. **服务器用户**：访问 `http://your-host:3001/admin` 创建管理员账户，然后打开 `http://your-host:3001` 开始使用
+2. **服务器用户**：访问 `http://your-host:3001/admin` 创建管理员账户，然后打开 `http://your-host:3001` 开始使用。初始化后可在主应用的 设置 > 管理 中管理用户
 3. 打开**流**视图，随手输入你脑中的想法，系统会帮你整理成任务
 
 ## MCP 集成
@@ -151,7 +151,7 @@ My Little Todo 内置原生 [MCP (Model Context Protocol)](https://modelcontextp
 
 开发环境搭建、构建指南和贡献规范请参考：
 
-- [开发入门](docs/development/getting-started.md) — 环境搭建、开发命令
+- [开发入门](docs/development/getting-started.md) — 环境搭建、开发命令、项目结构概览
 - [构建指南](docs/development/building.md) — 桌面端、PWA、移动端、服务器构建
 
 提交 PR 前请确保：

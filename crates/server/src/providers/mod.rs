@@ -6,6 +6,9 @@ pub mod sqlite;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 
+#[cfg(feature = "mysql")]
+pub mod mysql;
+
 pub use traits::{BlobMeta, DatabaseProvider, NewUser, User};
 
 use crate::config::{DbType, ServerConfig};
@@ -50,10 +53,19 @@ pub async fn create_provider(config: &ServerConfig) -> anyhow::Result<Arc<dyn Da
             }
         }
         DbType::Mysql => {
-            anyhow::bail!("MySQL support not yet implemented");
-        }
-        DbType::Mongodb => {
-            anyhow::bail!("MongoDB support not yet implemented");
+            #[cfg(feature = "mysql")]
+            {
+                let url = config
+                    .database_url
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("DATABASE_URL required for MySQL"))?;
+                let provider = mysql::MysqlProvider::new(url).await?;
+                Ok(Arc::new(provider))
+            }
+            #[cfg(not(feature = "mysql"))]
+            {
+                anyhow::bail!("MySQL support not compiled in. Enable the 'mysql' feature.");
+            }
         }
     }
 }

@@ -77,11 +77,29 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   updateStatus: async (id, status) => {
-    const updated = await updateStatusInRepo(id, status);
-    if (!updated) return;
+    const prev = get().tasks;
+    const task = prev.find((t) => t.id === id);
+    if (!task) return;
+
+    const optimistic = {
+      ...task,
+      status,
+      ...(status === 'completed' ? { completedAt: new Date() } : {}),
+    } as Task;
     set((state) => ({
-      tasks: state.tasks.map((t) => (t.id === id ? updated : t)),
+      tasks: state.tasks.map((t) => (t.id === id ? optimistic : t)),
     }));
+
+    try {
+      const updated = await updateStatusInRepo(id, status);
+      if (updated) {
+        set((state) => ({
+          tasks: state.tasks.map((t) => (t.id === id ? updated : t)),
+        }));
+      }
+    } catch {
+      set({ tasks: prev });
+    }
   },
 
   updateTask: async (task) => {
@@ -108,11 +126,18 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   deleteTask: async (id) => {
-    await deleteTaskInRepo(id);
+    const prev = get().tasks;
+    const prevSelectedId = get().selectedTaskId;
     set((state) => ({
       tasks: state.tasks.filter((t) => t.id !== id),
       selectedTaskId: state.selectedTaskId === id ? null : state.selectedTaskId,
     }));
+
+    try {
+      await deleteTaskInRepo(id);
+    } catch {
+      set({ tasks: prev, selectedTaskId: prevSelectedId });
+    }
   },
 
   addSubtask: async (parentId, title) => {
