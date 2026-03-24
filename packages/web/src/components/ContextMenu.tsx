@@ -52,7 +52,7 @@ export function ConfirmableDeleteItem({
   onConfirm: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => clearTimeout(timerRef.current), []);
 
