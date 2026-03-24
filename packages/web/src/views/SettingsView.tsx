@@ -319,9 +319,7 @@ function GeneralTab() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-[var(--color-text)]">
-                {t('Task Reminders')}
-              </p>
+              <p className="text-sm font-medium text-[var(--color-text)]">{t('Task Reminders')}</p>
               <p className="text-xs text-[var(--color-text-tertiary)]">
                 {t('Get notified when deadlines are approaching')}
               </p>
@@ -497,9 +495,7 @@ function AccountTab() {
           <section>
             <div className="flex items-center gap-2 mb-3">
               <Key size={16} className="text-[var(--color-accent)]" />
-              <h3 className="text-sm font-bold text-[var(--color-text)]">
-                {t('Change Password')}
-              </h3>
+              <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Change Password')}</h3>
             </div>
             <div className="space-y-3">
               <input
@@ -1457,9 +1453,7 @@ function SyncTab() {
   };
 
   const hasChanges =
-    pendingHost !== serverHost ||
-    pendingPort !== serverPort ||
-    pendingAuthMode !== serverAuthMode;
+    pendingHost !== serverHost || pendingPort !== serverPort || pendingAuthMode !== serverAuthMode;
 
   return (
     <div className="flex flex-col gap-6">
@@ -1693,9 +1687,7 @@ function SyncTab() {
                 <div className="flex items-center gap-2">
                   <Shield size={15} style={{ color: 'var(--color-text-secondary)' }} />
                   <div>
-                    <p className="text-sm font-medium text-[var(--color-text)]">
-                      {t('Auth Mode')}
-                    </p>
+                    <p className="text-sm font-medium text-[var(--color-text)]">{t('Auth Mode')}</p>
                     <p className="text-xs text-[var(--color-text-tertiary)]">
                       {t('Authentication mode for the embedded server')}
                     </p>
@@ -2316,7 +2308,9 @@ function AttachmentSettingsSection() {
       </div>
       <div className="space-y-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <label className="flex items-center justify-between">
-          <span className="text-sm" style={{ color: 'var(--color-text)' }}>{t('Allow attachments')}</span>
+          <span className="text-sm" style={{ color: 'var(--color-text)' }}>
+            {t('Allow attachments')}
+          </span>
           <input
             type="checkbox"
             checked={allowAttachments}
@@ -2692,7 +2686,9 @@ function AiTab() {
       if (v) {
         try {
           setDisabledTools(JSON.parse(v));
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     });
 
@@ -2759,8 +2755,7 @@ function AiTab() {
   };
 
   const token = getAuthToken();
-  const baseUrl =
-    typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
   const mcpConfig = JSON.stringify(
     {
       mcpServers: {
@@ -2796,9 +2791,7 @@ function AiTab() {
         <section>
           <div className="flex items-center gap-2 mb-3">
             <Key size={16} className="text-[var(--color-accent)]" />
-            <h3 className="text-sm font-bold text-[var(--color-text)]">
-              {t('AI Configuration')}
-            </h3>
+            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('AI Configuration')}</h3>
           </div>
           {sharedAvailable && !apiKey && (
             <div
@@ -2874,9 +2867,7 @@ function AiTab() {
         <section>
           <div className="flex items-center gap-2 mb-3">
             <Key size={16} className="text-[var(--color-accent)]" />
-            <h3 className="text-sm font-bold text-[var(--color-text)]">
-              {t('AI Configuration')}
-            </h3>
+            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('AI Configuration')}</h3>
           </div>
           <div
             className="rounded-lg px-3 py-2 text-xs"
@@ -2885,9 +2876,7 @@ function AiTab() {
               color: 'var(--color-accent)',
             }}
           >
-            {t(
-              'AI is configured by the admin. A shared API is available for all users.',
-            )}
+            {t('AI is configured by the admin. A shared API is available for all users.')}
           </div>
         </section>
       )}
@@ -2994,9 +2983,7 @@ function AiTab() {
         <div className="space-y-3">
           {/* IDE selector */}
           <div className="flex items-center gap-2">
-            <span className="text-xs text-[var(--color-text-secondary)] shrink-0">
-              {t('IDE')}
-            </span>
+            <span className="text-xs text-[var(--color-text-secondary)] shrink-0">{t('IDE')}</span>
             <select
               value={selectedIde}
               onChange={(e) => setSelectedIde(e.target.value)}
@@ -3142,7 +3129,9 @@ function AiTab() {
           }}
         >
           <p className="text-xs text-[var(--color-text-tertiary)]">
-            {t('AI features are under development. Usage statistics will appear here once available.')}
+            {t(
+              'AI features are under development. Usage statistics will appear here once available.',
+            )}
           </p>
           {isAdmin && (
             <p className="text-xs text-[var(--color-text-tertiary)] mt-1">

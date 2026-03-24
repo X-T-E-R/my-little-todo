@@ -2,8 +2,8 @@ import type { StreamEntry, StreamEntryType } from '@my-little-todo/core';
 import type { DdlType } from '@my-little-todo/core';
 import { formatDateKey } from '@my-little-todo/core';
 import { create } from 'zustand';
-import { getCachedStreamDays, setCachedStreamEntries } from '../storage/cacheLayer';
 import i18n from '../locales';
+import { getCachedStreamDays, setCachedStreamEntries } from '../storage/cacheLayer';
 import {
   addStreamEntry,
   linkEntryToTask,

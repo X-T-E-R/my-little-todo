@@ -23,10 +23,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { ContextMenu } from '../components/ContextMenu';
 import { MarkdownToolbar } from '../components/MarkdownToolbar';
-import { uploadBlob, getAttachmentConfig } from '../storage/blobApi';
-import type { AttachmentConfig } from '../storage/blobApi';
 import { OnboardingTip } from '../components/OnboardingTip';
 import { RolePill } from '../components/RolePickerPopover';
+import { getAttachmentConfig, uploadBlob } from '../storage/blobApi';
+import type { AttachmentConfig } from '../storage/blobApi';
 import { useShortcutStore } from '../stores';
 import {
   filterByRole,
@@ -668,6 +668,7 @@ function loadDraft() {
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: StreamView manages many interactive states
 export function StreamView() {
   const { t } = useTranslation('stream');
   const draft = useRef(loadDraft()).current;
@@ -675,7 +676,9 @@ export function StreamView() {
   const [isFocused, setIsFocused] = useState(false);
   const [saveAsTask, setSaveAsTask] = useState(draft.saveAsTask ?? false);
   const [metaDdlDate, setMetaDdlDate] = useState(draft.metaDdlDate ?? '');
-  const [metaDdlType, setMetaDdlType] = useState<'soft' | 'commitment' | 'hard'>(draft.metaDdlType ?? 'soft');
+  const [metaDdlType, setMetaDdlType] = useState<'soft' | 'commitment' | 'hard'>(
+    draft.metaDdlType ?? 'soft',
+  );
   const [metaTags, setMetaTags] = useState(draft.metaTags ?? '');
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [subtaskEntryId, setSubtaskEntryId] = useState<string | null>(null);
@@ -784,48 +787,59 @@ export function StreamView() {
   const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
-    getAttachmentConfig().then(setAttachmentConfig).catch(() => {});
+    getAttachmentConfig()
+      .then(setAttachmentConfig)
+      .catch(() => {});
   }, []);
 
-  const handleFileUpload = useCallback(async (file: File) => {
-    if (!attachmentConfig?.allow_attachments) return;
-    if (file.size > (attachmentConfig?.max_size ?? 10 * 1024 * 1024)) {
-      return;
-    }
-    setIsUploading(true);
-    try {
-      const result = await uploadBlob(file);
-      const isImage = result.mime_type.startsWith('image/');
-      const md = isImage
-        ? `![${result.filename}](${result.url})`
-        : `[${result.filename}](${result.url})`;
-      setInput((prev) => prev ? `${prev}\n${md}` : md);
-    } catch {
-      // upload failed silently
-    } finally {
-      setIsUploading(false);
-    }
-  }, [attachmentConfig]);
-
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (file) handleFileUpload(file);
+  const handleFileUpload = useCallback(
+    async (file: File) => {
+      if (!attachmentConfig?.allow_attachments) return;
+      if (file.size > (attachmentConfig?.max_size ?? 10 * 1024 * 1024)) {
         return;
       }
-    }
-  }, [handleFileUpload]);
+      setIsUploading(true);
+      try {
+        const result = await uploadBlob(file);
+        const isImage = result.mime_type.startsWith('image/');
+        const md = isImage
+          ? `![${result.filename}](${result.url})`
+          : `[${result.filename}](${result.url})`;
+        setInput((prev) => (prev ? `${prev}\n${md}` : md));
+      } catch {
+        // upload failed silently
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    [attachmentConfig],
+  );
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const files = e.dataTransfer?.files;
-    if (!files?.length) return;
-    handleFileUpload(files[0]);
-  }, [handleFileUpload]);
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) handleFileUpload(file);
+          return;
+        }
+      }
+    },
+    [handleFileUpload],
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const files = e.dataTransfer?.files;
+      if (!files?.length) return;
+      handleFileUpload(files[0]);
+    },
+    [handleFileUpload],
+  );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();

@@ -12,8 +12,8 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ConfirmableDeleteItem } from './ContextMenu';
 import { useRoleStore } from '../stores';
+import { ConfirmableDeleteItem } from './ContextMenu';
 
 interface TaskContextMenuProps {
   x: number;

@@ -49,11 +49,21 @@ export async function getAttachmentConfig(): Promise<AttachmentConfig> {
       headers: { ...authHeaders(), 'Content-Type': 'application/json' },
     });
     if (!res.ok) {
-      return { allow_attachments: true, max_size: 10 * 1024 * 1024, storage: 'local', image_host_url: '' };
+      return {
+        allow_attachments: true,
+        max_size: 10 * 1024 * 1024,
+        storage: 'local',
+        image_host_url: '',
+      };
     }
     return res.json();
   } catch {
-    return { allow_attachments: true, max_size: 10 * 1024 * 1024, storage: 'local', image_host_url: '' };
+    return {
+      allow_attachments: true,
+      max_size: 10 * 1024 * 1024,
+      storage: 'local',
+      image_host_url: '',
+    };
   }
 }
 

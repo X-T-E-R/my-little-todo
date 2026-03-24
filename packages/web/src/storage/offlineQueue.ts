@@ -28,7 +28,9 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-export async function enqueueOperation(op: Omit<QueuedOperation, 'id' | 'timestamp' | 'retries'>): Promise<string> {
+export async function enqueueOperation(
+  op: Omit<QueuedOperation, 'id' | 'timestamp' | 'retries'>,
+): Promise<string> {
   const db = await openDB();
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const entry: QueuedOperation = {
@@ -107,12 +109,10 @@ function notifyListeners(size: number) {
   for (const l of _listeners) l(size);
 }
 
-export async function replayQueue(
-  executor: {
-    writeFile: (content: string, ...segments: string[]) => Promise<void>;
-    deleteFile: (...segments: string[]) => Promise<void>;
-  },
-): Promise<{ succeeded: number; failed: number }> {
+export async function replayQueue(executor: {
+  writeFile: (content: string, ...segments: string[]) => Promise<void>;
+  deleteFile: (...segments: string[]) => Promise<void>;
+}): Promise<{ succeeded: number; failed: number }> {
   if (_syncing) return { succeeded: 0, failed: 0 };
   _syncing = true;
   let succeeded = 0;

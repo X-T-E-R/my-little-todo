@@ -131,9 +131,7 @@ fn now_iso() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let naive =
-        chrono_lite_timestamp(secs as i64);
-    naive
+    chrono_lite_timestamp(secs as i64)
 }
 
 fn chrono_lite_timestamp(epoch_secs: i64) -> String {
@@ -175,6 +173,7 @@ fn generate_task_id() -> String {
     format!("task-{}", short)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_task_markdown(
     id: &str,
     title: &str,

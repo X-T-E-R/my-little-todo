@@ -110,7 +110,10 @@ export async function getCachedStreamDays(): Promise<StreamDayCache[] | null> {
   }
 }
 
-export async function setCachedStreamEntries(entries: unknown[], dateKeyFn: (e: unknown) => string): Promise<void> {
+export async function setCachedStreamEntries(
+  entries: unknown[],
+  dateKeyFn: (e: unknown) => string,
+): Promise<void> {
   try {
     const db = await openDB();
     await txClear(db, STORE_STREAM);

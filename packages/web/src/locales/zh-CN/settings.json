@@ -150,7 +150,6 @@
   "User": "用户",
   "Confirm delete user {{username}}?": "确认删除用户 {{username}}？",
   "User {{username}} deleted": "用户 {{username}} 已删除",
-  "New Password": "新密码",
   "Confirm": "确认",
   "Cancel": "取消",
   "Reset Password": "重置密码",

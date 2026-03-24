@@ -14,7 +14,9 @@ export function OfflineIndicator() {
     window.addEventListener('offline', goOffline);
     window.addEventListener('online', goOnline);
 
-    getQueueSize().then(setPendingOps).catch(() => {});
+    getQueueSize()
+      .then(setPendingOps)
+      .catch(() => {});
 
     const unsubscribe = onQueueChange(setPendingOps);
 
@@ -36,9 +38,7 @@ export function OfflineIndicator() {
       }}
     >
       {isOffline && <WifiOff size={12} />}
-      {isOffline
-        ? t('Offline')
-        : t('Syncing {{count}} changes...', { count: pendingOps })}
+      {isOffline ? t('Offline') : t('Syncing {{count}} changes...', { count: pendingOps })}
     </div>
   );
 }

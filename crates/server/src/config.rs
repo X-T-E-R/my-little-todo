@@ -1,32 +1,22 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthMode {
     None,
     Single,
+    #[default]
     Multi,
 }
 
-impl Default for AuthMode {
-    fn default() -> Self {
-        Self::Multi
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum DbType {
+    #[default]
     Sqlite,
     Postgres,
     Mysql,
     Mongodb,
-}
-
-impl Default for DbType {
-    fn default() -> Self {
-        Self::Sqlite
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
