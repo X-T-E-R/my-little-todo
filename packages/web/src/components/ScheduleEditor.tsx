@@ -8,8 +8,16 @@ import { useScheduleStore } from '../stores/scheduleStore';
 
 const WEEKDAY_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const PRESET_COLORS = [
-  '#6b8cce', '#5eb376', '#e8a05c', '#d96c6c', '#9b7ed8',
-  '#4ecdc4', '#f0c040', '#ff6b9d', '#45b7d1', '#96ceb4',
+  '#6b8cce',
+  '#5eb376',
+  '#e8a05c',
+  '#d96c6c',
+  '#9b7ed8',
+  '#4ecdc4',
+  '#f0c040',
+  '#ff6b9d',
+  '#45b7d1',
+  '#96ceb4',
 ];
 
 function BlockCard({
@@ -51,9 +59,14 @@ function BlockCard({
           <p className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
             {block.name}
           </p>
-          <div className="mt-1 flex items-center gap-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+          <div
+            className="mt-1 flex items-center gap-2 text-[11px]"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
             <Clock size={10} />
-            <span>{block.startTime} - {block.endTime}</span>
+            <span>
+              {block.startTime} - {block.endTime}
+            </span>
             {block.location && (
               <>
                 <MapPin size={10} />
@@ -151,7 +164,10 @@ function BlockEditor({
 
       <div className="flex gap-2">
         <div className="flex-1">
-          <label className="text-[10px] font-medium block mb-1" style={{ color: 'var(--color-text-tertiary)' }}>
+          <label
+            className="text-[10px] font-medium block mb-1"
+            style={{ color: 'var(--color-text-tertiary)' }}
+          >
             {t('Start')}
           </label>
           <input
@@ -167,7 +183,10 @@ function BlockEditor({
           />
         </div>
         <div className="flex-1">
-          <label className="text-[10px] font-medium block mb-1" style={{ color: 'var(--color-text-tertiary)' }}>
+          <label
+            className="text-[10px] font-medium block mb-1"
+            style={{ color: 'var(--color-text-tertiary)' }}
+          >
             {t('End')}
           </label>
           <input
@@ -185,7 +204,10 @@ function BlockEditor({
       </div>
 
       <div>
-        <label className="text-[10px] font-medium block mb-1" style={{ color: 'var(--color-text-tertiary)' }}>
+        <label
+          className="text-[10px] font-medium block mb-1"
+          style={{ color: 'var(--color-text-tertiary)' }}
+        >
           {t('Location (optional)')}
         </label>
         <input
@@ -202,7 +224,10 @@ function BlockEditor({
       </div>
 
       <div>
-        <label className="text-[10px] font-medium block mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+        <label
+          className="text-[10px] font-medium block mb-1.5"
+          style={{ color: 'var(--color-text-tertiary)' }}
+        >
           {t('Repeat days')}
         </label>
         <div className="flex gap-1">
@@ -225,7 +250,10 @@ function BlockEditor({
       </div>
 
       <div>
-        <label className="text-[10px] font-medium block mb-1.5" style={{ color: 'var(--color-text-tertiary)' }}>
+        <label
+          className="text-[10px] font-medium block mb-1.5"
+          style={{ color: 'var(--color-text-tertiary)' }}
+        >
           {t('Color')}
         </label>
         <div className="flex gap-1.5">
@@ -282,7 +310,9 @@ export function ScheduleEditor() {
             {t('Schedule')}
           </p>
           <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
-            {t('Add class schedule, check-in times and other fixed arrangements. The recommendation engine will avoid these time slots.')}
+            {t(
+              'Add class schedule, check-in times and other fixed arrangements. The recommendation engine will avoid these time slots.',
+            )}
           </p>
         </div>
         {!showAdd && (
@@ -299,10 +329,7 @@ export function ScheduleEditor() {
       </div>
 
       {showAdd && (
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
           <BlockEditor
             onSave={(b) => {
               addBlock(b);

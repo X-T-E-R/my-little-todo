@@ -1,7 +1,7 @@
 import type { Task, TaskStatus } from '@my-little-todo/core';
 import { daysUntil } from '@my-little-todo/core';
-import i18n from '../locales';
 import { create } from 'zustand';
+import i18n from '../locales';
 import {
   addSubtask as addSubtaskInRepo,
   createTask as createTaskInRepo,
@@ -231,8 +231,18 @@ export function formatDdlLabel(ddl: Date): string {
   const hours = Math.floor(((ddl.getTime() - now.getTime()) % 86400000) / 3600000);
   if (days <= 7) {
     return hours > 0
-      ? i18n.t('dates.{{dayOfWeek}} ({{days}} days and {{hours}} hours left)', { ns: 'common', dayOfWeek, days, hours })
+      ? i18n.t('dates.{{dayOfWeek}} ({{days}} days and {{hours}} hours left)', {
+          ns: 'common',
+          dayOfWeek,
+          days,
+          hours,
+        })
       : i18n.t('dates.{{dayOfWeek}} ({{days}} days left)', { ns: 'common', dayOfWeek, days });
   }
-  return i18n.t('dates.{{month}}/{{date}} ({{days}} days left)', { ns: 'common', month: ddl.getMonth() + 1, date: ddl.getDate(), days });
+  return i18n.t('dates.{{month}}/{{date}} ({{days}} days left)', {
+    ns: 'common',
+    month: ddl.getMonth() + 1,
+    date: ddl.getDate(),
+    days,
+  });
 }

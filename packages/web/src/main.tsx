@@ -4,9 +4,9 @@ import './locales';
 import './styles/globals.css';
 import { App } from './App';
 import { setStorageAdapter } from './storage/adapter';
+import { createApiAdapter } from './storage/apiClient';
 import { setSettingsApiBase } from './storage/settingsApi';
 import { useAuthStore } from './stores/authStore';
-import { createApiAdapter } from './storage/apiClient';
 import { initPlatform } from './utils/platform';
 
 // Apply saved theme immediately to prevent flash

@@ -1,8 +1,8 @@
 import type { StreamEntry, StreamEntryType } from '@my-little-todo/core';
 import type { DdlType } from '@my-little-todo/core';
 import { formatDateKey } from '@my-little-todo/core';
-import i18n from '../locales';
 import { create } from 'zustand';
+import i18n from '../locales';
 import {
   addStreamEntry,
   linkEntryToTask,
@@ -17,7 +17,11 @@ interface StreamState {
   error: string | null;
 
   load: () => Promise<void>;
-  addEntry: (content: string, saveAsTask?: boolean, meta?: { ddl?: Date; ddlType?: DdlType; tags?: string[] }) => Promise<StreamEntry>;
+  addEntry: (
+    content: string,
+    saveAsTask?: boolean,
+    meta?: { ddl?: Date; ddlType?: DdlType; tags?: string[] },
+  ) => Promise<StreamEntry>;
   updateEntry: (entry: StreamEntry) => Promise<void>;
   deleteEntry: (entryId: string) => Promise<void>;
   /** Auto-create a linked Task if the entry doesn't already have one. Returns the task ID. */
@@ -43,7 +47,11 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     }
   },
 
-  addEntry: async (content: string, saveAsTask = false, meta?: { ddl?: Date; ddlType?: DdlType; tags?: string[] }) => {
+  addEntry: async (
+    content: string,
+    saveAsTask = false,
+    meta?: { ddl?: Date; ddlType?: DdlType; tags?: string[] },
+  ) => {
     const { useRoleStore } = await import('./roleStore');
     const roleId = useRoleStore.getState().currentRoleId ?? undefined;
     const entryType: StreamEntryType = saveAsTask ? 'task' : 'spark';
@@ -176,7 +184,12 @@ export function groupEntriesByDate(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([dateKey, items]) => ({
       dateKey,
-      label: dateKey === today ? i18n.t('dates.Today', { ns: 'common' }) : dateKey === yesterday ? i18n.t('dates.Yesterday', { ns: 'common' }) : dateKey,
+      label:
+        dateKey === today
+          ? i18n.t('dates.Today', { ns: 'common' })
+          : dateKey === yesterday
+            ? i18n.t('dates.Yesterday', { ns: 'common' })
+            : dateKey,
       entries: items.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
     }));
 

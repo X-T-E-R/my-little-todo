@@ -19,10 +19,9 @@ function headers(): HeadersInit {
 
 export async function getSetting(key: string): Promise<string | null> {
   try {
-    const res = await fetch(
-      `${_apiBase}/api/settings?key=${encodeURIComponent(key)}`,
-      { headers: headers() },
-    );
+    const res = await fetch(`${_apiBase}/api/settings?key=${encodeURIComponent(key)}`, {
+      headers: headers(),
+    });
     if (!res.ok) return null;
     const data = await res.json();
     return data.value ?? null;
@@ -40,10 +39,10 @@ export async function putSetting(key: string, value: string): Promise<void> {
 }
 
 export async function deleteSetting(key: string): Promise<void> {
-  await fetch(
-    `${_apiBase}/api/settings?key=${encodeURIComponent(key)}`,
-    { method: 'DELETE', headers: headers() },
-  );
+  await fetch(`${_apiBase}/api/settings?key=${encodeURIComponent(key)}`, {
+    method: 'DELETE',
+    headers: headers(),
+  });
 }
 
 export async function getAllSettings(): Promise<Record<string, string>> {

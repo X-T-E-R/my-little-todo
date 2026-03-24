@@ -10,8 +10,8 @@ import {
   ExternalLink,
   Eye,
   FileText,
-  Link2,
   Lightbulb,
+  Link2,
   PenLine,
   Plus,
   Trash2,
@@ -392,9 +392,14 @@ function RemindersSection({
               color: r.notified ? 'var(--color-text-tertiary)' : 'var(--color-text-secondary)',
             }}
           >
-            <Bell size={10} style={{ color: r.notified ? 'var(--color-text-tertiary)' : 'var(--color-warning)' }} />
+            <Bell
+              size={10}
+              style={{ color: r.notified ? 'var(--color-text-tertiary)' : 'var(--color-warning)' }}
+            />
             <span className="flex-1">
-              {r.time.getMonth() + 1}/{r.time.getDate()} {String(r.time.getHours()).padStart(2, '0')}:{String(r.time.getMinutes()).padStart(2, '0')}
+              {r.time.getMonth() + 1}/{r.time.getDate()}{' '}
+              {String(r.time.getHours()).padStart(2, '0')}:
+              {String(r.time.getMinutes()).padStart(2, '0')}
               {r.label && ` · ${r.label}`}
               {r.notified && ` (${t('Notified')})`}
             </span>
@@ -797,7 +802,10 @@ export function TaskDetailPanel() {
                           style={{ color: 'var(--color-success)' }}
                         />
                         <span>
-                          {s.onTime ? t('On time') : t('Late {{days}} days', { days: s.daysLate ?? '?' })} · {s.note}
+                          {s.onTime
+                            ? t('On time')
+                            : t('Late {{days}} days', { days: s.daysLate ?? '?' })}{' '}
+                          · {s.note}
                         </span>
                       </div>
                     ))}

@@ -8,8 +8,8 @@ import {
   Dices,
   ExternalLink,
   Info,
-  Pause,
   PartyPopper,
+  Pause,
   PenLine,
   Play,
 } from 'lucide-react';
@@ -34,7 +34,7 @@ import {
 const REJECTION_REASONS = [
   { id: 'no_conditions', label: 'No conditions to do this now' },
   { id: 'too_big', label: "Too big, don't know where to start" },
-  { id: 'dont_want', label: 'Just don\'t want to' },
+  { id: 'dont_want', label: "Just don't want to" },
   { id: 'something_urgent', label: 'Something more urgent' },
 ] as const;
 
@@ -217,11 +217,11 @@ function FocusModeView({
                 {t('Started at {{time}}', { time: formatTimeOfDay(focusState.startedAt) })}
               </span>
             </div>
-            <div
-              className="w-px h-4"
-              style={{ background: 'var(--color-border)' }}
-            />
-            <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--color-text)' }}>
+            <div className="w-px h-4" style={{ background: 'var(--color-border)' }} />
+            <span
+              className="text-sm font-semibold tabular-nums"
+              style={{ color: 'var(--color-text)' }}
+            >
               {t('{{elapsed}} elapsed', { elapsed: formatElapsed(elapsed, t) })}
             </span>
           </div>
@@ -286,7 +286,10 @@ function FocusModeView({
             className="mt-6"
           >
             <p className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
-              {t('Subtasks ({{completed}}/{{total}})', { completed: subtasks.filter((s) => s.status === 'completed').length, total: subtasks.length })}
+              {t('Subtasks ({{completed}}/{{total}})', {
+                completed: subtasks.filter((s) => s.status === 'completed').length,
+                total: subtasks.length,
+              })}
             </p>
             <div
               className="rounded-xl overflow-hidden"
@@ -519,7 +522,11 @@ export function NowView() {
           transition={{ type: 'spring', stiffness: 200, damping: 15 }}
           className="relative z-10 text-center"
         >
-          <PartyPopper size={56} className="mx-auto mb-4" style={{ color: 'var(--color-success)' }} />
+          <PartyPopper
+            size={56}
+            className="mx-auto mb-4"
+            style={{ color: 'var(--color-success)' }}
+          />
           <h1 className="text-3xl font-extrabold" style={{ color: 'var(--color-text)' }}>
             {t('Done!')}
           </h1>
@@ -573,7 +580,7 @@ export function NowView() {
               className="mt-3 max-w-xs mx-auto text-sm leading-relaxed"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              {t('You chose to rest. Enjoy this time, come back when you\'re ready.')}
+              {t("You chose to rest. Enjoy this time, come back when you're ready.")}
             </p>
             <motion.button
               type="button"
@@ -586,7 +593,7 @@ export function NowView() {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
-              {t('I\'m ready')}
+              {t("I'm ready")}
             </motion.button>
           </motion.div>
         </div>
@@ -630,7 +637,7 @@ export function NowView() {
     if (!currentTask.ddl) return t('This is your most important thing right now');
     const days = Math.ceil((currentTask.ddl.getTime() - Date.now()) / 86400000);
     if (days <= 0) return t('Already overdue, get on it!');
-    if (days <= 2) return t('Most urgent + you\'ve been putting it off');
+    if (days <= 2) return t("Most urgent + you've been putting it off");
     return t('Recommended based on urgency and priority');
   };
 
@@ -671,7 +678,11 @@ export function NowView() {
             }}
           >
             <Clock size={12} />
-            {t('Current schedule: {{name}} ({{startTime}}-{{endTime}})', { name: activeSchedule.name, startTime: activeSchedule.startTime, endTime: activeSchedule.endTime })}
+            {t('Current schedule: {{name}} ({{startTime}}-{{endTime}})', {
+              name: activeSchedule.name,
+              startTime: activeSchedule.startTime,
+              endTime: activeSchedule.endTime,
+            })}
           </motion.div>
         )}
         <motion.div
@@ -718,7 +729,16 @@ export function NowView() {
               border: '1px solid var(--color-border)',
             }}
           >
-            <Clock size={16} style={{ color: isOverdue(currentTask.ddl) ? 'var(--color-danger)' : daysUntil(currentTask.ddl) <= 2 ? 'var(--color-warning)' : 'var(--color-text-tertiary)' }} />
+            <Clock
+              size={16}
+              style={{
+                color: isOverdue(currentTask.ddl)
+                  ? 'var(--color-danger)'
+                  : daysUntil(currentTask.ddl) <= 2
+                    ? 'var(--color-warning)'
+                    : 'var(--color-text-tertiary)',
+              }}
+            />
             <span className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
               {ddlLabel}
             </span>
@@ -747,7 +767,7 @@ export function NowView() {
                   {t(
                     GENTLE_INTERVENTIONS[
                       Math.floor(rejectionCount / 3) % GENTLE_INTERVENTIONS.length
-                    ]
+                    ],
                   )}
                 </p>
                 <div className="flex flex-col gap-2">
@@ -919,21 +939,36 @@ export function NowView() {
             onAddSubtask={() => selectTask(currentTask.id)}
             onSetDdl={() => selectTask(currentTask.id)}
             onChangeRole={(roleId) => updateTask({ ...currentTask, roleId })}
-            onComplete={() => updateStatus(currentTask.id, 'completed').then(() => {
-              const freshTasks = useTaskStore.getState().tasks;
-              const freshFiltered = filterByRole(freshTasks, useRoleStore.getState().currentRoleId);
-              setCurrentTask(pickRecommendation(freshFiltered));
-            })}
-            onArchive={() => updateStatus(currentTask.id, 'archived').then(() => {
-              const freshTasks = useTaskStore.getState().tasks;
-              const freshFiltered = filterByRole(freshTasks, useRoleStore.getState().currentRoleId);
-              setCurrentTask(pickRecommendation(freshFiltered));
-            })}
-            onDelete={() => updateStatus(currentTask.id, 'archived').then(() => {
-              const freshTasks = useTaskStore.getState().tasks;
-              const freshFiltered = filterByRole(freshTasks, useRoleStore.getState().currentRoleId);
-              setCurrentTask(pickRecommendation(freshFiltered));
-            })}
+            onComplete={() =>
+              updateStatus(currentTask.id, 'completed').then(() => {
+                const freshTasks = useTaskStore.getState().tasks;
+                const freshFiltered = filterByRole(
+                  freshTasks,
+                  useRoleStore.getState().currentRoleId,
+                );
+                setCurrentTask(pickRecommendation(freshFiltered));
+              })
+            }
+            onArchive={() =>
+              updateStatus(currentTask.id, 'archived').then(() => {
+                const freshTasks = useTaskStore.getState().tasks;
+                const freshFiltered = filterByRole(
+                  freshTasks,
+                  useRoleStore.getState().currentRoleId,
+                );
+                setCurrentTask(pickRecommendation(freshFiltered));
+              })
+            }
+            onDelete={() =>
+              updateStatus(currentTask.id, 'archived').then(() => {
+                const freshTasks = useTaskStore.getState().tasks;
+                const freshFiltered = filterByRole(
+                  freshTasks,
+                  useRoleStore.getState().currentRoleId,
+                );
+                setCurrentTask(pickRecommendation(freshFiltered));
+              })
+            }
           />
         )}
       </div>

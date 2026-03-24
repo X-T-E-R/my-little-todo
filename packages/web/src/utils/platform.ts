@@ -17,7 +17,9 @@ async function detectAsync(): Promise<Platform> {
   try {
     const res = await fetch('/health', { signal: AbortSignal.timeout(3000) });
     if (res.ok) return 'web-hosted';
-  } catch { /* not reachable */ }
+  } catch {
+    /* not reachable */
+  }
 
   return 'web-standalone';
 }
@@ -32,17 +34,38 @@ export async function initPlatform(): Promise<Platform> {
 export function getPlatform(): Platform {
   if (_platform) return _platform;
   const sync = detectSync();
-  if (sync) { _platform = sync; return sync; }
+  if (sync) {
+    _platform = sync;
+    return sync;
+  }
   return 'web-hosted';
 }
 
-export function isTauriEnv(): boolean { return getPlatform() === 'tauri'; }
-export function isCapacitorEnv(): boolean { return getPlatform() === 'capacitor'; }
-export function isWebHosted(): boolean { return getPlatform() === 'web-hosted'; }
-export function isWebStandalone(): boolean { return getPlatform() === 'web-standalone'; }
+export function isTauriEnv(): boolean {
+  return getPlatform() === 'tauri';
+}
+export function isCapacitorEnv(): boolean {
+  return getPlatform() === 'capacitor';
+}
+export function isWebHosted(): boolean {
+  return getPlatform() === 'web-hosted';
+}
+export function isWebStandalone(): boolean {
+  return getPlatform() === 'web-standalone';
+}
 
-export function canChooseMode(): boolean { return getPlatform() === 'tauri'; }
-export function canEditBackendUrl(): boolean { return getPlatform() !== 'web-hosted'; }
-export function canControlServer(): boolean { return getPlatform() === 'tauri'; }
-export function canExportToFolder(): boolean { return getPlatform() === 'tauri'; }
-export function hasKeyboardShortcuts(): boolean { return getPlatform() !== 'capacitor'; }
+export function canChooseMode(): boolean {
+  return getPlatform() === 'tauri';
+}
+export function canEditBackendUrl(): boolean {
+  return getPlatform() !== 'web-hosted';
+}
+export function canControlServer(): boolean {
+  return getPlatform() === 'tauri';
+}
+export function canExportToFolder(): boolean {
+  return getPlatform() === 'tauri';
+}
+export function hasKeyboardShortcuts(): boolean {
+  return getPlatform() !== 'capacitor';
+}

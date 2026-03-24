@@ -60,10 +60,7 @@ export function ToastContainer() {
               }}
             >
               <Icon size={16} style={{ color: colors.text, flexShrink: 0 }} />
-              <span
-                className="flex-1 text-sm font-medium"
-                style={{ color: 'var(--color-text)' }}
-              >
+              <span className="flex-1 text-sm font-medium" style={{ color: 'var(--color-text)' }}>
                 {toast.message}
               </span>
               {toast.action && (

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { generateId, taskId, streamEntryId, behaviorEventId, stepId } from './id.js';
+import { describe, expect, it } from 'vitest';
+import { behaviorEventId, generateId, stepId, streamEntryId, taskId } from './id.js';
 
 describe('generateId', () => {
   it('returns string with given prefix', () => {

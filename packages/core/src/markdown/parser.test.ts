@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { parseStreamFile, parseTaskFile } from './parser.js';
 
 describe('parseStreamFile', () => {
@@ -21,7 +21,7 @@ entries: 1
   });
 
   it('parses legacy HH:MM format and pads seconds', () => {
-    const content = `- 09:15 | 早起打卡`;
+    const content = '- 09:15 | 早起打卡';
     const entries = parseStreamFile(content, dateKey);
     expect(entries).toHaveLength(1);
     expect(entries[0].id).toBe('se-20260322-091500');
@@ -29,7 +29,7 @@ entries: 1
   });
 
   it('handles [task] entry type tag', () => {
-    const content = `- 10:00:00 | [task] 需要完成报告`;
+    const content = '- 10:00:00 | [task] 需要完成报告';
     const entries = parseStreamFile(content, dateKey);
     expect(entries).toHaveLength(1);
     expect(entries[0].entryType).toBe('task');
@@ -37,26 +37,26 @@ entries: 1
   });
 
   it('extracts tags from content', () => {
-    const content = `- 11:00:00 | 讨论了 #项目A 和 #urgent 的问题`;
+    const content = '- 11:00:00 | 讨论了 #项目A 和 #urgent 的问题';
     const entries = parseStreamFile(content, dateKey);
     expect(entries[0].tags).toEqual(['项目A', 'urgent']);
   });
 
   it('extracts role reference', () => {
-    const content = `- 12:00:00 | 开会讨论需求 @role:dev-lead`;
+    const content = '- 12:00:00 | 开会讨论需求 @role:dev-lead';
     const entries = parseStreamFile(content, dateKey);
     expect(entries[0].roleId).toBe('dev-lead');
   });
 
   it('extracts task reference', () => {
-    const content = `- 13:00:00 | 完成了任务 → [t-20260320-100000]`;
+    const content = '- 13:00:00 | 完成了任务 → [t-20260320-100000]';
     const entries = parseStreamFile(content, dateKey);
     expect(entries[0].extractedTaskId).toBe('t-20260320-100000');
     expect(entries[0].content).not.toContain('→');
   });
 
   it('extracts image attachments', () => {
-    const content = `- 14:00:00 | 看到了这个 ![截图](https://example.com/img.png)`;
+    const content = '- 14:00:00 | 看到了这个 ![截图](https://example.com/img.png)';
     const entries = parseStreamFile(content, dateKey);
     expect(entries[0].attachments).toHaveLength(1);
     expect(entries[0].attachments[0].type).toBe('image');
@@ -64,11 +64,9 @@ entries: 1
   });
 
   it('generates unique IDs for entries at the same time', () => {
-    const content = [
-      '- 10:00:00 | 第一条',
-      '- 10:00:00 | 第二条',
-      '- 10:00:00 | 第三条',
-    ].join('\n');
+    const content = ['- 10:00:00 | 第一条', '- 10:00:00 | 第二条', '- 10:00:00 | 第三条'].join(
+      '\n',
+    );
     const entries = parseStreamFile(content, dateKey);
     expect(entries).toHaveLength(3);
     expect(entries[0].id).toBe('se-20260322-100000');

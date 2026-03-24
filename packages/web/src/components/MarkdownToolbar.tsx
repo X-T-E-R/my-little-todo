@@ -49,25 +49,29 @@ const INLINE_TOOLS: ToolButton[] = [
     icon: Bold,
     labelKey: 'Bold',
     shortcut: 'Ctrl+B',
-    action: (ta, t) => insertMarkdown(ta, { prefix: '**', suffix: '**', defaultContent: t('Bold') }),
+    action: (ta, t) =>
+      insertMarkdown(ta, { prefix: '**', suffix: '**', defaultContent: t('Bold') }),
   },
   {
     icon: Italic,
     labelKey: 'Italic',
     shortcut: 'Ctrl+I',
-    action: (ta, t) => insertMarkdown(ta, { prefix: '*', suffix: '*', defaultContent: t('Italic') }),
+    action: (ta, t) =>
+      insertMarkdown(ta, { prefix: '*', suffix: '*', defaultContent: t('Italic') }),
   },
   {
     icon: Strikethrough,
     labelKey: 'Strikethrough',
     shortcut: 'Alt+Shift+5',
-    action: (ta, t) => insertMarkdown(ta, { prefix: '~~', suffix: '~~', defaultContent: t('Strikethrough') }),
+    action: (ta, t) =>
+      insertMarkdown(ta, { prefix: '~~', suffix: '~~', defaultContent: t('Strikethrough') }),
   },
   {
     icon: Underline,
     labelKey: 'Underline',
     shortcut: 'Ctrl+U',
-    action: (ta, t) => insertMarkdown(ta, { prefix: '<u>', suffix: '</u>', defaultContent: t('Underline') }),
+    action: (ta, t) =>
+      insertMarkdown(ta, { prefix: '<u>', suffix: '</u>', defaultContent: t('Underline') }),
   },
   {
     icon: Code,
@@ -78,7 +82,8 @@ const INLINE_TOOLS: ToolButton[] = [
   {
     icon: Highlighter,
     labelKey: 'Highlight',
-    action: (ta, t) => insertMarkdown(ta, { prefix: '==', suffix: '==', defaultContent: t('Highlight') }),
+    action: (ta, t) =>
+      insertMarkdown(ta, { prefix: '==', suffix: '==', defaultContent: t('Highlight') }),
   },
   {
     icon: Eraser,

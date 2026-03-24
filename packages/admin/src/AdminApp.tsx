@@ -92,7 +92,6 @@ function SetupPage({ onSetup }: { onSetup: () => void }) {
             placeholder={t('Admin Username Placeholder')}
             className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
             required
-            autoFocus
           />
           <input
             type="password"
@@ -183,8 +182,16 @@ function Dashboard({ stats }: { stats: Stats | null }) {
       <h2 className="text-lg font-semibold">{t('Dashboard')}</h2>
       {stats && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard label={t('Total Users')} value={String(stats.total_users)} icon={<Users size={18} />} />
-          <StatCard label={t('Database Type')} value={stats.db_type} icon={<Activity size={18} />} />
+          <StatCard
+            label={t('Total Users')}
+            value={String(stats.total_users)}
+            icon={<Users size={18} />}
+          />
+          <StatCard
+            label={t('Database Type')}
+            value={stats.db_type}
+            icon={<Activity size={18} />}
+          />
           <StatCard label={t('Auth Mode')} value={stats.auth_mode} icon={<Key size={18} />} />
         </div>
       )}
@@ -253,10 +260,18 @@ function UsersPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-              <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">{t('Username')}</th>
-              <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">{t('Role')}</th>
-              <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">{t('Created At')}</th>
-              <th className="px-4 py-3 text-right font-medium text-[var(--color-text-secondary)]">{t('Actions')}</th>
+              <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">
+                {t('Username')}
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">
+                {t('Role')}
+              </th>
+              <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">
+                {t('Created At')}
+              </th>
+              <th className="px-4 py-3 text-right font-medium text-[var(--color-text-secondary)]">
+                {t('Actions')}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -295,7 +310,10 @@ function UsersPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => { setResetId(null); setNewPw(''); }}
+                          onClick={() => {
+                            setResetId(null);
+                            setNewPw('');
+                          }}
                           className="rounded px-2 py-1 text-xs text-[var(--color-text-secondary)]"
                         >
                           {t('Cancel')}
@@ -344,10 +362,13 @@ export function AdminApp() {
   const [needsSetup, setNeedsSetup] = useState(false);
 
   useEffect(() => {
-    Promise.all([api.getAuthMode(), api.getToken() ? api.getMe().catch(() => null) : Promise.resolve(null)])
+    Promise.all([
+      api.getAuthMode(),
+      api.getToken() ? api.getMe().catch(() => null) : Promise.resolve(null),
+    ])
       .then(([mode, me]) => {
         setNeedsSetup(mode.needs_setup);
-        if (me && me.is_admin) {
+        if (me?.is_admin) {
           setUser(me);
           setAuthed(true);
         } else if (api.getToken()) {
@@ -362,7 +383,10 @@ export function AdminApp() {
 
   useEffect(() => {
     if (!authed) return;
-    api.getStats().then(setStats).catch(() => {});
+    api
+      .getStats()
+      .then(setStats)
+      .catch(() => {});
   }, [authed]);
 
   const handleLogout = () => {

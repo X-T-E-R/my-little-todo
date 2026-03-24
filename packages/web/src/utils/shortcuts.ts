@@ -12,7 +12,13 @@ export interface ShortcutBinding {
 
 export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
   // Global shortcuts
-  { id: 'app.newTask', action: 'app.newTask', label: i18n.t('shortcuts.New Task', { ns: 'common' }), keys: 'Ctrl+N', scope: 'global' },
+  {
+    id: 'app.newTask',
+    action: 'app.newTask',
+    label: i18n.t('shortcuts.New Task', { ns: 'common' }),
+    keys: 'Ctrl+N',
+    scope: 'global',
+  },
   {
     id: 'app.viewNow',
     action: 'app.viewNow',
@@ -50,8 +56,20 @@ export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
   },
 
   // Editor shortcuts (Typora-based)
-  { id: 'editor.bold', action: 'editor.bold', label: i18n.t('shortcuts.Bold', { ns: 'common' }), keys: 'Ctrl+B', scope: 'editor' },
-  { id: 'editor.italic', action: 'editor.italic', label: i18n.t('shortcuts.Italic', { ns: 'common' }), keys: 'Ctrl+I', scope: 'editor' },
+  {
+    id: 'editor.bold',
+    action: 'editor.bold',
+    label: i18n.t('shortcuts.Bold', { ns: 'common' }),
+    keys: 'Ctrl+B',
+    scope: 'editor',
+  },
+  {
+    id: 'editor.italic',
+    action: 'editor.italic',
+    label: i18n.t('shortcuts.Italic', { ns: 'common' }),
+    keys: 'Ctrl+I',
+    scope: 'editor',
+  },
   {
     id: 'editor.underline',
     action: 'editor.underline',
@@ -80,7 +98,13 @@ export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
     keys: 'Ctrl+Shift+K',
     scope: 'editor',
   },
-  { id: 'editor.link', action: 'editor.link', label: i18n.t('shortcuts.Hyperlink', { ns: 'common' }), keys: 'Ctrl+K', scope: 'editor' },
+  {
+    id: 'editor.link',
+    action: 'editor.link',
+    label: i18n.t('shortcuts.Hyperlink', { ns: 'common' }),
+    keys: 'Ctrl+K',
+    scope: 'editor',
+  },
   {
     id: 'editor.quote',
     action: 'editor.quote',
@@ -102,7 +126,13 @@ export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
     keys: 'Ctrl+Shift+]',
     scope: 'editor',
   },
-  { id: 'editor.table', action: 'editor.table', label: i18n.t('shortcuts.Table', { ns: 'common' }), keys: 'Ctrl+T', scope: 'editor' },
+  {
+    id: 'editor.table',
+    action: 'editor.table',
+    label: i18n.t('shortcuts.Table', { ns: 'common' }),
+    keys: 'Ctrl+T',
+    scope: 'editor',
+  },
   {
     id: 'editor.clearFormat',
     action: 'editor.clearFormat',

@@ -1,13 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
+  daysBetween,
+  daysUntil,
+  endOfDay,
   formatDateKey,
   formatTime,
   formatTimeStorage,
-  startOfDay,
-  endOfDay,
-  daysUntil,
-  daysBetween,
   isOverdue,
+  startOfDay,
 } from './date.js';
 
 describe('formatDateKey', () => {

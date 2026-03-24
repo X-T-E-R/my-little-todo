@@ -20,8 +20,8 @@ import {
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../locales';
-import { useRoleStore } from '../stores';
 import { putSetting } from '../storage/settingsApi';
+import { useRoleStore } from '../stores';
 
 interface Props {
   isReentry?: boolean;
@@ -67,7 +67,10 @@ function WelcomeStep({ isReentry, onNext }: { isReentry: boolean; onNext: () => 
         </p>
       </div>
 
-      <p className="max-w-xs text-sm leading-relaxed" style={{ color: 'var(--color-text-tertiary)' }}>
+      <p
+        className="max-w-xs text-sm leading-relaxed"
+        style={{ color: 'var(--color-text-tertiary)' }}
+      >
         {t('Open to see only one thing, finish it and do the next.')}
         <br />
         {t('Write whatever you think, AI helps you organize.')}
@@ -88,7 +91,10 @@ function WelcomeStep({ isReentry, onNext }: { isReentry: boolean; onNext: () => 
   );
 }
 
-function PresetsStep({ onNext, onSkip }: { onNext: (selected: string[]) => void; onSkip: () => void }) {
+function PresetsStep({
+  onNext,
+  onSkip,
+}: { onNext: (selected: string[]) => void; onSkip: () => void }) {
   const { t } = useTranslation('onboarding');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const existingRoles = useRoleStore((s) => s.roles);
@@ -111,8 +117,12 @@ function PresetsStep({ onNext, onSkip }: { onNext: (selected: string[]) => void;
       className="flex flex-col items-center gap-6 px-6"
     >
       <div className="text-center space-y-1">
-        <h2 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>{t('What do you mainly use it for?')}</h2>
-        <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{t('Select scenes to quickly create roles, you can modify them anytime')}</p>
+        <h2 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
+          {t('What do you mainly use it for?')}
+        </h2>
+        <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+          {t('Select scenes to quickly create roles, you can modify them anytime')}
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-3 w-full max-w-sm">
@@ -133,9 +143,7 @@ function PresetsStep({ onNext, onSkip }: { onNext: (selected: string[]) => void;
                   : isSelected
                     ? `${preset.color}18`
                     : 'var(--color-surface)',
-                border: isSelected
-                  ? `2px solid ${preset.color}`
-                  : '2px solid var(--color-border)',
+                border: isSelected ? `2px solid ${preset.color}` : '2px solid var(--color-border)',
                 opacity: alreadyExists ? 0.5 : 1,
               }}
             >
@@ -149,7 +157,10 @@ function PresetsStep({ onNext, onSkip }: { onNext: (selected: string[]) => void;
                 {t(preset.label)}
               </span>
               {alreadyExists && (
-                <span className="absolute right-3 text-[10px] font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
+                <span
+                  className="absolute right-3 text-[10px] font-medium"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
                   {t('Already exists')}
                 </span>
               )}
@@ -178,7 +189,9 @@ function PresetsStep({ onNext, onSkip }: { onNext: (selected: string[]) => void;
           className="w-full rounded-2xl px-6 py-3 text-sm font-semibold text-white transition-opacity disabled:opacity-40"
           style={{ background: 'var(--color-accent)' }}
         >
-          {selected.size > 0 ? t('Create {{count}} roles', { count: selected.size }) : t('Create roles')}
+          {selected.size > 0
+            ? t('Create {{count}} roles', { count: selected.size })
+            : t('Create roles')}
         </motion.button>
         <button
           type="button"
@@ -193,7 +206,13 @@ function PresetsStep({ onNext, onSkip }: { onNext: (selected: string[]) => void;
   );
 }
 
-function QuickConfigStep({ onNext, onSaveConfig }: { onNext: () => void; onSaveConfig?: (config: { useMode: string; cloudUrl: string; lanAccess: boolean }) => void }) {
+function QuickConfigStep({
+  onNext,
+  onSaveConfig,
+}: {
+  onNext: () => void;
+  onSaveConfig?: (config: { useMode: string; cloudUrl: string; lanAccess: boolean }) => void;
+}) {
   const { t } = useTranslation('onboarding');
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
   const [lanAccess, setLanAccess] = useState(false);
@@ -226,14 +245,20 @@ function QuickConfigStep({ onNext, onSaveConfig }: { onNext: () => void; onSaveC
       className="flex flex-col items-center gap-6 px-6"
     >
       <div className="text-center space-y-1">
-        <h2 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>{t('Personalize')}</h2>
-        <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{t('These can be modified in settings anytime')}</p>
+        <h2 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
+          {t('Personalize')}
+        </h2>
+        <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+          {t('These can be modified in settings anytime')}
+        </p>
       </div>
 
       <div className="w-full max-w-sm space-y-5">
         {/* Language selector */}
         <div>
-          <p className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>{t('Language')}</p>
+          <p className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('Language')}
+          </p>
           <select
             value={i18n.language}
             onChange={(e) => {
@@ -255,7 +280,12 @@ function QuickConfigStep({ onNext, onSaveConfig }: { onNext: () => void; onSaveC
         {/* Use mode - only in Tauri */}
         {isTauriEnv && (
           <div>
-            <p className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>{t('Usage mode')}</p>
+            <p
+              className="text-xs font-medium mb-2"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              {t('Usage mode')}
+            </p>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -264,7 +294,10 @@ function QuickConfigStep({ onNext, onSaveConfig }: { onNext: () => void; onSaveC
                 style={{
                   background: useMode === 'local' ? 'var(--color-accent)' : 'var(--color-surface)',
                   color: useMode === 'local' ? 'white' : 'var(--color-text-secondary)',
-                  border: useMode === 'local' ? '1px solid var(--color-accent)' : '1px solid var(--color-border)',
+                  border:
+                    useMode === 'local'
+                      ? '1px solid var(--color-accent)'
+                      : '1px solid var(--color-border)',
                 }}
               >
                 <Laptop size={16} />
@@ -277,7 +310,10 @@ function QuickConfigStep({ onNext, onSaveConfig }: { onNext: () => void; onSaveC
                 style={{
                   background: useMode === 'cloud' ? 'var(--color-accent)' : 'var(--color-surface)',
                   color: useMode === 'cloud' ? 'white' : 'var(--color-text-secondary)',
-                  border: useMode === 'cloud' ? '1px solid var(--color-accent)' : '1px solid var(--color-border)',
+                  border:
+                    useMode === 'cloud'
+                      ? '1px solid var(--color-accent)'
+                      : '1px solid var(--color-border)',
                 }}
               >
                 <Cloud size={16} />
@@ -313,7 +349,9 @@ function QuickConfigStep({ onNext, onSaveConfig }: { onNext: () => void; onSaveC
 
         {/* Theme */}
         <div>
-          <p className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>{t('Theme')}</p>
+          <p className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('Theme')}
+          </p>
           <div className="flex gap-2">
             {themeOptions.map((opt) => {
               const Icon = opt.icon;
@@ -327,7 +365,9 @@ function QuickConfigStep({ onNext, onSaveConfig }: { onNext: () => void; onSaveC
                   style={{
                     background: active ? 'var(--color-accent)' : 'var(--color-surface)',
                     color: active ? 'white' : 'var(--color-text-secondary)',
-                    border: active ? '1px solid var(--color-accent)' : '1px solid var(--color-border)',
+                    border: active
+                      ? '1px solid var(--color-accent)'
+                      : '1px solid var(--color-border)',
                   }}
                 >
                   <Icon size={14} />
@@ -344,8 +384,12 @@ function QuickConfigStep({ onNext, onSaveConfig }: { onNext: () => void; onSaveC
             <div className="flex items-center gap-2">
               <Wifi size={15} style={{ color: 'var(--color-text-secondary)' }} />
               <div>
-                <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{t('Allow LAN access')}</p>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>{t('Let phone and other devices connect to this PC')}</p>
+                <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                  {t('Allow LAN access')}
+                </p>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('Let phone and other devices connect to this PC')}
+                </p>
               </div>
             </div>
             <button
@@ -423,8 +467,12 @@ function DoneStep({ onEnter }: { onEnter: () => void }) {
         <Check size={28} className="text-white" strokeWidth={3} />
       </motion.div>
       <div className="space-y-1">
-        <h2 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>{t('All ready')}</h2>
-        <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>{t('Start using')}</p>
+        <h2 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
+          {t('All ready')}
+        </h2>
+        <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+          {t('Start using')}
+        </p>
       </div>
       <motion.button
         type="button"
@@ -464,7 +512,9 @@ export function OnboardingView({ isReentry = false, onComplete }: Props) {
   const handleComplete = async () => {
     try {
       await putSetting('onboarding-completed', 'true');
-    } catch { /* server unreachable — localStorage fallback below */ }
+    } catch {
+      /* server unreachable — localStorage fallback below */
+    }
     localStorage.setItem('mlt-onboarding-completed', 'true');
     onComplete();
   };
@@ -493,6 +543,7 @@ export function OnboardingView({ isReentry = false, onComplete }: Props) {
           const isDone = i < step;
           return (
             <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: static-length progress dots
               key={i}
               className="h-1.5 rounded-full transition-all duration-300"
               style={{
@@ -511,31 +562,15 @@ export function OnboardingView({ isReentry = false, onComplete }: Props) {
 
       <AnimatePresence mode="wait">
         {currentStep === 'welcome' && (
-          <WelcomeStep
-            key="welcome"
-            isReentry={isReentry}
-            onNext={() => setStep(1)}
-          />
+          <WelcomeStep key="welcome" isReentry={isReentry} onNext={() => setStep(1)} />
         )}
         {currentStep === 'presets' && (
-          <PresetsStep
-            key="presets"
-            onNext={handlePresetsNext}
-            onSkip={() => setStep(2)}
-          />
+          <PresetsStep key="presets" onNext={handlePresetsNext} onSkip={() => setStep(2)} />
         )}
         {currentStep === 'config' && (
-          <QuickConfigStep
-            key="config"
-            onNext={() => setStep(isReentry ? 2 : 3)}
-          />
+          <QuickConfigStep key="config" onNext={() => setStep(isReentry ? 2 : 3)} />
         )}
-        {currentStep === 'done' && (
-          <DoneStep
-            key="done"
-            onEnter={handleComplete}
-          />
-        )}
+        {currentStep === 'done' && <DoneStep key="done" onEnter={handleComplete} />}
       </AnimatePresence>
     </div>
   );

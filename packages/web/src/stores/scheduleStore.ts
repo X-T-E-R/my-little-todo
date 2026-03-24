@@ -83,7 +83,10 @@ export const useScheduleStore = create<ScheduleState>((set, get) => ({
   },
 }));
 
-export function isInScheduleBlock(blocks: ScheduleBlock[], now: Date = new Date()): ScheduleBlock | null {
+export function isInScheduleBlock(
+  blocks: ScheduleBlock[],
+  now: Date = new Date(),
+): ScheduleBlock | null {
   const dayOfWeek = now.getDay();
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;

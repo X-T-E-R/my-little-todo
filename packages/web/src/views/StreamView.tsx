@@ -310,40 +310,41 @@ function EntryCard({
             {/* Inline task info: DDL pill + subtask count */}
             {linkedTask && (
               <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                {linkedTask.ddl && (() => {
-                  const taskCompleted = linkedTask.status === 'completed';
-                  const overdue = isOverdue(linkedTask.ddl);
-                  const days = daysUntil(linkedTask.ddl);
-                  let bg: string;
-                  let fg: string;
-                  let label: string;
-                  if (taskCompleted && overdue) {
-                    bg = 'var(--color-success-soft, rgba(34,197,94,0.1))';
-                    fg = 'var(--color-success, #22c55e)';
-                    label = t('Completed');
-                  } else if (overdue) {
-                    bg = 'var(--color-danger-soft, rgba(239,68,68,0.1))';
-                    fg = 'var(--color-danger, #ef4444)';
-                    label = formatDdlLabel(linkedTask.ddl);
-                  } else if (days <= 2) {
-                    bg = 'var(--color-warning-soft, rgba(234,179,8,0.1))';
-                    fg = 'var(--color-warning, #ca8a04)';
-                    label = formatDdlLabel(linkedTask.ddl);
-                  } else {
-                    bg = 'var(--color-bg)';
-                    fg = 'var(--color-text-secondary)';
-                    label = formatDdlLabel(linkedTask.ddl);
-                  }
-                  return (
-                    <span
-                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
-                      style={{ background: bg, color: fg }}
-                    >
-                      {taskCompleted && overdue ? <Check size={10} /> : <Calendar size={10} />}
-                      {label}
-                    </span>
-                  );
-                })()}
+                {linkedTask.ddl &&
+                  (() => {
+                    const taskCompleted = linkedTask.status === 'completed';
+                    const overdue = isOverdue(linkedTask.ddl);
+                    const days = daysUntil(linkedTask.ddl);
+                    let bg: string;
+                    let fg: string;
+                    let label: string;
+                    if (taskCompleted && overdue) {
+                      bg = 'var(--color-success-soft, rgba(34,197,94,0.1))';
+                      fg = 'var(--color-success, #22c55e)';
+                      label = t('Completed');
+                    } else if (overdue) {
+                      bg = 'var(--color-danger-soft, rgba(239,68,68,0.1))';
+                      fg = 'var(--color-danger, #ef4444)';
+                      label = formatDdlLabel(linkedTask.ddl);
+                    } else if (days <= 2) {
+                      bg = 'var(--color-warning-soft, rgba(234,179,8,0.1))';
+                      fg = 'var(--color-warning, #ca8a04)';
+                      label = formatDdlLabel(linkedTask.ddl);
+                    } else {
+                      bg = 'var(--color-bg)';
+                      fg = 'var(--color-text-secondary)';
+                      label = formatDdlLabel(linkedTask.ddl);
+                    }
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
+                        style={{ background: bg, color: fg }}
+                      >
+                        {taskCompleted && overdue ? <Check size={10} /> : <Calendar size={10} />}
+                        {label}
+                      </span>
+                    );
+                  })()}
                 {subtaskCount > 0 && (
                   <span
                     className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
@@ -352,7 +353,10 @@ function EntryCard({
                       color: 'var(--color-accent)',
                     }}
                   >
-                    {t('{{completed}}/{{total}} subtasks', { completed: completedSubtasks, total: subtaskCount })}
+                    {t('{{completed}}/{{total}} subtasks', {
+                      completed: completedSubtasks,
+                      total: subtaskCount,
+                    })}
                   </span>
                 )}
               </div>
@@ -556,13 +560,11 @@ function StreamFilterBar({
         className="flex items-center gap-1 rounded-lg p-0.5"
         style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
       >
-        {(
-          [
-            { key: 'all' as const, label: t('All'), icon: null },
-            { key: 'spark' as const, label: t('Inspiration'), icon: Sparkles },
-            { key: 'task' as const, label: t('Task'), icon: CheckSquare2 },
-          ]
-        ).map(({ key, label, icon: Icon }) => (
+        {[
+          { key: 'all' as const, label: t('All'), icon: null },
+          { key: 'spark' as const, label: t('Inspiration'), icon: Sparkles },
+          { key: 'task' as const, label: t('Task'), icon: CheckSquare2 },
+        ].map(({ key, label, icon: Icon }) => (
           <button
             key={key}
             type="button"
@@ -646,7 +648,6 @@ function StreamFilterBar({
 
 /* ── Main StreamView ── */
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: main view component
 export function StreamView() {
   const { t } = useTranslation('stream');
   const [input, setInput] = useState('');
@@ -749,10 +750,11 @@ export function StreamView() {
       ? {
           ddl: metaDdlDate ? new Date(metaDdlDate) : undefined,
           ddlType: metaDdlDate ? metaDdlType : undefined,
-          tags: metaTags
-            .split(/[\s,]+/)
-            .map((t) => t.trim())
-            .filter(Boolean) || undefined,
+          tags:
+            metaTags
+              .split(/[\s,]+/)
+              .map((t) => t.trim())
+              .filter(Boolean) || undefined,
         }
       : undefined;
     await addEntry(input.trim(), saveAsTask, meta);
@@ -968,7 +970,10 @@ export function StreamView() {
       />
 
       {/* Floating input area */}
-      <div className="absolute bottom-0 left-0 right-0 z-10 px-4" style={{ paddingBottom: 'calc(16px + var(--safe-area-bottom))' }}>
+      <div
+        className="absolute bottom-0 left-0 right-0 z-10 px-4"
+        style={{ paddingBottom: 'calc(16px + var(--safe-area-bottom))' }}
+      >
         <div className="mx-auto max-w-2xl">
           {/* Current role indicator */}
           {currentRole && (
@@ -1018,9 +1023,17 @@ export function StreamView() {
                     e.preventDefault();
                     const editorActions: Record<string, () => void> = {
                       'editor.bold': () =>
-                        insertMarkdown(ta, { prefix: '**', suffix: '**', defaultContent: t('Bold') }),
+                        insertMarkdown(ta, {
+                          prefix: '**',
+                          suffix: '**',
+                          defaultContent: t('Bold'),
+                        }),
                       'editor.italic': () =>
-                        insertMarkdown(ta, { prefix: '*', suffix: '*', defaultContent: t('Italic') }),
+                        insertMarkdown(ta, {
+                          prefix: '*',
+                          suffix: '*',
+                          defaultContent: t('Italic'),
+                        }),
                       'editor.underline': () =>
                         insertMarkdown(ta, {
                           prefix: '<u>',

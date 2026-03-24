@@ -49,9 +49,13 @@ export function LoginView() {
               <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-accent)]/10">
                 <Settings size={24} className="text-[var(--color-accent)]" />
               </div>
-              <h1 className="text-xl font-semibold text-[var(--color-text)]">{t('Setup required')}</h1>
+              <h1 className="text-xl font-semibold text-[var(--color-text)]">
+                {t('Setup required')}
+              </h1>
               <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-                {t('Please visit the admin panel to create the first admin account before using this app.')}
+                {t(
+                  'Please visit the admin panel to create the first admin account before using this app.',
+                )}
               </p>
             </div>
             <a
@@ -68,11 +72,7 @@ export function LoginView() {
   }
 
   const canRegister = authMode === 'multi' || needsSetup;
-  const title = needsSetup
-    ? t('Initial setup')
-    : isRegister
-      ? t('Create account')
-      : t('Login');
+  const title = needsSetup ? t('Initial setup') : isRegister ? t('Create account') : t('Login');
   const subtitle = needsSetup
     ? t('Create an admin account to get started')
     : isRegister
@@ -108,7 +108,6 @@ export function LoginView() {
                 className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]/30"
                 placeholder={t('Enter username')}
                 required
-                autoFocus
               />
             </div>
 

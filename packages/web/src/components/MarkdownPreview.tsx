@@ -16,7 +16,8 @@ export function MarkdownPreview({ content, className = '' }: MarkdownPreviewProp
   const { t } = useTranslation('editor');
 
   const html = useMemo(() => {
-    if (!content.trim()) return `<p style="color: var(--color-text-tertiary)">${t('No content')}</p>`;
+    if (!content.trim())
+      return `<p style="color: var(--color-text-tertiary)">${t('No content')}</p>`;
     return marked.parse(content, { async: false }) as string;
   }, [content, t]);
 

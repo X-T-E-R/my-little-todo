@@ -69,7 +69,18 @@ function AddRoleInline({ onDone }: { onDone: () => void }) {
   );
 }
 
-const ROLE_COLORS = ['#6b8cce', '#5eb376', '#e8a05c', '#d96c6c', '#9b7ed8', '#3ba0a8', '#c06dab', '#5c9e8f', '#c4785e', '#7b8ec7'];
+const ROLE_COLORS = [
+  '#6b8cce',
+  '#5eb376',
+  '#e8a05c',
+  '#d96c6c',
+  '#9b7ed8',
+  '#3ba0a8',
+  '#c06dab',
+  '#5c9e8f',
+  '#c4785e',
+  '#7b8ec7',
+];
 
 function RoleContextMenu({
   role,
@@ -128,7 +139,11 @@ function RoleContextMenu({
   };
 
   const handleDelete = async () => {
-    if (window.confirm(t('Delete role "{{name}}"? Tasks will become uncategorized.', { name: role.name }))) {
+    if (
+      window.confirm(
+        t('Delete role "{{name}}"? Tasks will become uncategorized.', { name: role.name }),
+      )
+    ) {
       await deleteRole(role.id);
     }
     onClose();
@@ -149,16 +164,22 @@ function RoleContextMenu({
       {renaming ? (
         <div className="px-2 py-1">
           <input
-            autoFocus
             value={renameName}
             onChange={(e) => setRenameName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleRename();
-              if (e.key === 'Escape') { setRenaming(false); onClose(); }
+              if (e.key === 'Escape') {
+                setRenaming(false);
+                onClose();
+              }
             }}
             onBlur={handleRename}
             className="w-full rounded px-2 py-1 text-xs outline-none"
-            style={{ background: 'var(--color-bg)', border: '1px solid var(--color-accent)', color: 'var(--color-text)' }}
+            style={{
+              background: 'var(--color-bg)',
+              border: '1px solid var(--color-accent)',
+              color: 'var(--color-text)',
+            }}
           />
         </div>
       ) : pickingColor ? (
@@ -182,11 +203,29 @@ function RoleContextMenu({
         </div>
       ) : (
         <>
-          <CtxItem icon={<Pencil size={14} />} label={t('Rename')} onClick={() => setRenaming(true)} />
-          <CtxItem icon={<Palette size={14} />} label={t('Change color')} onClick={() => setPickingColor(true)} />
+          <CtxItem
+            icon={<Pencil size={14} />}
+            label={t('Rename')}
+            onClick={() => setRenaming(true)}
+          />
+          <CtxItem
+            icon={<Palette size={14} />}
+            label={t('Change color')}
+            onClick={() => setPickingColor(true)}
+          />
           <div className="my-1 mx-2 border-t" style={{ borderColor: 'var(--color-border)' }} />
-          <CtxItem icon={<ArrowUp size={14} />} label={t('Move to top')} onClick={moveToTop} disabled={idx === 0} />
-          <CtxItem icon={<ArrowDown size={14} />} label={t('Move to bottom')} onClick={moveToBottom} disabled={idx === sorted.length - 1} />
+          <CtxItem
+            icon={<ArrowUp size={14} />}
+            label={t('Move to top')}
+            onClick={moveToTop}
+            disabled={idx === 0}
+          />
+          <CtxItem
+            icon={<ArrowDown size={14} />}
+            label={t('Move to bottom')}
+            onClick={moveToBottom}
+            disabled={idx === sorted.length - 1}
+          />
           <div className="my-1 mx-2 border-t" style={{ borderColor: 'var(--color-border)' }} />
           <CtxItem icon={<Trash2 size={14} />} label={t('Delete')} onClick={handleDelete} danger />
         </>
@@ -195,7 +234,13 @@ function RoleContextMenu({
   );
 }
 
-function CtxItem({ icon, label, onClick, disabled, danger }: {
+function CtxItem({
+  icon,
+  label,
+  onClick,
+  disabled,
+  danger,
+}: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
@@ -264,7 +309,12 @@ export function RoleSidebar({ horizontal = false }: { horizontal?: boolean }) {
             />
           ))}
         {ctxMenu && (
-          <RoleContextMenu role={ctxMenu.role} x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} />
+          <RoleContextMenu
+            role={ctxMenu.role}
+            x={ctxMenu.x}
+            y={ctxMenu.y}
+            onClose={() => setCtxMenu(null)}
+          />
         )}
       </div>
     );
@@ -329,7 +379,12 @@ export function RoleSidebar({ horizontal = false }: { horizontal?: boolean }) {
       )}
 
       {ctxMenu && (
-        <RoleContextMenu role={ctxMenu.role} x={ctxMenu.x} y={ctxMenu.y} onClose={() => setCtxMenu(null)} />
+        <RoleContextMenu
+          role={ctxMenu.role}
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          onClose={() => setCtxMenu(null)}
+        />
       )}
     </nav>
   );

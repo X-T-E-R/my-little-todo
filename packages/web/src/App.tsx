@@ -4,12 +4,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreateTaskDialog } from './components/CreateTaskDialog';
 import { QuickInputBar } from './components/QuickInputBar';
-import { ToastContainer } from './components/Toast';
 import { RoleLandingCard } from './components/RoleLandingCard';
 import { RoleSidebar } from './components/RoleSidebar';
 import { TaskDetailPanel } from './components/TaskDetailPanel';
-import { useRoleStore, useScheduleStore, useShortcutStore, useStreamStore, useTaskStore } from './stores';
+import { ToastContainer } from './components/Toast';
 import { getSetting } from './storage/settingsApi';
+import {
+  useRoleStore,
+  useScheduleStore,
+  useShortcutStore,
+  useStreamStore,
+  useTaskStore,
+} from './stores';
 import { useAuthStore } from './stores/authStore';
 import { startReminderService } from './utils/notificationService';
 import { useIsMobile } from './utils/useIsMobile';
@@ -77,12 +83,23 @@ export function App() {
         if (val === 'true') {
           localStorage.setItem('mlt-onboarding-completed', 'true');
         }
-        setShowOnboarding(val !== 'true' && localStorage.getItem('mlt-onboarding-completed') !== 'true');
+        setShowOnboarding(
+          val !== 'true' && localStorage.getItem('mlt-onboarding-completed') !== 'true',
+        );
       })
       .catch(() => {
         setShowOnboarding(localStorage.getItem('mlt-onboarding-completed') !== 'true');
       });
-  }, [authChecked, authMode, token, loadStream, loadTasks, loadRoles, loadShortcuts, loadSchedules]);
+  }, [
+    authChecked,
+    authMode,
+    token,
+    loadStream,
+    loadTasks,
+    loadRoles,
+    loadShortcuts,
+    loadSchedules,
+  ]);
 
   const handleNewTask = useCallback(() => setShowQuickInput((v) => !v), []);
 

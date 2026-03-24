@@ -1,6 +1,6 @@
 const TOKEN_KEY = 'mlt-admin-token';
 
-let baseUrl = window.location.origin;
+const baseUrl = window.location.origin;
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);

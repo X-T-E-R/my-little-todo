@@ -1,5 +1,5 @@
-import { useTaskStore } from '../stores';
 import i18n from '../locales';
+import { useTaskStore } from '../stores';
 
 let checkInterval: ReturnType<typeof setInterval> | null = null;
 

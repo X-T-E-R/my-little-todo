@@ -1,19 +1,19 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
+import zhBoard from './zh-CN/board.json';
+import zhCalendar from './zh-CN/calendar.json';
 import zhCommon from './zh-CN/common.json';
+import zhEditor from './zh-CN/editor.json';
+import zhErrors from './zh-CN/errors.json';
+import zhLogin from './zh-CN/login.json';
 import zhNav from './zh-CN/nav.json';
 import zhNow from './zh-CN/now.json';
-import zhStream from './zh-CN/stream.json';
-import zhBoard from './zh-CN/board.json';
-import zhSettings from './zh-CN/settings.json';
-import zhTask from './zh-CN/task.json';
 import zhOnboarding from './zh-CN/onboarding.json';
-import zhLogin from './zh-CN/login.json';
-import zhEditor from './zh-CN/editor.json';
-import zhCalendar from './zh-CN/calendar.json';
 import zhRole from './zh-CN/role.json';
-import zhErrors from './zh-CN/errors.json';
+import zhSettings from './zh-CN/settings.json';
+import zhStream from './zh-CN/stream.json';
+import zhTask from './zh-CN/task.json';
 
 export const defaultNS = 'common' as const;
 

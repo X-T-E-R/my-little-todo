@@ -1,5 +1,5 @@
-import type { StorageAdapter } from './adapter';
 import { getAuthToken } from '../stores/authStore';
+import type { StorageAdapter } from './adapter';
 
 export function createApiAdapter(baseUrl: string, token?: string): StorageAdapter {
   const headers = (): HeadersInit => {

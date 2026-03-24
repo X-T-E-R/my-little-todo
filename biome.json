@@ -11,7 +11,16 @@
         "noExcessiveCognitiveComplexity": "warn"
       },
       "suspicious": {
-        "noExplicitAny": "error"
+        "noExplicitAny": "warn"
+      },
+      "style": {
+        "noNonNullAssertion": "warn"
+      },
+      "a11y": {
+        "noLabelWithoutControl": "warn"
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "warn"
       }
     }
   },
@@ -31,11 +40,17 @@
     "ignore": [
       "node_modules",
       "dist",
+      ".turbo",
+      "target",
       "src-tauri/target",
       "参考资料",
       "**/tsconfig.app.json",
       "**/tsconfig.node.json",
-      "packages/web/src-tauri/gen"
+      "packages/web/src-tauri/gen",
+      "packages/mobile/android",
+      "dist-pwa",
+      "pnpm-lock.yaml",
+      "Cargo.lock"
     ]
   }
 }

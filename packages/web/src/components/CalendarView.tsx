@@ -150,9 +150,7 @@ export function CalendarView({
     setSelectedDate(now);
   };
 
-  const selectedDay = selectedDate
-    ? days.find((d) => isSameDay(d.date, selectedDate))
-    : null;
+  const selectedDay = selectedDate ? days.find((d) => isSameDay(d.date, selectedDate)) : null;
 
   return (
     <div>
@@ -167,7 +165,10 @@ export function CalendarView({
           >
             <ChevronLeft size={16} />
           </button>
-          <h2 className="text-sm font-bold min-w-[100px] text-center" style={{ color: 'var(--color-text)' }}>
+          <h2
+            className="text-sm font-bold min-w-[100px] text-center"
+            style={{ color: 'var(--color-text)' }}
+          >
             {t('{{year}}Y {{month}}M', { year: viewYear, month: viewMonth + 1 })}
           </h2>
           <button
@@ -206,9 +207,13 @@ export function CalendarView({
       </div>
 
       {/* Calendar grid */}
-      <div className="grid grid-cols-7 gap-px rounded-xl overflow-hidden" style={{ background: 'var(--color-border)' }}>
+      <div
+        className="grid grid-cols-7 gap-px rounded-xl overflow-hidden"
+        style={{ background: 'var(--color-border)' }}
+      >
         {days.map((day) => {
-          const hasItems = day.ddlTasks.length > 0 || day.plannedTasks.length > 0 || day.scheduleBlocks.length > 0;
+          const hasItems =
+            day.ddlTasks.length > 0 || day.plannedTasks.length > 0 || day.scheduleBlocks.length > 0;
           const isSelected = selectedDate && isSameDay(day.date, selectedDate);
           const hasOverdue = day.ddlTasks.some((t) => t.ddl && isOverdue(t.ddl));
 
@@ -271,95 +276,106 @@ export function CalendarView({
 
       {/* Selected date detail */}
       <AnimatePresence>
-        {selectedDay && (selectedDay.ddlTasks.length > 0 || selectedDay.plannedTasks.length > 0 || selectedDay.scheduleBlocks.length > 0) && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 10 }}
-            className="mt-4 rounded-xl p-4"
-            style={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-            }}
-          >
-            <p className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text)' }}>
-              {t('{{month}}M {{day}}D', { month: selectedDay.date.getMonth() + 1, day: selectedDay.date.getDate() })}
-            </p>
+        {selectedDay &&
+          (selectedDay.ddlTasks.length > 0 ||
+            selectedDay.plannedTasks.length > 0 ||
+            selectedDay.scheduleBlocks.length > 0) && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              className="mt-4 rounded-xl p-4"
+              style={{
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+              }}
+            >
+              <p className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text)' }}>
+                {t('{{month}}M {{day}}D', {
+                  month: selectedDay.date.getMonth() + 1,
+                  day: selectedDay.date.getDate(),
+                })}
+              </p>
 
-            {selectedDay.scheduleBlocks.length > 0 && (
-              <div className="mb-3 space-y-1">
-                {selectedDay.scheduleBlocks.map((block) => (
-                  <div
-                    key={block.id}
-                    className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px]"
-                    style={{
-                      background: `${block.color}20`,
-                      borderLeft: `3px solid ${block.color}`,
-                    }}
-                  >
-                    <span className="font-medium" style={{ color: block.color }}>
-                      {block.startTime}-{block.endTime}
-                    </span>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>{block.name}</span>
-                    {block.location && (
-                      <span style={{ color: 'var(--color-text-tertiary)' }}>@ {block.location}</span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {selectedDay.ddlTasks.length > 0 && (
-              <div className="space-y-1 mb-2">
-                <p className="text-[10px] font-medium" style={{ color: 'var(--color-warning)' }}>
-                  {t('Due')}
-                </p>
-                {selectedDay.ddlTasks.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => onSelectTask(t.id)}
-                    className="w-full text-left flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-[var(--color-bg)]"
-                  >
+              {selectedDay.scheduleBlocks.length > 0 && (
+                <div className="mb-3 space-y-1">
+                  {selectedDay.scheduleBlocks.map((block) => (
                     <div
-                      className="w-2 h-2 rounded-full shrink-0"
+                      key={block.id}
+                      className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px]"
                       style={{
-                        background: t.ddl && isOverdue(t.ddl) ? 'var(--color-danger)' : 'var(--color-warning)',
+                        background: `${block.color}20`,
+                        borderLeft: `3px solid ${block.color}`,
                       }}
-                    />
-                    <span className="text-[12px] truncate" style={{ color: 'var(--color-text)' }}>
-                      {t.title}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
+                    >
+                      <span className="font-medium" style={{ color: block.color }}>
+                        {block.startTime}-{block.endTime}
+                      </span>
+                      <span style={{ color: 'var(--color-text-secondary)' }}>{block.name}</span>
+                      {block.location && (
+                        <span style={{ color: 'var(--color-text-tertiary)' }}>
+                          @ {block.location}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
 
-            {selectedDay.plannedTasks.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-[10px] font-medium" style={{ color: 'var(--color-accent)' }}>
-                  {t('Planned')}
-                </p>
-                {selectedDay.plannedTasks.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => onSelectTask(t.id)}
-                    className="w-full text-left flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-[var(--color-bg)]"
-                  >
-                    <div
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{ background: 'var(--color-accent)' }}
-                    />
-                    <span className="text-[12px] truncate" style={{ color: 'var(--color-text)' }}>
-                      {t.title}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </motion.div>
-        )}
+              {selectedDay.ddlTasks.length > 0 && (
+                <div className="space-y-1 mb-2">
+                  <p className="text-[10px] font-medium" style={{ color: 'var(--color-warning)' }}>
+                    {t('Due')}
+                  </p>
+                  {selectedDay.ddlTasks.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => onSelectTask(t.id)}
+                      className="w-full text-left flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-[var(--color-bg)]"
+                    >
+                      <div
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{
+                          background:
+                            t.ddl && isOverdue(t.ddl)
+                              ? 'var(--color-danger)'
+                              : 'var(--color-warning)',
+                        }}
+                      />
+                      <span className="text-[12px] truncate" style={{ color: 'var(--color-text)' }}>
+                        {t.title}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {selectedDay.plannedTasks.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[10px] font-medium" style={{ color: 'var(--color-accent)' }}>
+                    {t('Planned')}
+                  </p>
+                  {selectedDay.plannedTasks.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => onSelectTask(t.id)}
+                      className="w-full text-left flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-[var(--color-bg)]"
+                    >
+                      <div
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ background: 'var(--color-accent)' }}
+                      />
+                      <span className="text-[12px] truncate" style={{ color: 'var(--color-text)' }}>
+                        {t.title}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
       </AnimatePresence>
     </div>
   );

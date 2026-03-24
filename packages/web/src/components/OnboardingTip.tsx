@@ -22,7 +22,9 @@ export function OnboardingTip({ tipId, children, position = 'top' }: Props) {
     getSetting(settingKey).then((val) => {
       if (mounted && val !== 'dismissed') setVisible(true);
     });
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [settingKey]);
 
   const dismiss = useCallback(() => {

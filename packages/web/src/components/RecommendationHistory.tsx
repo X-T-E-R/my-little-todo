@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, History, RefreshCw, X as XIcon, XCircle } from 'lucide-react';
+import { Check, History, RefreshCw, XCircle, X as XIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -118,25 +118,45 @@ export function RecommendationHistory() {
                   </p>
                   <div className="grid grid-cols-2 gap-3 text-center">
                     <div>
-                      <p className="text-[10px] font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
+                      <p
+                        className="text-[10px] font-medium"
+                        style={{ color: 'var(--color-text-tertiary)' }}
+                      >
                         {t('Today')}
                       </p>
-                      <p className="text-lg font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>
+                      <p
+                        className="text-lg font-bold tabular-nums"
+                        style={{ color: 'var(--color-text)' }}
+                      >
                         {todayStats.total}
                       </p>
                       <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                        {t('Accepted {{accepted}} · Rejected {{rejected}} · Swapped {{swapped}}', { accepted: todayStats.accepted, rejected: todayStats.rejected, swapped: todayStats.swapped })}
+                        {t('Accepted {{accepted}} · Rejected {{rejected}} · Swapped {{swapped}}', {
+                          accepted: todayStats.accepted,
+                          rejected: todayStats.rejected,
+                          swapped: todayStats.swapped,
+                        })}
                       </p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
+                      <p
+                        className="text-[10px] font-medium"
+                        style={{ color: 'var(--color-text-tertiary)' }}
+                      >
                         {t('This week')}
                       </p>
-                      <p className="text-lg font-bold tabular-nums" style={{ color: 'var(--color-text)' }}>
+                      <p
+                        className="text-lg font-bold tabular-nums"
+                        style={{ color: 'var(--color-text)' }}
+                      >
                         {weekStats.total}
                       </p>
                       <p className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                        {t('Accepted {{accepted}} · Rejected {{rejected}} · Swapped {{swapped}}', { accepted: weekStats.accepted, rejected: weekStats.rejected, swapped: weekStats.swapped })}
+                        {t('Accepted {{accepted}} · Rejected {{rejected}} · Swapped {{swapped}}', {
+                          accepted: weekStats.accepted,
+                          rejected: weekStats.rejected,
+                          swapped: weekStats.swapped,
+                        })}
                       </p>
                     </div>
                   </div>
@@ -154,7 +174,10 @@ export function RecommendationHistory() {
                           }}
                         />
                       </div>
-                      <span className="text-[10px] font-semibold tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span
+                        className="text-[10px] font-semibold tabular-nums"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                      >
                         {t('{{rate}}% acceptance rate', { rate: acceptRate })}
                       </span>
                     </div>
@@ -167,7 +190,10 @@ export function RecommendationHistory() {
                     {t('Records')}
                   </p>
                   {recentEvents.length === 0 ? (
-                    <p className="text-xs text-center py-6" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <p
+                      className="text-xs text-center py-6"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
                       {t('No recommendation records yet')}
                     </p>
                   ) : (
@@ -186,7 +212,10 @@ export function RecommendationHistory() {
                           </span>
                           <div className="mt-0.5 shrink-0">{actionIcon(event.action)}</div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-[12px] truncate" style={{ color: 'var(--color-text)' }}>
+                            <p
+                              className="text-[12px] truncate"
+                              style={{ color: 'var(--color-text)' }}
+                            >
                               <span
                                 className="font-medium"
                                 style={{
@@ -199,12 +228,14 @@ export function RecommendationHistory() {
                                 }}
                               >
                                 {actionLabel(event.action, t)}
-                              </span>
-                              {' '}
+                              </span>{' '}
                               「{event.taskTitle}」
                             </p>
                             {event.rejectionReason && (
-                              <p className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                              <p
+                                className="text-[10px] mt-0.5"
+                                style={{ color: 'var(--color-text-tertiary)' }}
+                              >
                                 {t('Reason: {{reason}}', { reason: event.rejectionReason })}
                               </p>
                             )}

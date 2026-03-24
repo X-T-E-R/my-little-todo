@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { StreamEntry } from '../models/stream.js';
 import type { Task } from '../models/task.js';
 import { serializeStreamFile, serializeTaskFile } from './serializer.js';
@@ -83,9 +83,7 @@ describe('serializeStreamFile', () => {
   });
 
   it('appends task reference', () => {
-    const entries = [
-      makeEntry({ content: '完成了', extractedTaskId: 't-20260320-100000' }),
-    ];
+    const entries = [makeEntry({ content: '完成了', extractedTaskId: 't-20260320-100000' })];
     const result = serializeStreamFile(entries, dateKey);
     expect(result).toContain('→ [t-20260320-100000]');
   });

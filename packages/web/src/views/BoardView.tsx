@@ -314,7 +314,9 @@ function SubmitDialog({
             className="text-xs mb-3"
             style={{ color: isOverdue(task.ddl) ? 'var(--color-danger)' : 'var(--color-success)' }}
           >
-            {isOverdue(task.ddl) ? t('Overdue — but finishing is still great') : t('Completed on time!')}
+            {isOverdue(task.ddl)
+              ? t('Overdue — but finishing is still great')
+              : t('Completed on time!')}
           </p>
         )}
 
@@ -389,9 +391,19 @@ function groupByTimeHorizon(tasks: Task[], now: Date): TaskGroup[] {
   if (today.length > 0)
     groups.push({ key: 'today', label: 'Due today', tasks: today, color: 'var(--color-warning)' });
   if (thisWeek.length > 0)
-    groups.push({ key: 'week', label: 'Due this week', tasks: thisWeek, color: 'var(--color-accent)' });
+    groups.push({
+      key: 'week',
+      label: 'Due this week',
+      tasks: thisWeek,
+      color: 'var(--color-accent)',
+    });
   if (later.length > 0)
-    groups.push({ key: 'later', label: 'Later', tasks: later, color: 'var(--color-text-tertiary)' });
+    groups.push({
+      key: 'later',
+      label: 'Later',
+      tasks: later,
+      color: 'var(--color-text-tertiary)',
+    });
   return groups;
 }
 
@@ -589,18 +601,28 @@ function TaskCard({
             />
           </div>
           {urgentSubtasks.length > 0 && (
-            <div className="mt-2 flex items-center gap-1.5 text-[11px]" style={{
-              color: overdueSubtasks.length > 0 ? 'var(--color-danger)' : 'var(--color-warning)',
-            }}>
+            <div
+              className="mt-2 flex items-center gap-1.5 text-[11px]"
+              style={{
+                color: overdueSubtasks.length > 0 ? 'var(--color-danger)' : 'var(--color-warning)',
+              }}
+            >
               <AlertCircle size={11} />
               <span>
                 {urgentSubtasks.length === 1
-                  ? (overdueSubtasks.length > 0
-                    ? t('Subtask "{{title}}" is overdue', { title: urgentSubtasks[0]?.title.slice(0, 15) })
-                    : t('Subtask "{{title}}" is due soon', { title: urgentSubtasks[0]?.title.slice(0, 15) }))
-                  : (overdueSubtasks.length > 0
-                    ? t('{{count}} subtasks ({{overdueCount}} overdue)', { count: urgentSubtasks.length, overdueCount: overdueSubtasks.length })
-                    : t('{{count}} subtasks due soon', { count: urgentSubtasks.length }))}
+                  ? overdueSubtasks.length > 0
+                    ? t('Subtask "{{title}}" is overdue', {
+                        title: urgentSubtasks[0]?.title.slice(0, 15),
+                      })
+                    : t('Subtask "{{title}}" is due soon', {
+                        title: urgentSubtasks[0]?.title.slice(0, 15),
+                      })
+                  : overdueSubtasks.length > 0
+                    ? t('{{count}} subtasks ({{overdueCount}} overdue)', {
+                        count: urgentSubtasks.length,
+                        overdueCount: overdueSubtasks.length,
+                      })
+                    : t('{{count}} subtasks due soon', { count: urgentSubtasks.length })}
               </span>
             </div>
           )}
@@ -798,7 +820,8 @@ export function BoardView() {
                 title={t('Calendar view')}
                 style={{
                   background: viewMode === 'calendar' ? 'var(--color-accent-soft)' : 'transparent',
-                  color: viewMode === 'calendar' ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+                  color:
+                    viewMode === 'calendar' ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
                 }}
               >
                 <CalendarDays size={14} />
@@ -818,300 +841,321 @@ export function BoardView() {
 
         {/* DDL tasks grouped by urgency */}
         {viewMode === 'list' && (
-        <>
-        {totalActive === 0 && (
-          <div
-            className="rounded-2xl border-dashed py-12 text-center"
-            style={{ border: '1px dashed var(--color-border)' }}
-          >
-            <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
-              {t('No tasks yet')}
-            </p>
-            <p className="mt-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-              {t('Write something in the stream, or click + to create directly')}
-            </p>
-          </div>
-        )}
-
-        {groups.map((group) => (
-          <section key={group.key}>
-            <div className="mb-4 flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full" style={{ background: group.color }} />
-              <h2
-                className="text-sm font-bold tracking-wide"
-                style={{ color: 'var(--color-text)' }}
-              >
-                {t(group.label)}
-              </h2>
-              <span className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
-                {group.tasks.length}
-              </span>
+          <>
+            {totalActive === 0 && (
               <div
-                className="h-px flex-1"
-                style={{
-                  background: 'linear-gradient(to right, var(--color-border), transparent)',
-                }}
-              />
-            </div>
-            <div className="flex flex-col gap-4">
-              <AnimatePresence>
-                {group.tasks.map((item, index) => (
-                  <div key={item.id}>
-                    <TaskCard
-                      task={item}
-                      index={index}
-                      now={now}
-                      onComplete={setSubmittingTask}
-                      onPostpone={setPostponingTask}
-                      onClick={handleClickTask}
-                      onContextMenu={handleContextMenu}
-                    />
-                    {subtaskInputId === item.id && (
-                      <BoardInlineSubtaskInput
-                        onAdd={(title) => handleAddSubtaskInline(item.id, title)}
-                        onCancel={() => setSubtaskInputId(null)}
-                      />
-                    )}
-                    {ddlInputId === item.id && (
-                      <BoardInlineDdlInput
-                        onSet={(ddl) => handleSetDdlInline(item.id, ddl)}
-                        onCancel={() => setDdlInputId(null)}
-                      />
-                    )}
-                  </div>
-                ))}
-              </AnimatePresence>
-            </div>
-          </section>
-        ))}
-
-        {/* No-DDL tasks (collapsible) */}
-        {noDdlTasks.length > 0 && (
-          <section>
-            <button
-              type="button"
-              onClick={() => setShowNoDdl(!showNoDdl)}
-              className="mb-4 flex w-full items-center gap-2"
-            >
-              {showNoDdl ? (
-                <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-              ) : (
-                <ChevronRight size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-              )}
-              <h2
-                className="text-sm font-bold tracking-wide"
-                style={{ color: 'var(--color-text)' }}
+                className="rounded-2xl border-dashed py-12 text-center"
+                style={{ border: '1px dashed var(--color-border)' }}
               >
-                {t('To-do')}
-              </h2>
-              <span className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
-                {noDdlTasks.length}
-              </span>
-              <div
-                className="h-px flex-1"
-                style={{
-                  background: 'linear-gradient(to right, var(--color-border), transparent)',
-                }}
-              />
-            </button>
-            <AnimatePresence>
-              {showNoDdl && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="flex flex-col gap-3 overflow-hidden"
+                <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('No tasks yet')}
+                </p>
+                <p className="mt-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('Write something in the stream, or click + to create directly')}
+                </p>
+              </div>
+            )}
+
+            {groups.map((group) => (
+              <section key={group.key}>
+                <div className="mb-4 flex items-center gap-2">
+                  <div className="h-2 w-2 rounded-full" style={{ background: group.color }} />
+                  <h2
+                    className="text-sm font-bold tracking-wide"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    {t(group.label)}
+                  </h2>
+                  <span
+                    className="text-xs font-medium"
+                    style={{ color: 'var(--color-text-tertiary)' }}
+                  >
+                    {group.tasks.length}
+                  </span>
+                  <div
+                    className="h-px flex-1"
+                    style={{
+                      background: 'linear-gradient(to right, var(--color-border), transparent)',
+                    }}
+                  />
+                </div>
+                <div className="flex flex-col gap-4">
+                  <AnimatePresence>
+                    {group.tasks.map((item, index) => (
+                      <div key={item.id}>
+                        <TaskCard
+                          task={item}
+                          index={index}
+                          now={now}
+                          onComplete={setSubmittingTask}
+                          onPostpone={setPostponingTask}
+                          onClick={handleClickTask}
+                          onContextMenu={handleContextMenu}
+                        />
+                        {subtaskInputId === item.id && (
+                          <BoardInlineSubtaskInput
+                            onAdd={(title) => handleAddSubtaskInline(item.id, title)}
+                            onCancel={() => setSubtaskInputId(null)}
+                          />
+                        )}
+                        {ddlInputId === item.id && (
+                          <BoardInlineDdlInput
+                            onSet={(ddl) => handleSetDdlInline(item.id, ddl)}
+                            onCancel={() => setDdlInputId(null)}
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              </section>
+            ))}
+
+            {/* No-DDL tasks (collapsible) */}
+            {noDdlTasks.length > 0 && (
+              <section>
+                <button
+                  type="button"
+                  onClick={() => setShowNoDdl(!showNoDdl)}
+                  className="mb-4 flex w-full items-center gap-2"
                 >
-                  {noDdlTasks.map((task, i) => (
-                    <div key={task.id}>
-                      <motion.div
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.04 }}
-                        className="group rounded-xl px-4 py-3 cursor-pointer transition-colors hover:shadow-sm"
-                        style={{
-                          background: 'var(--color-surface)',
-                          border: '1px solid var(--color-border)',
-                        }}
-                        onClick={() => handleClickTask(task)}
-                        onContextMenu={(e) => handleContextMenu(e, task)}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="flex-1 min-w-0">
-                            <p
-                              className="text-sm font-medium truncate"
-                              style={{ color: 'var(--color-text)' }}
-                            >
-                              {task.title}
-                            </p>
-                            <div className="mt-1 flex items-center gap-2">
-                              <RolePill
-                                roleId={task.roleId}
-                                onChangeRole={(newRoleId) => {
-                                  useTaskStore.getState().updateTask({ ...task, roleId: newRoleId });
-                                }}
+                  {showNoDdl ? (
+                    <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                  ) : (
+                    <ChevronRight size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                  )}
+                  <h2
+                    className="text-sm font-bold tracking-wide"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    {t('To-do')}
+                  </h2>
+                  <span
+                    className="text-xs font-medium"
+                    style={{ color: 'var(--color-text-tertiary)' }}
+                  >
+                    {noDdlTasks.length}
+                  </span>
+                  <div
+                    className="h-px flex-1"
+                    style={{
+                      background: 'linear-gradient(to right, var(--color-border), transparent)',
+                    }}
+                  />
+                </button>
+                <AnimatePresence>
+                  {showNoDdl && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex flex-col gap-3 overflow-hidden"
+                    >
+                      {noDdlTasks.map((task, i) => (
+                        <div key={task.id}>
+                          <motion.div
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: i * 0.04 }}
+                            className="group rounded-xl px-4 py-3 cursor-pointer transition-colors hover:shadow-sm"
+                            style={{
+                              background: 'var(--color-surface)',
+                              border: '1px solid var(--color-border)',
+                            }}
+                            onClick={() => handleClickTask(task)}
+                            onContextMenu={(e) => handleContextMenu(e, task)}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="flex-1 min-w-0">
+                                <p
+                                  className="text-sm font-medium truncate"
+                                  style={{ color: 'var(--color-text)' }}
+                                >
+                                  {task.title}
+                                </p>
+                                <div className="mt-1 flex items-center gap-2">
+                                  <RolePill
+                                    roleId={task.roleId}
+                                    onChangeRole={(newRoleId) => {
+                                      useTaskStore
+                                        .getState()
+                                        .updateTask({ ...task, roleId: newRoleId });
+                                    }}
+                                  />
+                                  {(task.subtaskIds ?? []).length > 0 && (
+                                    <span
+                                      className="text-[10px]"
+                                      style={{ color: 'var(--color-text-tertiary)' }}
+                                    >
+                                      {t('{{completed}}/{{total}} subtasks', {
+                                        completed: (task.subtaskIds ?? []).filter(
+                                          (id) =>
+                                            tasks.find((t) => t.id === id)?.status === 'completed',
+                                        ).length,
+                                        total: (task.subtaskIds ?? []).length,
+                                      })}
+                                    </span>
+                                  )}
+                                  {(() => {
+                                    const subs = (task.subtaskIds ?? [])
+                                      .map((id) => tasks.find((t) => t.id === id))
+                                      .filter(
+                                        (t): t is Task =>
+                                          !!t &&
+                                          !!t.ddl &&
+                                          t.status !== 'completed' &&
+                                          daysUntil(t.ddl, now) <= 3,
+                                      );
+                                    if (subs.length === 0) return null;
+                                    return (
+                                      <span
+                                        className="flex items-center gap-0.5 text-[10px]"
+                                        style={{ color: 'var(--color-warning)' }}
+                                      >
+                                        <AlertCircle size={9} />
+                                        {t('{{count}} subtasks due soon', { count: subs.length })}
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                              <ChevronRight
+                                size={16}
+                                style={{ color: 'var(--color-text-tertiary)' }}
                               />
-                              {(task.subtaskIds ?? []).length > 0 && (
-                                <span
-                                  className="text-[10px]"
+                            </div>
+
+                            <BoardSubtaskPreview task={task} />
+                          </motion.div>
+                          {subtaskInputId === task.id && (
+                            <BoardInlineSubtaskInput
+                              onAdd={(title) => handleAddSubtaskInline(task.id, title)}
+                              onCancel={() => setSubtaskInputId(null)}
+                            />
+                          )}
+                          {ddlInputId === task.id && (
+                            <BoardInlineDdlInput
+                              onSet={(ddl) => handleSetDdlInline(task.id, ddl)}
+                              onCancel={() => setDdlInputId(null)}
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </section>
+            )}
+
+            {/* Completed (collapsible) */}
+            {completed.length > 0 && (
+              <section>
+                <button
+                  type="button"
+                  onClick={() => setShowCompleted(!showCompleted)}
+                  className="mb-4 flex w-full items-center gap-2"
+                >
+                  {showCompleted ? (
+                    <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                  ) : (
+                    <ChevronRight size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                  )}
+                  <h2
+                    className="text-sm font-bold tracking-wide"
+                    style={{ color: 'var(--color-text-tertiary)' }}
+                  >
+                    {t('Recently completed')}
+                  </h2>
+                  <span
+                    className="text-xs font-medium"
+                    style={{ color: 'var(--color-text-tertiary)' }}
+                  >
+                    {completed.length}
+                  </span>
+                  <div
+                    className="h-px flex-1"
+                    style={{
+                      background: 'linear-gradient(to right, var(--color-border), transparent)',
+                    }}
+                  />
+                </button>
+                <AnimatePresence>
+                  {showCompleted && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex flex-col gap-2 overflow-hidden"
+                    >
+                      {completed.map((item, index) => (
+                        <motion.div
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          key={item.id}
+                          className="group flex items-center gap-4 rounded-xl px-4 py-3 cursor-pointer transition-colors"
+                          style={{
+                            background:
+                              'color-mix(in srgb, var(--color-success-soft) 50%, transparent)',
+                          }}
+                          onClick={() => handleClickTask(item)}
+                        >
+                          <div
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                            style={{
+                              background:
+                                'color-mix(in srgb, var(--color-success) 20%, transparent)',
+                              color: 'var(--color-success)',
+                            }}
+                          >
+                            <Check size={16} strokeWidth={3} />
+                          </div>
+                          <div className="flex-1">
+                            <p
+                              className="text-sm font-medium line-through"
+                              style={{
+                                color: 'var(--color-text)',
+                                textDecorationColor:
+                                  'color-mix(in srgb, var(--color-text-tertiary) 50%, transparent)',
+                              }}
+                            >
+                              {item.title}
+                            </p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              {item.completedAt && (
+                                <p
+                                  className="text-xs"
                                   style={{ color: 'var(--color-text-tertiary)' }}
                                 >
-                                  {t('{{completed}}/{{total}} subtasks', {
-                                    completed: (task.subtaskIds ?? []).filter(
-                                      (id) =>
-                                        tasks.find((t) => t.id === id)?.status === 'completed',
-                                    ).length,
-                                    total: (task.subtaskIds ?? []).length,
+                                  {t('{{month}}/{{day}}', {
+                                    month: item.completedAt.getMonth() + 1,
+                                    day: item.completedAt.getDate(),
                                   })}
-                                </span>
+                                </p>
                               )}
-                              {(() => {
-                                const subs = (task.subtaskIds ?? [])
-                                  .map((id) => tasks.find((t) => t.id === id))
-                                  .filter(
-                                    (t): t is Task =>
-                                      !!t &&
-                                      !!t.ddl &&
-                                      t.status !== 'completed' &&
-                                      daysUntil(t.ddl, now) <= 3,
-                                  );
-                                if (subs.length === 0) return null;
-                                return (
-                                  <span
-                                    className="flex items-center gap-0.5 text-[10px]"
-                                    style={{ color: 'var(--color-warning)' }}
-                                  >
-                                    <AlertCircle size={9} />
-                                    {t('{{count}} subtasks due soon', { count: subs.length })}
-                                  </span>
-                                );
-                              })()}
+                              {item.submissions.length > 0 && item.submissions[0]?.note && (
+                                <p
+                                  className="text-xs italic"
+                                  style={{ color: 'var(--color-text-tertiary)' }}
+                                >
+                                  「{item.submissions[0].note}」
+                                </p>
+                              )}
                             </div>
                           </div>
-                          <ChevronRight size={16} style={{ color: 'var(--color-text-tertiary)' }} />
-                        </div>
-
-                        <BoardSubtaskPreview task={task} />
-                      </motion.div>
-                      {subtaskInputId === task.id && (
-                        <BoardInlineSubtaskInput
-                          onAdd={(title) => handleAddSubtaskInline(task.id, title)}
-                          onCancel={() => setSubtaskInputId(null)}
-                        />
-                      )}
-                      {ddlInputId === task.id && (
-                        <BoardInlineDdlInput
-                          onSet={(ddl) => handleSetDdlInline(task.id, ddl)}
-                          onCancel={() => setDdlInputId(null)}
-                        />
-                      )}
-                    </div>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </section>
-        )}
-
-        {/* Completed (collapsible) */}
-        {completed.length > 0 && (
-          <section>
-            <button
-              type="button"
-              onClick={() => setShowCompleted(!showCompleted)}
-              className="mb-4 flex w-full items-center gap-2"
-            >
-              {showCompleted ? (
-                <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-              ) : (
-                <ChevronRight size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-              )}
-              <h2
-                className="text-sm font-bold tracking-wide"
-                style={{ color: 'var(--color-text-tertiary)' }}
-              >
-                {t('Recently completed')}
-              </h2>
-              <span className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
-                {completed.length}
-              </span>
-              <div
-                className="h-px flex-1"
-                style={{
-                  background: 'linear-gradient(to right, var(--color-border), transparent)',
-                }}
-              />
-            </button>
-            <AnimatePresence>
-              {showCompleted && (
-                <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  className="flex flex-col gap-2 overflow-hidden"
-                >
-                  {completed.map((item, index) => (
-                    <motion.div
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: index * 0.05 }}
-                      key={item.id}
-                      className="group flex items-center gap-4 rounded-xl px-4 py-3 cursor-pointer transition-colors"
-                      style={{
-                        background:
-                          'color-mix(in srgb, var(--color-success-soft) 50%, transparent)',
-                      }}
-                      onClick={() => handleClickTask(item)}
-                    >
-                      <div
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-                        style={{
-                          background: 'color-mix(in srgb, var(--color-success) 20%, transparent)',
-                          color: 'var(--color-success)',
-                        }}
-                      >
-                        <Check size={16} strokeWidth={3} />
-                      </div>
-                      <div className="flex-1">
-                        <p
-                          className="text-sm font-medium line-through"
-                          style={{
-                            color: 'var(--color-text)',
-                            textDecorationColor:
-                              'color-mix(in srgb, var(--color-text-tertiary) 50%, transparent)',
-                          }}
-                        >
-                          {item.title}
-                        </p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {item.completedAt && (
-                            <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                              {t('{{month}}/{{day}}', { month: item.completedAt.getMonth() + 1, day: item.completedAt.getDate() })}
-                            </p>
-                          )}
-                          {item.submissions.length > 0 && item.submissions[0]?.note && (
-                            <p
-                              className="text-xs italic"
-                              style={{ color: 'var(--color-text-tertiary)' }}
-                            >
-                              「{item.submissions[0].note}」
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <ChevronRight
-                        size={16}
-                        className="opacity-0 transition-opacity group-hover:opacity-100"
-                        style={{ color: 'var(--color-text-tertiary)' }}
-                      />
+                          <ChevronRight
+                            size={16}
+                            className="opacity-0 transition-opacity group-hover:opacity-100"
+                            style={{ color: 'var(--color-text-tertiary)' }}
+                          />
+                        </motion.div>
+                      ))}
                     </motion.div>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </section>
-        )}
-        </>
+                  )}
+                </AnimatePresence>
+              </section>
+            )}
+          </>
         )}
       </div>
 

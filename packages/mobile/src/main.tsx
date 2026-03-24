@@ -5,10 +5,7 @@ import { App } from '@web/App';
 import { loadStorageConfig, setStorageAdapter } from '@web/storage/adapter';
 import { createApiAdapter } from '@web/storage/apiClient';
 
-export async function initStorage(
-  overrideUrl?: string,
-  overrideToken?: string,
-) {
+export async function initStorage(overrideUrl?: string, overrideToken?: string) {
   const config = loadStorageConfig();
   const url = overrideUrl ?? config.apiUrl;
   const token = overrideToken ?? config.apiToken;

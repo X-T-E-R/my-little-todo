@@ -94,7 +94,9 @@ export function insertMarkdown(textarea: HTMLTextAreaElement, opts: InsertOption
  * Insert a markdown table at the cursor position.
  */
 export function insertTable(textarea: HTMLTextAreaElement, rows = 3, cols = 3): void {
-  const header = `| ${Array(cols).fill(i18n.t('markdown.Header', { ns: 'common' })).join(' | ')} |`;
+  const header = `| ${Array(cols)
+    .fill(i18n.t('markdown.Header', { ns: 'common' }))
+    .join(' | ')} |`;
   const separator = `| ${Array(cols).fill('---').join(' | ')} |`;
   const dataRows = Array(rows - 1)
     .fill(`| ${Array(cols).fill('   ').join(' | ')} |`)

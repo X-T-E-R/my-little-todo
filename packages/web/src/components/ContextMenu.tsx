@@ -129,8 +129,12 @@ export function ContextMenu({
 
         <MenuItem icon={ListPlus} label={t('Add subtask')} onClick={onAddSubtask} />
         <MenuItem icon={Calendar} label={t('Set due date')} onClick={onSetDdl} />
-        {onPromote && <MenuItem icon={ArrowUpCircle} label={t('Promote to task')} onClick={onPromote} />}
-        {onDemote && <MenuItem icon={ArrowDownCircle} label={t('Demote to spark')} onClick={onDemote} />}
+        {onPromote && (
+          <MenuItem icon={ArrowUpCircle} label={t('Promote to task')} onClick={onPromote} />
+        )}
+        {onDemote && (
+          <MenuItem icon={ArrowDownCircle} label={t('Demote to spark')} onClick={onDemote} />
+        )}
 
         {/* Role submenu */}
         {roles.length > 0 && (

@@ -68,7 +68,9 @@ export const useRoleStore = create<RoleState>((set, get) => ({
   createRole: async (name, opts) => {
     const { roles, settings, currentRoleId } = get();
     if (roles.length >= settings.maxRoles) {
-      throw new Error(i18n.t('roles.Role limit reached ({{max}})', { ns: 'common', max: settings.maxRoles }));
+      throw new Error(
+        i18n.t('roles.Role limit reached ({{max}})', { ns: 'common', max: settings.maxRoles }),
+      );
     }
     const role: Role = {
       id: generateRoleId(),

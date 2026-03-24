@@ -1,4 +1,3 @@
-import type React from 'react';
 import { motion } from 'framer-motion';
 import {
   Activity,
@@ -25,17 +24,32 @@ import {
   Wifi,
   XCircle,
 } from 'lucide-react';
+import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import i18n from '../locales';
 import { ScheduleEditor } from '../components/ScheduleEditor';
+import i18n from '../locales';
+import { deleteSetting, getSetting, getSettingsApiBase, putSetting } from '../storage/settingsApi';
+import {
+  useRoleStore,
+  useScheduleStore,
+  useShortcutStore,
+  useStreamStore,
+  useTaskStore,
+} from '../stores';
 import { getAuthToken, useAuthStore } from '../stores/authStore';
-import { getSetting, putSetting, deleteSetting, getSettingsApiBase } from '../storage/settingsApi';
-import { useScheduleStore, useShortcutStore, useStreamStore, useTaskStore, useRoleStore } from '../stores';
 import { useToastStore } from '../stores/toastStore';
-import { useIsMobile } from '../utils/useIsMobile';
+import {
+  canChooseMode,
+  canControlServer,
+  canEditBackendUrl,
+  canExportToFolder,
+  getPlatform,
+  hasKeyboardShortcuts,
+  isTauriEnv,
+} from '../utils/platform';
 import { eventToKeyString } from '../utils/shortcuts';
-import { getPlatform, isTauriEnv, canChooseMode, canEditBackendUrl, canControlServer, canExportToFolder, hasKeyboardShortcuts } from '../utils/platform';
+import { useIsMobile } from '../utils/useIsMobile';
 
 type SettingsTab = 'general' | 'schedule' | 'shortcuts' | 'sync' | 'data' | 'about' | 'admin';
 
@@ -136,8 +150,12 @@ function GeneralTab() {
   const updateRoleSettings = useRoleStore((s) => s.updateSettings);
 
   useEffect(() => {
-    getSetting('ai-api-key').then((v) => { if (v) setApiKey(v); });
-    getSetting('ai-api-endpoint').then((v) => { if (v) setApiEndpoint(v); });
+    getSetting('ai-api-key').then((v) => {
+      if (v) setApiKey(v);
+    });
+    getSetting('ai-api-endpoint').then((v) => {
+      if (v) setApiEndpoint(v);
+    });
     getSetting('theme').then((v) => {
       const t = v || 'system';
       setTheme(t);
@@ -167,7 +185,9 @@ function GeneralTab() {
           <h3 className="text-sm font-bold text-[var(--color-text)]">{t('AI Configuration')}</h3>
         </div>
         <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {t('Enter an OpenAI-compatible API key for smart task extraction, recommendations, and more. The key is stored locally only.')}
+          {t(
+            'Enter an OpenAI-compatible API key for smart task extraction, recommendations, and more. The key is stored locally only.',
+          )}
         </p>
         <div className="flex gap-2 mb-2">
           <input
@@ -218,7 +238,11 @@ function GeneralTab() {
           <div>
             <p className="text-sm font-medium text-[var(--color-text)]">{t('Theme')}</p>
             <p className="text-xs text-[var(--color-text-tertiary)]">
-              {theme === 'system' ? t('Currently following system settings') : theme === 'dark' ? t('Dark mode') : t('Light mode')}
+              {theme === 'system'
+                ? t('Currently following system settings')
+                : theme === 'dark'
+                  ? t('Dark mode')
+                  : t('Light mode')}
             </p>
           </div>
           <div className="flex gap-1 rounded-xl bg-[var(--color-bg)] p-1">
@@ -254,7 +278,9 @@ function GeneralTab() {
         </div>
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">{t('Display language for the app interface')}</p>
+            <p className="text-sm font-medium text-[var(--color-text)]">
+              {t('Display language for the app interface')}
+            </p>
           </div>
           <select
             value={i18n.language}
@@ -283,22 +309,30 @@ function GeneralTab() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-[var(--color-text)]">{t('Max roles')}</p>
-              <p className="text-xs text-[var(--color-text-tertiary)]">{t('Maximum number of roles allowed')}</p>
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                {t('Maximum number of roles allowed')}
+              </p>
             </div>
             <input
               type="number"
               min={1}
               max={20}
               value={roleSettings.maxRoles}
-              onChange={(e) => updateRoleSettings({ maxRoles: Number.parseInt(e.target.value) || 8 })}
+              onChange={(e) =>
+                updateRoleSettings({ maxRoles: Number.parseInt(e.target.value) || 8 })
+              }
               className="w-16 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-center text-sm outline-none focus:border-[var(--color-accent)]"
             />
           </div>
 
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-[var(--color-text)]">{t('Show task count on roles')}</p>
-              <p className="text-xs text-[var(--color-text-tertiary)]">{t('Display active task count next to each role')}</p>
+              <p className="text-sm font-medium text-[var(--color-text)]">
+                {t('Show task count on roles')}
+              </p>
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                {t('Display active task count next to each role')}
+              </p>
             </div>
             <ToggleSwitch
               checked={roleSettings.showCounts}
@@ -308,8 +342,12 @@ function GeneralTab() {
 
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-[var(--color-text)]">{t('Show welcome card on role switch')}</p>
-              <p className="text-xs text-[var(--color-text-tertiary)]">{t('Show a brief overview when switching roles')}</p>
+              <p className="text-sm font-medium text-[var(--color-text)]">
+                {t('Show welcome card on role switch')}
+              </p>
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                {t('Show a brief overview when switching roles')}
+              </p>
             </div>
             <ToggleSwitch
               checked={roleSettings.showLandingCard}
@@ -330,7 +368,9 @@ function GeneralTab() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-[var(--color-text)]">{t('Startup Guide')}</p>
-            <p className="text-xs text-[var(--color-text-tertiary)]">{t('Review the onboarding guide and contextual tips')}</p>
+            <p className="text-xs text-[var(--color-text-tertiary)]">
+              {t('Review the onboarding guide and contextual tips')}
+            </p>
           </div>
           <button
             type="button"
@@ -440,7 +480,7 @@ function ShortcutsTab() {
   );
 }
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = __APP_VERSION__;
 
 function DataTab() {
   const { t } = useTranslation('settings');
@@ -476,7 +516,9 @@ function DataTab() {
         const apiBase = getSettingsApiBase();
         const res = await fetch(`${apiBase}/api/admin/storage`, { headers: h });
         if (res.ok) setStorageInfo(await res.json());
-      } catch { /* not admin or not available */ }
+      } catch {
+        /* not admin or not available */
+      }
 
       const savedPath = await getSetting('auto-export-path');
       if (savedPath) {
@@ -506,16 +548,25 @@ function DataTab() {
         const JSZip = (await import('jszip')).default;
         const zip = new JSZip();
 
-        zip.file('_meta.json', JSON.stringify({
-          version: APP_VERSION,
-          exported_at: new Date().toISOString(),
-          format,
-        }, null, 2));
+        zip.file(
+          '_meta.json',
+          JSON.stringify(
+            {
+              version: APP_VERSION,
+              exported_at: new Date().toISOString(),
+              format,
+            },
+            null,
+            2,
+          ),
+        );
 
         if (format === 'json') {
           zip.file('export.json', JSON.stringify(data, null, 2));
         } else {
-          const entries: { path: string; content: string }[] = Array.isArray(data) ? data : data.files || [];
+          const entries: { path: string; content: string }[] = Array.isArray(data)
+            ? data
+            : data.files || [];
           for (const entry of entries) {
             zip.file(entry.path, entry.content);
           }
@@ -529,7 +580,10 @@ function DataTab() {
         a.click();
         URL.revokeObjectURL(url);
       } else {
-        const withMeta = { ...data, _meta: { version: APP_VERSION, exported_at: new Date().toISOString() } };
+        const withMeta = {
+          ...data,
+          _meta: { version: APP_VERSION, exported_at: new Date().toISOString() },
+        };
         const blob = new Blob([JSON.stringify(withMeta, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -540,7 +594,12 @@ function DataTab() {
       }
       showToast({ type: 'success', message: t('Export completed successfully') });
     } catch (err) {
-      showToast({ type: 'error', message: t('Export failed: {{message}}', { message: err instanceof Error ? err.message : String(err) }) });
+      showToast({
+        type: 'error',
+        message: t('Export failed: {{message}}', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      });
     } finally {
       setExporting(null);
     }
@@ -570,7 +629,9 @@ function DataTab() {
           try {
             const meta = JSON.parse(metaText);
             console.log('[Import] version:', meta.version, 'exported_at:', meta.exported_at);
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
 
         const jsonFile = zip.file('export.json');
@@ -598,14 +659,23 @@ function DataTab() {
       if (!res.ok) {
         const text = await res.text();
         let msg: string;
-        try { msg = JSON.parse(text).error ?? text; } catch { msg = text || `HTTP ${res.status}`; }
+        try {
+          msg = JSON.parse(text).error ?? text;
+        } catch {
+          msg = text || `HTTP ${res.status}`;
+        }
         setImportIsError(true);
         setImportResult(t('Error: {{message}}', { message: msg }));
         return;
       }
       const result = await res.json();
       setImportIsError(false);
-      setImportResult(t('Import succeeded: {{fileCount}} files, {{settingsCount}} settings', { fileCount: result.files_imported, settingsCount: result.settings_imported ?? 0 }));
+      setImportResult(
+        t('Import succeeded: {{fileCount}} files, {{settingsCount}} settings', {
+          fileCount: result.files_imported,
+          settingsCount: result.settings_imported ?? 0,
+        }),
+      );
       await Promise.all([
         useStreamStore.getState().load(),
         useTaskStore.getState().load(),
@@ -615,7 +685,11 @@ function DataTab() {
       ]);
     } catch (err) {
       setImportIsError(true);
-      setImportResult(t('Import failed: {{message}}', { message: err instanceof Error ? err.message : String(err) }));
+      setImportResult(
+        t('Import failed: {{message}}', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -643,14 +717,24 @@ function DataTab() {
       const data = await res.json();
       if (res.ok) {
         setMigrateIsError(false);
-        setMigrateResult(t('Migration succeeded: {{fileCount}} files, {{settingsCount}} settings. {{message}}', { fileCount: data.files_migrated, settingsCount: data.settings_migrated, message: data.message }));
+        setMigrateResult(
+          t('Migration succeeded: {{fileCount}} files, {{settingsCount}} settings. {{message}}', {
+            fileCount: data.files_migrated,
+            settingsCount: data.settings_migrated,
+            message: data.message,
+          }),
+        );
       } else {
         setMigrateIsError(true);
         setMigrateResult(t('Error: {{message}}', { message: data.error }));
       }
     } catch (err) {
       setMigrateIsError(true);
-      setMigrateResult(t('Migration failed: {{message}}', { message: err instanceof Error ? err.message : String(err) }));
+      setMigrateResult(
+        t('Migration failed: {{message}}', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
     } finally {
       setMigrating(false);
     }
@@ -676,15 +760,22 @@ function DataTab() {
           <div className="space-y-2">
             {storageInfo.data_dir && (
               <div>
-                <p className="text-xs font-medium text-[var(--color-text-tertiary)] mb-1">{t('Data Directory')}</p>
+                <p className="text-xs font-medium text-[var(--color-text-tertiary)] mb-1">
+                  {t('Data Directory')}
+                </p>
                 <p className="rounded-lg bg-[var(--color-bg)] px-3 py-2 text-xs font-mono text-[var(--color-text-secondary)] break-all border border-[var(--color-border)]">
                   {storageInfo.data_dir}
                 </p>
               </div>
             )}
             <div className="flex gap-4 text-xs text-[var(--color-text-secondary)]">
-              <span>{t('Backend Type')}: <strong>{dbLabel[storageInfo.db_type ?? ''] ?? storageInfo.db_type}</strong></span>
-              <span>{t('Auth Mode')}: <strong>{storageInfo.auth_mode}</strong></span>
+              <span>
+                {t('Backend Type')}:{' '}
+                <strong>{dbLabel[storageInfo.db_type ?? ''] ?? storageInfo.db_type}</strong>
+              </span>
+              <span>
+                {t('Auth Mode')}: <strong>{storageInfo.auth_mode}</strong>
+              </span>
             </div>
           </div>
         </section>
@@ -699,7 +790,10 @@ function DataTab() {
           <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Export Data')}</h3>
         </div>
         <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {t('Export all data to a local file for backup and transfer. Exported files include version info (v{{version}}).', { version: APP_VERSION })}
+          {t(
+            'Export all data to a local file for backup and transfer. Exported files include version info (v{{version}}).',
+            { version: APP_VERSION },
+          )}
         </p>
         <div className="flex gap-2 flex-wrap">
           <button
@@ -715,7 +809,10 @@ function DataTab() {
               <button
                 type="button"
                 onClick={async () => {
-                  const dir = window.prompt(t('Select export folder'), 'C:\\Users\\me\\Documents\\my-little-todo-export');
+                  const dir = window.prompt(
+                    t('Select export folder'),
+                    'C:\\Users\\me\\Documents\\my-little-todo-export',
+                  );
                   if (!dir) return;
                   setExporting('markdown');
                   try {
@@ -730,17 +827,27 @@ function DataTab() {
                     if (res.ok) {
                       const data = await res.json();
                       setFullExportIsError(false);
-                      setFullExportResult(t('Exported {{count}} files to folder', { count: data.files_exported }));
+                      setFullExportResult(
+                        t('Exported {{count}} files to folder', { count: data.files_exported }),
+                      );
                     } else {
                       const text = await res.text();
                       let msg: string;
-                      try { msg = JSON.parse(text).error ?? text; } catch { msg = text || `HTTP ${res.status}`; }
+                      try {
+                        msg = JSON.parse(text).error ?? text;
+                      } catch {
+                        msg = text || `HTTP ${res.status}`;
+                      }
                       setFullExportIsError(true);
                       setFullExportResult(t('Export failed: {{message}}', { message: msg }));
                     }
                   } catch (err) {
                     setFullExportIsError(true);
-                    setFullExportResult(t('Export failed: {{message}}', { message: err instanceof Error ? err.message : String(err) }));
+                    setFullExportResult(
+                      t('Export failed: {{message}}', {
+                        message: err instanceof Error ? err.message : String(err),
+                      }),
+                    );
                   } finally {
                     setExporting(null);
                   }
@@ -774,11 +881,13 @@ function DataTab() {
           )}
         </div>
         {fullExportResult && (
-          <p className={`text-xs rounded-lg p-3 mt-3 ${
-            fullExportIsError
-              ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
-              : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
-          }`}>
+          <p
+            className={`text-xs rounded-lg p-3 mt-3 ${
+              fullExportIsError
+                ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
+            }`}
+          >
             {fullExportResult}
           </p>
         )}
@@ -793,7 +902,9 @@ function DataTab() {
           <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Import Data')}</h3>
         </div>
         <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {t('Restore data from previously exported files. Supports JSON files and Markdown ZIP packages.')}
+          {t(
+            'Restore data from previously exported files. Supports JSON files and Markdown ZIP packages.',
+          )}
         </p>
         <div className="flex items-center gap-3">
           <input
@@ -810,18 +921,24 @@ function DataTab() {
             className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] disabled:opacity-50"
           >
             {importing ? (
-              <><Loader2 size={14} className="animate-spin" /> {t('Importing...')}</>
+              <>
+                <Loader2 size={14} className="animate-spin" /> {t('Importing...')}
+              </>
             ) : (
-              <><Upload size={14} /> {t('Select File (JSON / ZIP)')}</>
+              <>
+                <Upload size={14} /> {t('Select File (JSON / ZIP)')}
+              </>
             )}
           </button>
         </div>
         {importResult && (
-          <p className={`mt-3 text-xs rounded-lg p-3 ${
-            importIsError
-              ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
-              : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
-          }`}>
+          <p
+            className={`mt-3 text-xs rounded-lg p-3 ${
+              importIsError
+                ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
+            }`}
+          >
             {importResult}
           </p>
         )}
@@ -833,12 +950,16 @@ function DataTab() {
       <section>
         <h3 className="text-sm font-bold text-[var(--color-text)] mb-1">{t('Data Migration')}</h3>
         <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {t('Copy data from the current storage backend to another. Migration does not auto-switch; you need to update the config file (config.toml / .env) and restart.')}
+          {t(
+            'Copy data from the current storage backend to another. Migration does not auto-switch; you need to update the config file (config.toml / .env) and restart.',
+          )}
         </p>
 
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">{t('Target Backend')}</label>
+            <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
+              {t('Target Backend')}
+            </label>
             <select
               value={migrateTarget}
               onChange={(e) => setMigrateTarget(e.target.value)}
@@ -893,11 +1014,13 @@ function DataTab() {
           )}
 
           {migrateResult && (
-            <p className={`text-xs rounded-lg p-3 ${
-              migrateIsError
-                ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
-                : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
-            }`}>
+            <p
+              className={`text-xs rounded-lg p-3 ${
+                migrateIsError
+                  ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                  : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
+              }`}
+            >
               {migrateResult}
             </p>
           )}
@@ -907,123 +1030,139 @@ function DataTab() {
       {isTauriDataTab && <hr style={{ borderColor: 'var(--color-border)' }} />}
 
       {/* Continuous export — Tauri only */}
-      {isTauriDataTab && <section>
-        <div className="flex items-center gap-2 mb-2">
-          <RefreshCw size={16} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Continuous Export')}</h3>
-        </div>
-        <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {t('When enabled, each file save automatically syncs a copy to the specified local directory. The database remains the primary data source; this directory is a read-only mirror.')}
-        </p>
-
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{t('Enable Continuous Export')}</span>
-            <button
-              type="button"
-              onClick={async () => {
-                if (autoExportEnabled) {
-                  setAutoExportSaving(true);
-                  await deleteSetting('auto-export-path');
-                  setAutoExportEnabled(false);
-                  setAutoExportPath('');
-                  setAutoExportSaving(false);
-                } else {
-                  setAutoExportEnabled(true);
-                }
-              }}
-              className="relative h-6 w-11 rounded-full transition-colors shrink-0"
-              style={{
-                background: autoExportEnabled ? 'var(--color-accent)' : 'var(--color-border)',
-              }}
-            >
-              <motion.div
-                className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"
-                animate={{ left: autoExportEnabled ? '22px' : '2px' }}
-                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-              />
-            </button>
+      {isTauriDataTab && (
+        <section>
+          <div className="flex items-center gap-2 mb-2">
+            <RefreshCw size={16} className="text-[var(--color-accent)]" />
+            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Continuous Export')}</h3>
           </div>
+          <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+            {t(
+              'When enabled, each file save automatically syncs a copy to the specified local directory. The database remains the primary data source; this directory is a read-only mirror.',
+            )}
+          </p>
 
-          {autoExportEnabled && (
-            <>
-              <div>
-                <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
-                  {t('Export Directory')}
-                </label>
-                <input
-                  type="text"
-                  value={autoExportPath}
-                  onChange={(e) => setAutoExportPath(e.target.value)}
-                  placeholder="C:\Users\me\Documents\my-little-todo-export"
-                  className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors font-mono"
-                />
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={!autoExportPath || autoExportSaving}
-                  onClick={async () => {
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+                {t('Enable Continuous Export')}
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (autoExportEnabled) {
                     setAutoExportSaving(true);
-                    await putSetting('auto-export-path', autoExportPath);
+                    await deleteSetting('auto-export-path');
+                    setAutoExportEnabled(false);
+                    setAutoExportPath('');
                     setAutoExportSaving(false);
-                  }}
-                  className="rounded-xl px-4 py-2 text-sm font-medium transition-all bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50"
-                >
-                  {autoExportSaving ? t('Saving...') : t('Save Path')}
-                </button>
+                  } else {
+                    setAutoExportEnabled(true);
+                  }
+                }}
+                className="relative h-6 w-11 rounded-full transition-colors shrink-0"
+                style={{
+                  background: autoExportEnabled ? 'var(--color-accent)' : 'var(--color-border)',
+                }}
+              >
+                <motion.div
+                  className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"
+                  animate={{ left: autoExportEnabled ? '22px' : '2px' }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                />
+              </button>
+            </div>
 
-                <button
-                  type="button"
-                  disabled={!autoExportPath || fullExporting}
-                  onClick={async () => {
-                    setFullExporting(true);
-                    setFullExportResult('');
-                    try {
-                      const token = getAuthToken();
-                      const h: HeadersInit = { 'Content-Type': 'application/json' };
-                      if (token) h.Authorization = `Bearer ${token}`;
-                      const res = await fetch(`${getSettingsApiBase()}/api/export/disk`, {
-                        method: 'POST',
-                        headers: h,
-                        body: JSON.stringify({ path: autoExportPath }),
-                      });
-                      const data = await res.json();
-                      if (res.ok) {
-                        setFullExportIsError(false);
-                        setFullExportResult(t('Full export complete: {{fileCount}} files', { fileCount: data.files_exported }));
-                      } else {
+            {autoExportEnabled && (
+              <>
+                <div>
+                  <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
+                    {t('Export Directory')}
+                  </label>
+                  <input
+                    type="text"
+                    value={autoExportPath}
+                    onChange={(e) => setAutoExportPath(e.target.value)}
+                    placeholder="C:\Users\me\Documents\my-little-todo-export"
+                    className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors font-mono"
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={!autoExportPath || autoExportSaving}
+                    onClick={async () => {
+                      setAutoExportSaving(true);
+                      await putSetting('auto-export-path', autoExportPath);
+                      setAutoExportSaving(false);
+                    }}
+                    className="rounded-xl px-4 py-2 text-sm font-medium transition-all bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                  >
+                    {autoExportSaving ? t('Saving...') : t('Save Path')}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!autoExportPath || fullExporting}
+                    onClick={async () => {
+                      setFullExporting(true);
+                      setFullExportResult('');
+                      try {
+                        const token = getAuthToken();
+                        const h: HeadersInit = { 'Content-Type': 'application/json' };
+                        if (token) h.Authorization = `Bearer ${token}`;
+                        const res = await fetch(`${getSettingsApiBase()}/api/export/disk`, {
+                          method: 'POST',
+                          headers: h,
+                          body: JSON.stringify({ path: autoExportPath }),
+                        });
+                        const data = await res.json();
+                        if (res.ok) {
+                          setFullExportIsError(false);
+                          setFullExportResult(
+                            t('Full export complete: {{fileCount}} files', {
+                              fileCount: data.files_exported,
+                            }),
+                          );
+                        } else {
+                          setFullExportIsError(true);
+                          setFullExportResult(t('Error: {{message}}', { message: data.error }));
+                        }
+                      } catch (err) {
                         setFullExportIsError(true);
-                        setFullExportResult(t('Error: {{message}}', { message: data.error }));
+                        setFullExportResult(
+                          t('Export failed: {{message}}', {
+                            message: err instanceof Error ? err.message : String(err),
+                          }),
+                        );
+                      } finally {
+                        setFullExporting(false);
                       }
-                    } catch (err) {
-                      setFullExportIsError(true);
-                      setFullExportResult(t('Export failed: {{message}}', { message: err instanceof Error ? err.message : String(err) }));
-                    } finally {
-                      setFullExporting(false);
-                    }
-                  }}
-                  className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] disabled:opacity-50"
-                >
-                  <HardDriveDownload size={14} />
-                  {fullExporting ? t('Exporting...') : t('Full Export Now')}
-                </button>
-              </div>
+                    }}
+                    className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] disabled:opacity-50"
+                  >
+                    <HardDriveDownload size={14} />
+                    {fullExporting ? t('Exporting...') : t('Full Export Now')}
+                  </button>
+                </div>
 
-              {fullExportResult && (
-                <p className={`text-xs rounded-lg p-3 ${
-                  fullExportIsError
-                    ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
-                    : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
-                }`}>
-                  {fullExportResult}
-                </p>
-              )}
-            </>
-          )}
-        </div>
-      </section>}
+                {fullExportResult && (
+                  <p
+                    className={`text-xs rounded-lg p-3 ${
+                      fullExportIsError
+                        ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                        : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
+                    }`}
+                  >
+                    {fullExportResult}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
@@ -1046,8 +1185,8 @@ function SyncTab() {
   const [restartMsg, setRestartMsg] = useState('');
   const [restartIsError, setRestartIsError] = useState(false);
 
-  const [useMode, setUseMode] = useState<'local' | 'cloud'>(() =>
-    (localStorage.getItem('mlt-use-mode') as 'local' | 'cloud') || 'local',
+  const [useMode, setUseMode] = useState<'local' | 'cloud'>(
+    () => (localStorage.getItem('mlt-use-mode') as 'local' | 'cloud') || 'local',
   );
   const [cloudUrl, setCloudUrl] = useState(() => localStorage.getItem('mlt-cloud-url') || '');
   const [modeSaved, setModeSaved] = useState(false);
@@ -1070,14 +1209,20 @@ function SyncTab() {
           setServerPort(cfg.port);
           setPendingHost(cfg.host);
           setPendingPort(cfg.port);
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       })();
     } else {
       (async () => {
         try {
-          const res = await fetch(`${getSettingsApiBase()}/health`, { signal: AbortSignal.timeout(3000) });
+          const res = await fetch(`${getSettingsApiBase()}/health`, {
+            signal: AbortSignal.timeout(3000),
+          });
           if (res.ok) setServerRunning(true);
-        } catch { /* not reachable */ }
+        } catch {
+          /* not reachable */
+        }
       })();
     }
   }, [platform]);
@@ -1090,7 +1235,11 @@ function SyncTab() {
       if (res.ok) {
         const data = await res.json();
         setTestStatus('success');
-        setTestMsg(t('Connection successful — {{details}}', { details: `${data.db ?? ''} ${data.auth ?? ''}` }));
+        setTestMsg(
+          t('Connection successful — {{details}}', {
+            details: `${data.db ?? ''} ${data.auth ?? ''}`,
+          }),
+        );
       } else {
         setTestStatus('error');
         setTestMsg(`HTTP ${res.status}`);
@@ -1107,7 +1256,11 @@ function SyncTab() {
     setRestartMsg('');
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      try { await invoke('stop_embedded_server'); } catch { /* might not be running */ }
+      try {
+        await invoke('stop_embedded_server');
+      } catch {
+        /* might not be running */
+      }
       await new Promise((r) => setTimeout(r, 300));
       const url = await invoke<string>('start_embedded_server', {
         port: pendingPort,
@@ -1120,7 +1273,11 @@ function SyncTab() {
       setRestartMsg(t('Server restarted at {{url}}', { url }));
     } catch (err) {
       setRestartIsError(true);
-      setRestartMsg(t('Restart failed: {{message}}', { message: err instanceof Error ? err.message : String(err) }));
+      setRestartMsg(
+        t('Restart failed: {{message}}', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
     } finally {
       setRestarting(false);
     }
@@ -1224,12 +1381,16 @@ function SyncTab() {
         <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
           {platform === 'web-hosted'
             ? t('Hosted by the server — the backend address is fixed to the current domain.')
-            : t('Data is read, written, and synced through the API server. The PC desktop version auto-starts an embedded server; the web version uses the current domain.')}
+            : t(
+                'Data is read, written, and synced through the API server. The PC desktop version auto-starts an embedded server; the web version uses the current domain.',
+              )}
         </p>
 
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
-            <div className={`h-2.5 w-2.5 rounded-full shrink-0 ${serverRunning ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+            <div
+              className={`h-2.5 w-2.5 rounded-full shrink-0 ${serverRunning ? 'bg-emerald-500' : 'bg-gray-400'}`}
+            />
             <span className="rounded-lg bg-[var(--color-bg)] px-3 py-2 text-xs font-mono text-[var(--color-text-secondary)] break-all border border-[var(--color-border)] flex-1">
               {getSettingsApiBase() || window.location.origin}
             </span>
@@ -1259,7 +1420,10 @@ function SyncTab() {
                     setTimeout(() => setModeSaved(false), 3000);
                   }}
                   className="rounded-xl border px-4 py-2 text-xs font-medium transition-colors"
-                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)',
+                  }}
                 >
                   {t('Save')}
                 </button>
@@ -1290,7 +1454,10 @@ function SyncTab() {
               <span
                 className="text-xs"
                 style={{
-                  color: testStatus === 'success' ? 'var(--color-success, #22c55e)' : 'var(--color-danger, #ef4444)',
+                  color:
+                    testStatus === 'success'
+                      ? 'var(--color-success, #22c55e)'
+                      : 'var(--color-danger, #ef4444)',
                 }}
               >
                 {testMsg}
@@ -1316,18 +1483,25 @@ function SyncTab() {
                 <div className="flex items-center gap-2">
                   <Wifi size={15} style={{ color: 'var(--color-text-secondary)' }} />
                   <div>
-                    <p className="text-sm font-medium text-[var(--color-text)]">{t('Allow LAN Access')}</p>
+                    <p className="text-sm font-medium text-[var(--color-text)]">
+                      {t('Allow LAN Access')}
+                    </p>
                     <p className="text-xs text-[var(--color-text-tertiary)]">
-                      {isLanSharing ? t('Other devices can connect via LAN') : t('Local access only')}
+                      {isLanSharing
+                        ? t('Other devices can connect via LAN')
+                        : t('Local access only')}
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setPendingHost(pendingHost === '0.0.0.0' ? '127.0.0.1' : '0.0.0.0')}
+                  onClick={() =>
+                    setPendingHost(pendingHost === '0.0.0.0' ? '127.0.0.1' : '0.0.0.0')
+                  }
                   className="relative h-6 w-11 rounded-full transition-colors shrink-0"
                   style={{
-                    background: pendingHost === '0.0.0.0' ? 'var(--color-accent)' : 'var(--color-border)',
+                    background:
+                      pendingHost === '0.0.0.0' ? 'var(--color-accent)' : 'var(--color-border)',
                   }}
                 >
                   <motion.div
@@ -1342,7 +1516,9 @@ function SyncTab() {
               <div>
                 <div className="flex items-center gap-2 mb-2">
                   <Globe size={15} style={{ color: 'var(--color-text-secondary)' }} />
-                  <p className="text-xs font-medium text-[var(--color-text-secondary)]">{t('Listen Address and Port')}</p>
+                  <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+                    {t('Listen Address and Port')}
+                  </p>
                 </div>
                 <div className="flex gap-2">
                   <input
@@ -1360,7 +1536,9 @@ function SyncTab() {
                   />
                 </div>
                 <p className="mt-1.5 text-[11px] text-[var(--color-text-tertiary)]">
-                  {t('127.0.0.1 = local only · 0.0.0.0 = all interfaces · or specify a network interface IP')}
+                  {t(
+                    '127.0.0.1 = local only · 0.0.0.0 = all interfaces · or specify a network interface IP',
+                  )}
                 </p>
               </div>
 
@@ -1377,11 +1555,13 @@ function SyncTab() {
               )}
 
               {restartMsg && (
-                <p className={`text-xs rounded-lg p-3 ${
-                  restartIsError
-                    ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
-                    : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
-                }`}>
+                <p
+                  className={`text-xs rounded-lg p-3 ${
+                    restartIsError
+                      ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                      : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
+                  }`}
+                >
                   {restartMsg}
                 </p>
               )}
@@ -1425,7 +1605,9 @@ function CloudBackupSection() {
           const data = await res.json();
           if (data.provider) setProvider(data.provider as '' | 's3' | 'webdav');
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     })();
   }, []);
 
@@ -1455,9 +1637,15 @@ function CloudBackupSection() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      setStatus(res.ok ? t('Configuration Saved') : t('Error: {{message}}', { message: data.error }));
+      setStatus(
+        res.ok ? t('Configuration Saved') : t('Error: {{message}}', { message: data.error }),
+      );
     } catch (err) {
-      setStatus(t('Save failed: {{message}}', { message: err instanceof Error ? err.message : String(err) }));
+      setStatus(
+        t('Save failed: {{message}}', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
     } finally {
       setSaving(false);
     }
@@ -1475,15 +1663,22 @@ function CloudBackupSection() {
         headers: h,
       });
       const data = await res.json();
-      setBackupStatus(res.ok ? t('Backup Complete') : t('Error: {{message}}', { message: data.error }));
+      setBackupStatus(
+        res.ok ? t('Backup Complete') : t('Error: {{message}}', { message: data.error }),
+      );
     } catch (err) {
-      setBackupStatus(t('Backup failed: {{message}}', { message: err instanceof Error ? err.message : String(err) }));
+      setBackupStatus(
+        t('Backup failed: {{message}}', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
     } finally {
       setBackupRunning(false);
     }
   };
 
-  const inputClass = 'w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors';
+  const inputClass =
+    'w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors';
   const labelClass = 'text-xs font-medium text-[var(--color-text-secondary)] mb-1 block';
 
   return (
@@ -1493,7 +1688,9 @@ function CloudBackupSection() {
         <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Cloud Backup')}</h3>
       </div>
       <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-        {t('Back up data to S3-compatible object storage or a WebDAV server. This feature is under construction; some providers may not be fully available yet.')}
+        {t(
+          'Back up data to S3-compatible object storage or a WebDAV server. This feature is under construction; some providers may not be fully available yet.',
+        )}
       </p>
 
       <div className="space-y-4">
@@ -1514,25 +1711,53 @@ function CloudBackupSection() {
           <div className="space-y-3">
             <div>
               <label className={labelClass}>Endpoint URL</label>
-              <input type="text" value={config.endpoint} onChange={(e) => setConfig({ ...config, endpoint: e.target.value })} placeholder="https://s3.amazonaws.com" className={inputClass} />
+              <input
+                type="text"
+                value={config.endpoint}
+                onChange={(e) => setConfig({ ...config, endpoint: e.target.value })}
+                placeholder="https://s3.amazonaws.com"
+                className={inputClass}
+              />
             </div>
             <div>
               <label className={labelClass}>Bucket</label>
-              <input type="text" value={config.bucket} onChange={(e) => setConfig({ ...config, bucket: e.target.value })} placeholder="my-todo-backup" className={inputClass} />
+              <input
+                type="text"
+                value={config.bucket}
+                onChange={(e) => setConfig({ ...config, bucket: e.target.value })}
+                placeholder="my-todo-backup"
+                className={inputClass}
+              />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className={labelClass}>Access Key</label>
-                <input type="password" value={config.access_key} onChange={(e) => setConfig({ ...config, access_key: e.target.value })} className={inputClass} />
+                <input
+                  type="password"
+                  value={config.access_key}
+                  onChange={(e) => setConfig({ ...config, access_key: e.target.value })}
+                  className={inputClass}
+                />
               </div>
               <div>
                 <label className={labelClass}>Secret Key</label>
-                <input type="password" value={config.secret_key} onChange={(e) => setConfig({ ...config, secret_key: e.target.value })} className={inputClass} />
+                <input
+                  type="password"
+                  value={config.secret_key}
+                  onChange={(e) => setConfig({ ...config, secret_key: e.target.value })}
+                  className={inputClass}
+                />
               </div>
             </div>
             <div>
               <label className={labelClass}>{t('Region (Optional)')}</label>
-              <input type="text" value={config.region} onChange={(e) => setConfig({ ...config, region: e.target.value })} placeholder="us-east-1" className={inputClass} />
+              <input
+                type="text"
+                value={config.region}
+                onChange={(e) => setConfig({ ...config, region: e.target.value })}
+                placeholder="us-east-1"
+                className={inputClass}
+              />
             </div>
           </div>
         )}
@@ -1541,16 +1766,32 @@ function CloudBackupSection() {
           <div className="space-y-3">
             <div>
               <label className={labelClass}>WebDAV URL</label>
-              <input type="url" value={config.endpoint} onChange={(e) => setConfig({ ...config, endpoint: e.target.value })} placeholder="https://dav.example.com/backup/" className={inputClass} />
+              <input
+                type="url"
+                value={config.endpoint}
+                onChange={(e) => setConfig({ ...config, endpoint: e.target.value })}
+                placeholder="https://dav.example.com/backup/"
+                className={inputClass}
+              />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className={labelClass}>{t('Username (Optional)')}</label>
-                <input type="text" value={config.username} onChange={(e) => setConfig({ ...config, username: e.target.value })} className={inputClass} />
+                <input
+                  type="text"
+                  value={config.username}
+                  onChange={(e) => setConfig({ ...config, username: e.target.value })}
+                  className={inputClass}
+                />
               </div>
               <div>
                 <label className={labelClass}>{t('Password (Optional)')}</label>
-                <input type="password" value={config.password} onChange={(e) => setConfig({ ...config, password: e.target.value })} className={inputClass} />
+                <input
+                  type="password"
+                  value={config.password}
+                  onChange={(e) => setConfig({ ...config, password: e.target.value })}
+                  className={inputClass}
+                />
               </div>
             </div>
           </div>
@@ -1578,7 +1819,9 @@ function CloudBackupSection() {
         )}
 
         {status && <p className="text-xs text-[var(--color-text-secondary)]">{status}</p>}
-        {backupStatus && <p className="text-xs text-[var(--color-text-secondary)]">{backupStatus}</p>}
+        {backupStatus && (
+          <p className="text-xs text-[var(--color-text-secondary)]">{backupStatus}</p>
+        )}
       </div>
     </section>
   );
@@ -1595,7 +1838,11 @@ interface AdminUserItem {
 
 function AdminTab() {
   const { t } = useTranslation('settings');
-  const [stats, setStats] = useState<{ total_users: number; db_type: string; auth_mode: string } | null>(null);
+  const [stats, setStats] = useState<{
+    total_users: number;
+    db_type: string;
+    auth_mode: string;
+  } | null>(null);
   const [users, setUsers] = useState<AdminUserItem[]>([]);
   const [resetId, setResetId] = useState<string | null>(null);
   const [newPw, setNewPw] = useState('');
@@ -1613,23 +1860,36 @@ function AdminTab() {
     try {
       const res = await fetch(`${getSettingsApiBase()}/api/admin/stats`, { headers: apiHeaders() });
       if (res.ok) setStats(await res.json());
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [apiHeaders]);
 
   const loadUsers = useCallback(async () => {
     try {
       const res = await fetch(`${getSettingsApiBase()}/api/admin/users`, { headers: apiHeaders() });
       if (res.ok) setUsers(await res.json());
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [apiHeaders]);
 
-  useEffect(() => { loadStats(); loadUsers(); }, [loadStats, loadUsers]);
+  useEffect(() => {
+    loadStats();
+    loadUsers();
+  }, [loadStats, loadUsers]);
 
   const handleDelete = async (id: string, username: string) => {
     if (!confirm(t('Confirm delete user {{username}}?', { username }))) return;
     try {
-      const res = await fetch(`${getSettingsApiBase()}/api/admin/users/${id}`, { method: 'DELETE', headers: apiHeaders() });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+      const res = await fetch(`${getSettingsApiBase()}/api/admin/users/${id}`, {
+        method: 'DELETE',
+        headers: apiHeaders(),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || `HTTP ${res.status}`);
+      }
       showToast({ type: 'success', message: t('User {{username}} deleted', { username }) });
       loadUsers();
       loadStats();
@@ -1646,7 +1906,10 @@ function AdminTab() {
         headers: apiHeaders(),
         body: JSON.stringify({ password: newPw }),
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || `HTTP ${res.status}`);
+      }
       showToast({ type: 'success', message: t('Password reset successfully') });
       setResetId(null);
       setNewPw('');
@@ -1666,16 +1929,25 @@ function AdminTab() {
         {stats && (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
-              { label: t('Total Users'), value: String(stats.total_users), icon: <Users size={16} /> },
+              {
+                label: t('Total Users'),
+                value: String(stats.total_users),
+                icon: <Users size={16} />,
+              },
               { label: t('Database Type'), value: stats.db_type, icon: <Activity size={16} /> },
               { label: t('Auth Mode'), value: stats.auth_mode, icon: <Key size={16} /> },
             ].map((card) => (
-              <div key={card.label} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+              <div
+                key={card.label}
+                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
+              >
                 <div className="mb-1.5 flex items-center gap-2 text-[var(--color-text-secondary)]">
                   {card.icon}
                   <span className="text-xs">{card.label}</span>
                 </div>
-                <p className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>{card.value}</p>
+                <p className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
+                  {card.value}
+                </p>
               </div>
             ))}
           </div>
@@ -1695,10 +1967,18 @@ function AdminTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">{t('Username')}</th>
-                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">{t('Role')}</th>
-                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">{t('Created At')}</th>
-                <th className="px-4 py-3 text-right font-medium text-[var(--color-text-secondary)]">{t('Actions')}</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">
+                  {t('Username')}
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">
+                  {t('Role')}
+                </th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">
+                  {t('Created At')}
+                </th>
+                <th className="px-4 py-3 text-right font-medium text-[var(--color-text-secondary)]">
+                  {t('Actions')}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -1706,11 +1986,13 @@ function AdminTab() {
                 <tr key={u.id} className="border-b border-[var(--color-border)] last:border-0">
                   <td className="px-4 py-3">{u.username}</td>
                   <td className="px-4 py-3">
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${
-                      u.is_admin
-                        ? 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]'
-                        : 'bg-[var(--color-border)] text-[var(--color-text-secondary)]'
-                    }`}>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs ${
+                        u.is_admin
+                          ? 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]'
+                          : 'bg-[var(--color-border)] text-[var(--color-text-secondary)]'
+                      }`}
+                    >
                       {u.is_admin ? t('Admin') : t('User')}
                     </span>
                   </td>
@@ -1726,20 +2008,41 @@ function AdminTab() {
                             placeholder={t('New Password')}
                             className="w-24 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none"
                           />
-                          <button type="button" onClick={() => handleReset(u.id)} className="rounded bg-[var(--color-accent)] px-2 py-1 text-xs text-white">
+                          <button
+                            type="button"
+                            onClick={() => handleReset(u.id)}
+                            className="rounded bg-[var(--color-accent)] px-2 py-1 text-xs text-white"
+                          >
                             {t('Confirm')}
                           </button>
-                          <button type="button" onClick={() => { setResetId(null); setNewPw(''); }} className="rounded px-2 py-1 text-xs text-[var(--color-text-secondary)]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setResetId(null);
+                              setNewPw('');
+                            }}
+                            className="rounded px-2 py-1 text-xs text-[var(--color-text-secondary)]"
+                          >
                             {t('Cancel')}
                           </button>
                         </div>
                       ) : (
                         <>
-                          <button type="button" onClick={() => setResetId(u.id)} className="rounded p-1 text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]" title={t('Reset Password')}>
+                          <button
+                            type="button"
+                            onClick={() => setResetId(u.id)}
+                            className="rounded p-1 text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]"
+                            title={t('Reset Password')}
+                          >
                             <Key size={14} />
                           </button>
                           {!u.is_admin && (
-                            <button type="button" onClick={() => handleDelete(u.id, u.username)} className="rounded p-1 text-[var(--color-text-secondary)] hover:text-red-400" title={t('Delete User')}>
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(u.id, u.username)}
+                              className="rounded p-1 text-[var(--color-text-secondary)] hover:text-red-400"
+                              title={t('Delete User')}
+                            >
                               <Trash2 size={14} />
                             </button>
                           )}
@@ -1767,7 +2070,9 @@ function AboutTab() {
   const [updateVersion, setUpdateVersion] = useState('');
   const [updateNotes, setUpdateNotes] = useState('');
   const [downloadProgress, setDownloadProgress] = useState(0);
-  const updateRef = useRef<Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>> | null>(null);
+  const updateRef = useRef<Awaited<
+    ReturnType<typeof import('@tauri-apps/plugin-updater').check>
+  > | null>(null);
 
   const handleCheckUpdate = useCallback(async () => {
     setUpdateStatus('checking');
@@ -1785,7 +2090,10 @@ function AboutTab() {
       }
     } catch (e: unknown) {
       setUpdateStatus('error');
-      showToast({ type: 'error', message: t('Update check failed: {{message}}', { message: String(e) }) });
+      showToast({
+        type: 'error',
+        message: t('Update check failed: {{message}}', { message: String(e) }),
+      });
     }
   }, [showToast, t]);
 
@@ -1810,7 +2118,10 @@ function AboutTab() {
       setUpdateStatus('ready');
     } catch (e: unknown) {
       setUpdateStatus('error');
-      showToast({ type: 'error', message: t('Update download failed: {{message}}', { message: String(e) }) });
+      showToast({
+        type: 'error',
+        message: t('Update download failed: {{message}}', { message: String(e) }),
+      });
     }
   }, [showToast, t]);
 
@@ -1822,14 +2133,21 @@ function AboutTab() {
   return (
     <div className="flex flex-col gap-4 text-sm text-[var(--color-text-secondary)]">
       <p>
-        My Little Todo <span className="text-[var(--color-text-tertiary)]">v0.1.0</span>
+        My Little Todo{' '}
+        <span className="text-[var(--color-text-tertiary)]">
+          v{APP_VERSION}
+          <span className="ml-1 text-[10px] opacity-60">({__GIT_HASH__})</span>
+        </span>
       </p>
       <p className="text-xs text-[var(--color-text-tertiary)]">
         {t('This is not a task manager — this is your external execution system.')}
       </p>
 
       {tauri && (
-        <div className="flex flex-col gap-3 mt-2 p-3 rounded-lg" style={{ background: 'var(--color-surface)' }}>
+        <div
+          className="flex flex-col gap-3 mt-2 p-3 rounded-lg"
+          style={{ background: 'var(--color-surface)' }}
+        >
           <div className="flex items-center gap-2 text-xs font-medium text-[var(--color-text-primary)]">
             <Download size={14} />
             {t('Auto Update')}
@@ -1860,7 +2178,9 @@ function AboutTab() {
                 {t('New version available: v{{version}}', { version: updateVersion })}
               </p>
               {updateNotes && (
-                <p className="text-xs text-[var(--color-text-tertiary)] whitespace-pre-wrap">{updateNotes}</p>
+                <p className="text-xs text-[var(--color-text-tertiary)] whitespace-pre-wrap">
+                  {updateNotes}
+                </p>
               )}
               <button
                 type="button"
@@ -1880,7 +2200,10 @@ function AboutTab() {
                 <Loader2 size={14} className="animate-spin" />
                 {t('Downloading update... {{progress}}%', { progress: downloadProgress })}
               </div>
-              <div className="w-full h-1.5 rounded-full" style={{ background: 'var(--color-border)' }}>
+              <div
+                className="w-full h-1.5 rounded-full"
+                style={{ background: 'var(--color-border)' }}
+              >
                 <div
                   className="h-full rounded-full transition-all"
                   style={{ width: `${downloadProgress}%`, background: 'var(--color-primary)' }}
@@ -1925,7 +2248,9 @@ function AboutTab() {
 
 function ScheduleTab() {
   const { load } = useScheduleStore();
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
   return <ScheduleEditor />;
 }
 
