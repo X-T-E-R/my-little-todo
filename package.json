@@ -17,7 +17,8 @@
     "dev:admin": "pnpm --filter @my-little-todo/admin dev",
     "dev:web": "concurrently -n rust,vite -c blue,green \"cargo run -p mlt-server-bin\" \"pnpm --filter @my-little-todo/web dev:vite\"",
     "typecheck": "pnpm --filter @my-little-todo/core exec tsc --noEmit && pnpm --filter @my-little-todo/web exec tsc -b --noEmit",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "bump": "node scripts/bump-version.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",
