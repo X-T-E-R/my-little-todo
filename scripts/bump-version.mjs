@@ -13,9 +13,9 @@
  *   node scripts/bump-version.mjs minor --tag
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { resolve, dirname } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -106,7 +106,7 @@ if (doTag) {
   console.log(`\n🚀 Pushed v${newVersion} — workflows should be running now.`);
 } else {
   console.log('Next steps (or re-run with --tag to automate):');
-  console.log(`  git add -A`);
+  console.log('  git add -A');
   console.log(`  git commit -m "chore: bump to v${newVersion}"`);
   console.log(`  git tag v${newVersion}`);
   console.log(`  git push && git push origin v${newVersion}`);
