@@ -37,6 +37,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Build core package
+        run: pnpm turbo run build --filter=@my-little-todo/core
+
       - name: Biome lint & format check
         run: pnpm biome check .
 
