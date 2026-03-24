@@ -5,6 +5,8 @@ import {
   Calendar,
   CheckCircle,
   ClipboardCopy,
+  Eye,
+  EyeOff,
   ListPlus,
   Pencil,
   Trash2,
@@ -27,6 +29,7 @@ interface TaskContextMenuProps {
   onComplete: () => void;
   onArchive: () => void;
   onDelete: () => void;
+  onPromote?: () => void;
 }
 
 export function TaskContextMenu({
@@ -41,6 +44,7 @@ export function TaskContextMenu({
   onComplete,
   onArchive,
   onDelete,
+  onPromote,
 }: TaskContextMenuProps) {
   const { t } = useTranslation('task');
   const [roleSubmenu, setRoleSubmenu] = useState(false);
@@ -170,8 +174,17 @@ export function TaskContextMenu({
 
         <div className="my-1 mx-2" style={{ borderTop: '1px solid var(--color-border)' }} />
 
-        {!isCompleted && (
-          <MenuItem icon={CheckCircle} label={t('Mark complete')} onClick={onComplete} />
+        <MenuItem
+          icon={CheckCircle}
+          label={isCompleted ? t('Mark incomplete') : t('Mark complete')}
+          onClick={onComplete}
+        />
+        {onPromote && task.parentId && (
+          <MenuItem
+            icon={task.promoted ? EyeOff : Eye}
+            label={task.promoted ? t('Demote to subtask') : t('Mark as independent task')}
+            onClick={onPromote}
+          />
         )}
         <MenuItem icon={Archive} label={t('Archive')} onClick={onArchive} />
         <MenuItem

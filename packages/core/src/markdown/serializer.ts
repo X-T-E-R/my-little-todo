@@ -42,6 +42,7 @@ function serializeTaskMetaHeader(task: Task): string[] {
   if (task.sourceStreamId) meta.push(`source: ${task.sourceStreamId}`);
   if (task.subtaskIds.length > 0) meta.push(`subtasks: [${task.subtaskIds.join(', ')}]`);
   if (task.parentId) meta.push(`parent: ${task.parentId}`);
+  if (task.promoted) meta.push('promoted: true');
   meta.push('---');
   return meta;
 }
@@ -104,6 +105,15 @@ function serializeRemindersBlock(reminders: Task['reminders']): string[] {
   return body;
 }
 
+function serializeStatusHistoryBlock(history: Task['statusHistory']): string[] {
+  if (!history || history.length === 0) return [];
+  const body: string[] = ['', '## Status History', ''];
+  for (const h of history) {
+    body.push(`- ${h.timestamp.toISOString()} | ${h.from} → ${h.to}`);
+  }
+  return body;
+}
+
 export function serializeTaskFile(task: Task): string {
   const meta = serializeTaskMetaHeader(task);
 
@@ -115,6 +125,7 @@ export function serializeTaskFile(task: Task): string {
     ...serializeRemindersBlock(task.reminders),
     ...serializeSubmissionsBlock(task.submissions),
     ...serializePostponementsBlock(task.postponements),
+    ...serializeStatusHistoryBlock(task.statusHistory),
   ];
   return `${meta.join('\n')}\n${bodyBlock}${sections.join('\n')}\n`;
 }

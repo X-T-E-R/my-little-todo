@@ -39,9 +39,8 @@
   "Tags (space separated)": "标签（空格分隔）",
   "Completed": "已完成",
   "Uploading...": "上传中...",
-  "Note": "笔记",
-  "Journal": "日记",
-  "Log": "日志",
+  "Log": "记录",
   "Change type": "更改类型",
-  "Mark complete": "标记完成"
+  "Mark complete": "标记完成",
+  "Mark incomplete": "取消完成"
 }

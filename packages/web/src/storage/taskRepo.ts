@@ -8,17 +8,18 @@ function taskFileName(id: string): string {
 
 export async function loadAllTasks(): Promise<Task[]> {
   const files = await listFiles(TASKS_DIR);
-  const tasks: Task[] = [];
-  for (const file of files) {
-    const content = await readFile(TASKS_DIR, file);
-    if (!content) continue;
-    try {
-      tasks.push(parseTaskFile(content));
-    } catch {
-      // skip malformed task files
-    }
-  }
-  return tasks;
+  const results = await Promise.all(
+    files.map(async (file) => {
+      const content = await readFile(TASKS_DIR, file);
+      if (!content) return null;
+      try {
+        return parseTaskFile(content);
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return results.filter((t): t is Task => t !== null);
 }
 
 export async function loadTask(id: string): Promise<Task | null> {
@@ -66,6 +67,7 @@ export async function createTask(
     reminders: [],
     submissions: [],
     postponements: [],
+    statusHistory: [{ from: 'inbox' as const, to: 'inbox' as const, timestamp: now }],
   };
   await saveTask(task);
   return task;
@@ -108,10 +110,17 @@ export async function extractSubtask(subtaskId: string): Promise<Task | null> {
 export async function updateTaskStatus(id: string, status: TaskStatus): Promise<Task | null> {
   const task = await loadTask(id);
   if (!task) return null;
+  const now = new Date();
+  const prevStatus = task.status;
   task.status = status;
   if (status === 'completed') {
-    task.completedAt = new Date();
+    task.completedAt = now;
+    if (task.parentId) task.promoted = undefined;
+  } else {
+    task.completedAt = undefined;
   }
+  if (!task.statusHistory) task.statusHistory = [];
+  task.statusHistory.push({ from: prevStatus, to: status, timestamp: now });
   await saveTask(task);
   return task;
 }

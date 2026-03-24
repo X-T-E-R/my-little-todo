@@ -71,6 +71,6 @@ jobs:
           tagName: v__VERSION__
           releaseName: 'My Little Todo v__VERSION__'
           releaseBody: 'See the assets to download and install.'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

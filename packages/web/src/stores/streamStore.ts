@@ -40,29 +40,37 @@ interface StreamState {
   setEntryDdl: (entryId: string, ddl: Date, ddlType?: DdlType) => Promise<void>;
 }
 
+let _streamLoadPromise: Promise<void> | null = null;
+
 export const useStreamStore = create<StreamState>((set, get) => ({
   entries: [],
   loading: false,
   error: null,
 
   load: async () => {
-    set({ loading: true, error: null });
-    try {
-      const cached = await getCachedStreamDays();
-      if (cached && get().entries.length === 0) {
-        const flatEntries = cached.flatMap((d) => d.entries as StreamEntry[]);
-        if (flatEntries.length > 0) set({ entries: flatEntries, loading: false });
+    if (_streamLoadPromise) return _streamLoadPromise;
+    _streamLoadPromise = (async () => {
+      set({ loading: true, error: null });
+      try {
+        const cached = await getCachedStreamDays();
+        if (cached && get().entries.length === 0) {
+          const flatEntries = cached.flatMap((d) => d.entries as StreamEntry[]);
+          if (flatEntries.length > 0) set({ entries: flatEntries, loading: false });
+        }
+        const entries = await loadRecentDays(14);
+        set({ entries, loading: false });
+        setCachedStreamEntries(entries, (e) => formatDateKey((e as StreamEntry).timestamp));
+      } catch (e) {
+        if (get().entries.length === 0) {
+          set({ error: String(e), loading: false });
+        } else {
+          set({ loading: false });
+        }
+      } finally {
+        _streamLoadPromise = null;
       }
-      const entries = await loadRecentDays(14);
-      set({ entries, loading: false });
-      setCachedStreamEntries(entries, (e) => formatDateKey((e as StreamEntry).timestamp));
-    } catch (e) {
-      if (get().entries.length === 0) {
-        set({ error: String(e), loading: false });
-      } else {
-        set({ loading: false });
-      }
-    }
+    })();
+    return _streamLoadPromise;
   },
 
   addEntry: async (
@@ -116,7 +124,11 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           ),
         }));
         const { useTaskStore } = await import('./taskStore');
-        await useTaskStore.getState().load();
+        const ts = useTaskStore.getState();
+        if (!ts.tasks.find((t) => t.id === task.id)) {
+          ts.tasks = [...ts.tasks, task];
+          useTaskStore.setState({ tasks: ts.tasks });
+        }
       }
 
       return entry;
@@ -179,7 +191,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     const { useTaskStore } = await import('./taskStore');
     const ts = useTaskStore.getState();
     if (!ts.tasks.find((t) => t.id === task.id)) {
-      await ts.load();
+      useTaskStore.setState({ tasks: [...ts.tasks, task] });
     }
 
     return task.id;

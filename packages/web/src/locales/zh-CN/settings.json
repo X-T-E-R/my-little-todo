@@ -241,5 +241,6 @@
   "Storage backend": "存储后端",
   "Image host URL": "图床地址",
   "Attachment settings saved": "附件设置已保存",
-  "Auto check updates": "自动检查更新"
+  "Auto check updates": "自动检查更新",
+  "Unable to reach update server. Please check your network or try again later.": "无法连接更新服务器，请检查网络连接后重试。"
 }

@@ -232,20 +232,31 @@ function EntryCard({
             title={linkedTask.status === 'completed' ? t('Completed') : t('Mark complete')}
             onClick={(e) => {
               e.stopPropagation();
-              if (onMarkComplete && linkedTask.status !== 'completed') onMarkComplete(entry);
+              if (onMarkComplete) onMarkComplete(entry);
             }}
           >
             {linkedTask.status === 'completed' && (
               <Check size={8} className="text-white" strokeWidth={3} />
             )}
           </button>
+        ) : isTask ? (
+          <div
+            className="mt-0.5"
+            style={{
+              width: 14,
+              height: 14,
+              borderRadius: 3,
+              border: `2px solid ${typeMeta.dotColor}`,
+              background: 'transparent',
+            }}
+          />
         ) : (
           <div
             className="mt-1"
             style={{
               width: 8,
               height: 8,
-              borderRadius: typeMeta.dotRadius,
+              borderRadius: entry.entryType === 'spark' ? '50%' : 2,
               background: typeMeta.dotColor,
             }}
           />
@@ -723,19 +734,20 @@ export function StreamView() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
 
-  const {
-    entries,
-    loading,
-    load,
-    addEntry,
-    updateEntry,
-    deleteEntry,
-    enrichEntry,
-    setEntryType,
-    addSubtaskToEntry,
-    setEntryDdl,
-  } = useStreamStore();
-  const { tasks, load: loadTasks, selectTask, updateStatus } = useTaskStore();
+  const entries = useStreamStore((s) => s.entries);
+  const loading = useStreamStore((s) => s.loading);
+  const load = useStreamStore((s) => s.load);
+  const addEntry = useStreamStore((s) => s.addEntry);
+  const updateEntry = useStreamStore((s) => s.updateEntry);
+  const deleteEntry = useStreamStore((s) => s.deleteEntry);
+  const enrichEntry = useStreamStore((s) => s.enrichEntry);
+  const setEntryType = useStreamStore((s) => s.setEntryType);
+  const addSubtaskToEntry = useStreamStore((s) => s.addSubtaskToEntry);
+  const setEntryDdl = useStreamStore((s) => s.setEntryDdl);
+  const tasks = useTaskStore((s) => s.tasks);
+  const loadTasks = useTaskStore((s) => s.load);
+  const selectTask = useTaskStore((s) => s.selectTask);
+  const updateStatus = useTaskStore((s) => s.updateStatus);
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const roles = useRoleStore((s) => s.roles);
   const currentRole = currentRoleId ? roles.find((r) => r.id === currentRoleId) : undefined;
@@ -809,7 +821,6 @@ export function StreamView() {
     autoResize();
   }, [input, autoResize]);
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [attachmentConfig, setAttachmentConfig] = useState<AttachmentConfig | null>(null);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -872,31 +883,26 @@ export function StreamView() {
     e.preventDefault();
   }, []);
 
-  const handleSubmit = async () => {
-    if (!input.trim() || isSubmitting) return;
-    setIsSubmitting(true);
+  const handleSubmit = () => {
+    if (!input.trim()) return;
     const isTask = selectedEntryType === 'task';
-    try {
-      const meta: Parameters<typeof addEntry>[2] = {
-        entryType: selectedEntryType,
-        ...(isTask && {
-          ddl: metaDdlDate ? new Date(metaDdlDate) : undefined,
-          ddlType: metaDdlDate ? metaDdlType : undefined,
-          tags:
-            metaTags
-              .split(/[\s,]+/)
-              .map((t) => t.trim())
-              .filter(Boolean) || undefined,
-        }),
-      };
-      await addEntry(input.trim(), isTask, meta);
-      setInput('');
-      setMetaDdlDate('');
-      setMetaDdlType('soft');
-      setMetaTags('');
-    } finally {
-      setIsSubmitting(false);
-    }
+    const meta: Parameters<typeof addEntry>[2] = {
+      entryType: selectedEntryType,
+      ...(isTask && {
+        ddl: metaDdlDate ? new Date(metaDdlDate) : undefined,
+        ddlType: metaDdlDate ? metaDdlType : undefined,
+        tags:
+          metaTags
+            .split(/[\s,]+/)
+            .map((t) => t.trim())
+            .filter(Boolean) || undefined,
+      }),
+    };
+    addEntry(input.trim(), isTask, meta).catch(() => {});
+    setInput('');
+    setMetaDdlDate('');
+    setMetaDdlType('soft');
+    setMetaTags('');
   };
 
   const handleSaveEdit = async (entryId: string, content: string) => {
@@ -1071,7 +1077,10 @@ export function StreamView() {
                       onMarkComplete={
                         entry.entryType === 'task' && entry.extractedTaskId
                           ? (e) => {
-                              if (e.extractedTaskId) updateStatus(e.extractedTaskId, 'completed');
+                              if (e.extractedTaskId) {
+                                const t = taskMap.get(e.extractedTaskId);
+                                updateStatus(e.extractedTaskId, t?.status === 'completed' ? 'active' : 'completed');
+                              }
                             }
                           : undefined
                       }
@@ -1261,7 +1270,7 @@ export function StreamView() {
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={!input.trim() || isSubmitting}
+                disabled={!input.trim()}
                 className="shrink-0 flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold text-white shadow-sm transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:hover:scale-100"
                 style={{ background: 'var(--color-accent)' }}
               >
@@ -1350,11 +1359,19 @@ export function StreamView() {
             handleToggleSelect(contextMenu.entry.id);
           }}
           onChangeType={(type) => handleChangeType(contextMenu.entry.id, type)}
+          isCompleted={
+            contextMenu.entry.extractedTaskId
+              ? taskMap.get(contextMenu.entry.extractedTaskId)?.status === 'completed'
+              : false
+          }
           onMarkComplete={
             contextMenu.entry.entryType === 'task' && contextMenu.entry.extractedTaskId
               ? () => {
                   const taskId = contextMenu.entry.extractedTaskId;
-                  if (taskId) updateStatus(taskId, 'completed');
+                  if (taskId) {
+                    const t = taskMap.get(taskId);
+                    updateStatus(taskId, t?.status === 'completed' ? 'active' : 'completed');
+                  }
                 }
               : undefined
           }

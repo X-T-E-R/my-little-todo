@@ -59,6 +59,7 @@
   "Switch role": "切换角色",
   "No role": "无角色",
   "Mark complete": "标记完成",
+  "Mark incomplete": "取消完成",
   "Archive": "归档",
   "Copy title": "复制标题",
   "Edit content": "编辑内容",
@@ -78,5 +79,9 @@
   "{{rate}}% acceptance rate": "{{rate}}% 接受率",
   "Records": "记录",
   "No recommendation records yet": "还没有推荐记录",
-  "Reason: {{reason}}": "原因：{{reason}}"
+  "Reason: {{reason}}": "原因：{{reason}}",
+  "Independent": "独立",
+  "Mark as independent task": "标记为独立任务",
+  "Demote to subtask": "回归子任务",
+  "Parent: {{title}}": "父任务：{{title}}"
 }

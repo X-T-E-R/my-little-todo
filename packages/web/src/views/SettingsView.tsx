@@ -2539,11 +2539,15 @@ function AboutTab() {
         if (!silent) showToast({ type: 'info', message: t('Already up to date') });
       }
     } catch (e: unknown) {
-      setUpdateStatus('error');
+      setUpdateStatus('idle');
       if (!silent) {
+        const msg = String(e);
+        const isNetwork = msg.includes('fetch') || msg.includes('network') || msg.includes('JSON') || msg.includes('404');
         showToast({
           type: 'error',
-          message: t('Update check failed: {{message}}', { message: String(e) }),
+          message: isNetwork
+            ? t('Unable to reach update server. Please check your network or try again later.')
+            : t('Update check failed: {{message}}', { message: msg }),
         });
       }
     }

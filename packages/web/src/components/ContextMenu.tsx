@@ -38,6 +38,7 @@ interface ContextMenuProps {
   onBatchSelect: () => void;
   onChangeType?: (type: StreamEntryType) => void;
   onMarkComplete?: () => void;
+  isCompleted?: boolean;
 }
 
 export function ConfirmableDeleteItem({
@@ -93,6 +94,7 @@ export function ContextMenu({
   onBatchSelect,
   onChangeType,
   onMarkComplete,
+  isCompleted,
 }: ContextMenuProps) {
   const { t } = useTranslation('task');
   const { t: tStream } = useTranslation('stream');
@@ -172,7 +174,7 @@ export function ContextMenu({
         <MenuItem icon={Calendar} label={t('Set due date')} onClick={onSetDdl} />
 
         {onMarkComplete && (
-          <MenuItem icon={CheckSquare} label={tStream('Mark complete')} onClick={onMarkComplete} />
+          <MenuItem icon={CheckSquare} label={tStream(isCompleted ? 'Mark incomplete' : 'Mark complete')} onClick={onMarkComplete} />
         )}
 
         {onChangeType && (

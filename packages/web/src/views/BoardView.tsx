@@ -989,6 +989,14 @@ export function BoardView() {
                                 >
                                   {task.title}
                                 </p>
+                                {task.parentId && task.promoted && (() => {
+                                  const parent = tasks.find((t) => t.id === task.parentId);
+                                  return parent ? (
+                                    <p className="text-[10px] truncate mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
+                                      ↳ {parent.title}
+                                    </p>
+                                  ) : null;
+                                })()}
                                 <div className="mt-1 flex items-center gap-2">
                                   <RolePill
                                     roleId={task.roleId}
@@ -1209,11 +1217,16 @@ export function BoardView() {
           onSetDdl={() => setDdlInputId(contextMenu.task.id)}
           onChangeRole={(roleId) => updateTask({ ...contextMenu.task, roleId })}
           onComplete={() => {
-            updateStatus(contextMenu.task.id, 'completed');
-            setShowConfetti(true);
+            const newStatus = contextMenu.task.status === 'completed' ? 'active' : 'completed';
+            updateStatus(contextMenu.task.id, newStatus);
+            if (newStatus === 'completed') setShowConfetti(true);
           }}
           onArchive={() => updateStatus(contextMenu.task.id, 'archived')}
           onDelete={() => deleteTask(contextMenu.task.id)}
+          onPromote={contextMenu.task.parentId ? () => {
+            const { promoteSubtask } = useTaskStore.getState();
+            promoteSubtask(contextMenu.task.id, !contextMenu.task.promoted);
+          } : undefined}
         />
       )}
     </div>

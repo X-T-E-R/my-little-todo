@@ -26,13 +26,10 @@ export async function loadRecentDays(count = 7): Promise<StreamEntry[]> {
   const files = await listFiles(STREAM_DIR);
   const recent = files.slice(0, count);
 
-  const allEntries: StreamEntry[] = [];
-  for (const file of recent) {
-    const dateKey = fileNameToDateKey(file);
-    const entries = await loadStreamDay(dateKey);
-    allEntries.push(...entries);
-  }
-  return allEntries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  const dayResults = await Promise.all(
+    recent.map((file) => loadStreamDay(fileNameToDateKey(file))),
+  );
+  return dayResults.flat().sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 }
 
 /**

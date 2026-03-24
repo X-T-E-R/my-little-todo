@@ -42,8 +42,11 @@ interface TaskState {
   deleteTask: (id: string) => Promise<void>;
   addSubtask: (parentId: string, title: string) => Promise<Task | null>;
   extractSubtask: (subtaskId: string) => Promise<void>;
+  promoteSubtask: (subtaskId: string, promoted: boolean) => Promise<void>;
   selectTask: (id: string | null) => void;
 }
+
+let _taskLoadPromise: Promise<void> | null = null;
 
 export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
@@ -52,22 +55,28 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   selectedTaskId: null,
 
   load: async () => {
-    set({ loading: true, error: null });
-    try {
-      const cached = await getCachedTasks();
-      if (cached && get().tasks.length === 0) {
-        set({ tasks: cached as Task[], loading: false });
+    if (_taskLoadPromise) return _taskLoadPromise;
+    _taskLoadPromise = (async () => {
+      set({ loading: true, error: null });
+      try {
+        const cached = await getCachedTasks();
+        if (cached && get().tasks.length === 0) {
+          set({ tasks: cached as Task[], loading: false });
+        }
+        const tasks = await loadAllTasks();
+        set({ tasks, loading: false });
+        setCachedTasks(tasks);
+      } catch (e) {
+        if (get().tasks.length === 0) {
+          set({ error: String(e), loading: false });
+        } else {
+          set({ loading: false });
+        }
+      } finally {
+        _taskLoadPromise = null;
       }
-      const tasks = await loadAllTasks();
-      set({ tasks, loading: false });
-      setCachedTasks(tasks);
-    } catch (e) {
-      if (get().tasks.length === 0) {
-        set({ error: String(e), loading: false });
-      } else {
-        set({ loading: false });
-      }
-    }
+    })();
+    return _taskLoadPromise;
   },
 
   createTask: async (title, opts) => {
@@ -81,10 +90,13 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     const task = prev.find((t) => t.id === id);
     if (!task) return;
 
+    const now = new Date();
     const optimistic = {
       ...task,
       status,
-      ...(status === 'completed' ? { completedAt: new Date() } : {}),
+      completedAt: status === 'completed' ? now : undefined,
+      ...(status === 'completed' && task.parentId ? { promoted: undefined } : {}),
+      statusHistory: [...(task.statusHistory ?? []), { from: task.status, to: status, timestamp: now }],
     } as Task;
     set((state) => ({
       tasks: state.tasks.map((t) => (t.id === id ? optimistic : t)),
@@ -103,10 +115,19 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   },
 
   updateTask: async (task) => {
-    await saveTask(task);
+    const prev = get().tasks;
+    const updated = { ...task };
+    if (updated.parentId && (updated.ddl || updated.plannedAt)) {
+      updated.promoted = true;
+    }
     set((state) => ({
-      tasks: state.tasks.map((t) => (t.id === task.id ? task : t)),
+      tasks: state.tasks.map((t) => (t.id === updated.id ? updated : t)),
     }));
+    try {
+      await saveTask(updated);
+    } catch {
+      set({ tasks: prev });
+    }
   },
 
   postponeTask: async (id, reason, newDate) => {
@@ -174,16 +195,32 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     }));
   },
 
+  promoteSubtask: async (subtaskId, promoted) => {
+    const task = get().tasks.find((t) => t.id === subtaskId);
+    if (!task || !task.parentId) return;
+    const updated = { ...task, promoted: promoted || undefined };
+    set((state) => ({
+      tasks: state.tasks.map((t) => (t.id === subtaskId ? updated : t)),
+    }));
+    try {
+      await saveTask(updated);
+    } catch {
+      set((state) => ({
+        tasks: state.tasks.map((t) => (t.id === subtaskId ? task : t)),
+      }));
+    }
+  },
+
   selectTask: (id) => set({ selectedTaskId: id }),
 }));
 
-/** Top-level active tasks only (excludes subtasks and malformed entries). */
+/** Top-level active tasks only (excludes subtasks unless promoted). */
 export function getActiveTasks(tasks: Task[]): Task[] {
   return tasks.filter(
     (t) =>
       t.id &&
       t.title &&
-      !t.parentId &&
+      (!t.parentId || t.promoted) &&
       (t.status === 'active' || t.status === 'today' || t.status === 'inbox'),
   );
 }
@@ -204,7 +241,7 @@ export function getTasksWithoutDdl(tasks: Task[]): Task[] {
 
 export function getCompletedTasks(tasks: Task[]): Task[] {
   return tasks
-    .filter((t) => !t.parentId && t.status === 'completed')
+    .filter((t) => (!t.parentId || t.promoted) && t.status === 'completed')
     .sort((a, b) => (b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0));
 }
 

@@ -2,6 +2,7 @@ import type { Attachment, StreamEntry, StreamEntryType } from '../models/stream.
 import type {
   DdlType,
   Postponement,
+  StatusChange,
   Submission,
   Task,
   TaskReminder,
@@ -88,7 +89,8 @@ export function parseStreamFile(content: string, dateKey: string): StreamEntry[]
     let entryType: StreamEntryType = 'spark';
     const typeMatch = ENTRY_TYPE_REGEX.exec(rawContent);
     if (typeMatch) {
-      entryType = typeMatch[1] as StreamEntryType;
+      const raw = typeMatch[1] as string;
+      entryType = (raw === 'note' || raw === 'journal' ? 'log' : raw) as StreamEntryType;
       rawContent = rawContent.replace(ENTRY_TYPE_REGEX, '');
     }
 
@@ -129,7 +131,7 @@ export function parseStreamFile(content: string, dateKey: string): StreamEntry[]
   return entries;
 }
 
-const STRUCTURED_SECTION_REGEX = /^## (Submissions|Postponements|Resources|Reminders)$/;
+const STRUCTURED_SECTION_REGEX = /^## (Submissions|Postponements|Resources|Reminders|Status History)$/;
 
 function parseResourceLine(line: string): TaskResource | null {
   const trimmed = line.replace(/^- /, '').trim();
@@ -150,6 +152,21 @@ function parseResourceLine(line: string): TaskResource | null {
     };
   }
   return { type: 'note', title: rest, addedAt: new Date(dateStr) };
+}
+
+function parseStatusHistoryLine(line: string): StatusChange | null {
+  const trimmed = line.replace(/^- /, '').trim();
+  if (!trimmed || trimmed === '（暂无）') return null;
+  const parts = trimmed.split(' | ');
+  if (parts.length < 2) return null;
+  const timestamp = new Date((parts[0] ?? '').trim());
+  const transition = (parts[1] ?? '').trim();
+  const arrow = transition.split(' → ');
+  if (arrow.length !== 2) return null;
+  const fromStatus = arrow[0]?.trim();
+  const toStatus = arrow[1]?.trim();
+  if (!fromStatus || !toStatus) return null;
+  return { from: fromStatus as TaskStatus, to: toStatus as TaskStatus, timestamp };
 }
 
 function parseReminderLine(line: string): TaskReminder | null {
@@ -173,6 +190,7 @@ function buildTaskFromMeta(
   postponements: Postponement[],
   resources: TaskResource[],
   reminders: TaskReminder[],
+  statusHistory: StatusChange[],
 ): Task {
   const tags = Array.isArray(meta.tags) ? (meta.tags as string[]) : [];
   const subtaskIds = Array.isArray(meta.subtasks) ? (meta.subtasks as string[]) : [];
@@ -195,10 +213,12 @@ function buildTaskFromMeta(
     subtaskIds,
     parentId: meta.parent as string | undefined,
     sourceStreamId: meta.source as string | undefined,
+    promoted: meta.promoted === true || meta.promoted === 'true' ? true : undefined,
     resources,
     reminders,
     submissions,
     postponements,
+    statusHistory,
   };
 }
 
@@ -210,9 +230,10 @@ export function parseTaskFile(content: string): Task {
   const postponements: Postponement[] = [];
   const resources: TaskResource[] = [];
   const reminders: TaskReminder[] = [];
+  const statusHistory: StatusChange[] = [];
 
   const bodyLines: string[] = [];
-  let section: 'body' | 'submissions' | 'postponements' | 'resources' | 'reminders' = 'body';
+  let section: 'body' | 'submissions' | 'postponements' | 'resources' | 'reminders' | 'statusHistory' = 'body';
 
   for (const line of body.split('\n')) {
     const trimmed = line.trim();
@@ -223,6 +244,7 @@ export function parseTaskFile(content: string): Task {
       else if (s === 'Postponements') section = 'postponements';
       else if (s === 'Resources') section = 'resources';
       else if (s === 'Reminders') section = 'reminders';
+      else if (s === 'Status History') section = 'statusHistory';
       continue;
     }
     if (section === 'body') {
@@ -233,10 +255,13 @@ export function parseTaskFile(content: string): Task {
     } else if (section === 'reminders' && trimmed.startsWith('- ')) {
       const rem = parseReminderLine(trimmed);
       if (rem) reminders.push(rem);
+    } else if (section === 'statusHistory' && trimmed.startsWith('- ')) {
+      const sh = parseStatusHistoryLine(trimmed);
+      if (sh) statusHistory.push(sh);
     }
   }
 
   const bodyText = bodyLines.join('\n').trim();
 
-  return buildTaskFromMeta(meta, bodyText, submissions, postponements, resources, reminders);
+  return buildTaskFromMeta(meta, bodyText, submissions, postponements, resources, reminders, statusHistory);
 }

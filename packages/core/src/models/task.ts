@@ -33,6 +33,12 @@ export interface TaskReminder {
   label?: string;
 }
 
+export interface StatusChange {
+  from: TaskStatus;
+  to: TaskStatus;
+  timestamp: Date;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -61,8 +67,11 @@ export interface Task {
 
   sourceStreamId?: string;
 
+  promoted?: boolean;
+
   resources: TaskResource[];
   reminders: TaskReminder[];
   submissions: Submission[];
   postponements: Postponement[];
+  statusHistory: StatusChange[];
 }

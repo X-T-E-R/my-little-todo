@@ -3,6 +3,7 @@ import { daysUntil, generateId, isOverdue } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertCircle,
+  ArrowRight,
   Bell,
   Calendar,
   Check,
@@ -130,24 +131,27 @@ function SubtaskRow({
   subtask,
   onToggle,
   onExtract,
+  onPromote,
   onOpen,
 }: {
   subtask: Task;
   onToggle: () => void;
   onExtract: () => void;
+  onPromote: () => void;
   onOpen: () => void;
 }) {
   const { t } = useTranslation('task');
   const done = subtask.status === 'completed';
   const isMultiLine = subtask.title.includes('\n');
   const ddlInfo = subtask.ddl && !done ? subtaskDdlLabel(subtask.ddl, t) : null;
+  const isPromoted = !!subtask.promoted;
 
   return (
     <div
       className="group flex items-start gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-[var(--color-bg)] relative"
       style={{
-        background: ddlInfo?.overdue ? 'var(--color-danger-soft)' : undefined,
-        borderLeft: ddlInfo?.overdue ? '2px solid var(--color-danger)' : '2px solid transparent',
+        background: ddlInfo?.overdue ? 'var(--color-danger-soft)' : isPromoted ? 'var(--color-accent-soft)' : undefined,
+        borderLeft: ddlInfo?.overdue ? '2px solid var(--color-danger)' : isPromoted ? '2px solid var(--color-accent)' : '2px solid transparent',
       }}
     >
       <button
@@ -171,6 +175,14 @@ function SubtaskRow({
         }}
       >
         {subtask.title}
+        {isPromoted && (
+          <span
+            className="ml-1 inline-flex items-center rounded-full px-1 py-0 text-[9px] font-medium"
+            style={{ background: 'var(--color-accent)', color: 'white' }}
+          >
+            {t('Independent')}
+          </span>
+        )}
       </button>
       {ddlInfo && (
         <span
@@ -193,6 +205,15 @@ function SubtaskRow({
           {ddlInfo.text}
         </span>
       )}
+      <button
+        type="button"
+        onClick={onPromote}
+        title={isPromoted ? t('Demote to subtask') : t('Mark as independent task')}
+        className="opacity-0 group-hover:opacity-100 rounded p-0.5 transition-opacity mt-0.5"
+        style={{ color: isPromoted ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }}
+      >
+        <Eye size={12} />
+      </button>
       <button
         type="button"
         onClick={onExtract}
@@ -488,6 +509,7 @@ export function TaskDetailPanel() {
     deleteTask,
     addSubtask,
     extractSubtask,
+    promoteSubtask,
     updateStatus,
   } = useTaskStore();
 
@@ -503,6 +525,10 @@ export function TaskDetailPanel() {
 
   const taskId = task?.id;
   useEffect(() => {
+    if (bodyTimerRef.current) {
+      clearTimeout(bodyTimerRef.current);
+      bodyTimerRef.current = null;
+    }
     if (!taskId) return;
     const t = tasks.find((x) => x.id === taskId);
     if (t) {
@@ -555,10 +581,11 @@ export function TaskDetailPanel() {
   };
 
   return (
-    <AnimatePresence>
+    <AnimatePresence mode="wait">
       {selectedTaskId && (
         <>
           <motion.div
+            key={`overlay-${selectedTaskId}`}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -566,6 +593,7 @@ export function TaskDetailPanel() {
             onClick={() => selectTask(null)}
           />
           <motion.div
+            key={`panel-${selectedTaskId}`}
             initial={isMobile ? { y: '100%' } : { x: '100%' }}
             animate={isMobile ? { y: 0 } : { x: 0 }}
             exit={isMobile ? { y: '100%' } : { x: '100%' }}
@@ -750,6 +778,7 @@ export function TaskDetailPanel() {
                       subtask={sub}
                       onToggle={() => handleToggleSubtask(sub)}
                       onExtract={() => handleExtractSubtask(sub.id)}
+                      onPromote={() => promoteSubtask(sub.id, !sub.promoted)}
                       onOpen={() => selectTask(sub.id)}
                     />
                   ))}
@@ -764,7 +793,7 @@ export function TaskDetailPanel() {
               <RemindersSection task={task} onUpdate={updateTask} />
 
               {/* History */}
-              {(task.postponements.length > 0 || task.submissions.length > 0) && (
+              {(task.postponements.length > 0 || task.submissions.length > 0 || (task.statusHistory ?? []).length > 0) && (
                 <div>
                   <p
                     className="text-xs font-medium mb-2"
@@ -773,6 +802,25 @@ export function TaskDetailPanel() {
                     {t('History')}
                   </p>
                   <div className="space-y-1.5">
+                    {(task.statusHistory ?? []).map((h, i) => (
+                      <div
+                        key={`sh-${h.timestamp.getTime()}-${i}`}
+                        className="flex items-start gap-2 text-[11px]"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                      >
+                        <ArrowRight
+                          size={12}
+                          className="shrink-0 mt-0.5"
+                          style={{ color: 'var(--color-accent)' }}
+                        />
+                        <span>
+                          {h.from} → {h.to}
+                          <span className="ml-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                            {h.timestamp.toLocaleDateString()} {h.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
                     {task.postponements.map((p, i) => (
                       <div
                         key={`post-${p.timestamp.getTime()}-${i}`}
