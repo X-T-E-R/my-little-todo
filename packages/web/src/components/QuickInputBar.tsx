@@ -36,29 +36,35 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
     }
   }, [open]);
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleSubmit = useCallback(async () => {
     const trimmed = title.trim();
-    if (!trimmed) return;
+    if (!trimmed || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const parsedDdl = ddlDate ? new Date(ddlDate) : undefined;
+      const parsedTags = tags
+        .split(/[\s,]+/)
+        .map((t) => t.trim())
+        .filter(Boolean);
 
-    const parsedDdl = ddlDate ? new Date(ddlDate) : undefined;
-    const parsedTags = tags
-      .split(/[\s,]+/)
-      .map((t) => t.trim())
-      .filter(Boolean);
+      await addEntry(trimmed, true, {
+        ddl: parsedDdl,
+        ddlType: ddlDate ? ddlType : undefined,
+        tags: parsedTags.length > 0 ? parsedTags : undefined,
+      });
 
-    await addEntry(trimmed, true, {
-      ddl: parsedDdl,
-      ddlType: ddlDate ? ddlType : undefined,
-      tags: parsedTags.length > 0 ? parsedTags : undefined,
-    });
-
-    setTitle('');
-    setDdlDate('');
-    setDdlType('soft');
-    setTags('');
-    setShowMeta(false);
-    onClose();
-  }, [title, ddlDate, ddlType, tags, addEntry, onClose]);
+      setTitle('');
+      setDdlDate('');
+      setDdlType('soft');
+      setTags('');
+      setShowMeta(false);
+      onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [title, ddlDate, ddlType, tags, addEntry, onClose, isSubmitting]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -116,7 +122,7 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={!title.trim()}
+              disabled={!title.trim() || isSubmitting}
               className="rounded p-1.5 text-[var(--color-accent)] transition-opacity disabled:opacity-30"
             >
               <Send size={16} />

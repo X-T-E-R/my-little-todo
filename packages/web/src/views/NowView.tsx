@@ -12,6 +12,7 @@ import {
   Pause,
   PenLine,
   Play,
+  Wind,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
@@ -362,7 +363,7 @@ function FocusModeView({
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: NowView has many states
-export function NowView() {
+export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => void }) {
   const { t } = useTranslation('now');
   const [showRejectPanel, setShowRejectPanel] = useState(false);
   const [showReason, setShowReason] = useState(false);
@@ -374,7 +375,7 @@ export function NowView() {
   const [showCompletionCelebration, setShowCompletionCelebration] = useState(false);
   const [taskCtxMenu, setTaskCtxMenu] = useState<{ x: number; y: number } | null>(null);
 
-  const { tasks, loading, load, selectTask, updateTask, updateStatus } = useTaskStore();
+  const { tasks, loading, load, selectTask, updateTask, updateStatus, deleteTask } = useTaskStore();
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const filtered = useMemo(() => filterByRole(tasks, currentRoleId), [tasks, currentRoleId]);
   const { recordEvent, load: loadBehavior } = useBehaviorStore();
@@ -625,6 +626,17 @@ export function NowView() {
             <p className="mt-3" style={{ color: 'var(--color-text-secondary)' }}>
               {t('Write something in Stream, or just enjoy this moment')}
             </p>
+            {onNavigateToStream && (
+              <button
+                type="button"
+                onClick={onNavigateToStream}
+                className="mt-6 inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium text-white shadow-md transition-all hover:scale-[1.02] active:scale-95"
+                style={{ background: 'var(--color-accent)' }}
+              >
+                <Wind size={16} />
+                {t('Record an inspiration')}
+              </button>
+            )}
           </motion.div>
         </div>
       </div>
@@ -927,6 +939,18 @@ export function NowView() {
             <Dices size={16} className="transition-transform duration-500 group-hover:rotate-180" />
             <span>{t('Try another')}</span>
           </button>
+
+          {onNavigateToStream && (
+            <button
+              type="button"
+              onClick={onNavigateToStream}
+              className="group flex items-center gap-2 text-xs font-medium transition-colors"
+              style={{ color: 'var(--color-text-tertiary)' }}
+            >
+              <Wind size={16} className="transition-transform group-hover:translate-x-0.5" />
+              <span>{t('Record an inspiration')}</span>
+            </button>
+          )}
         </motion.div>
 
         {taskCtxMenu && currentTask && (
@@ -960,7 +984,7 @@ export function NowView() {
               })
             }
             onDelete={() =>
-              updateStatus(currentTask.id, 'archived').then(() => {
+              deleteTask(currentTask.id).then(() => {
                 const freshTasks = useTaskStore.getState().tasks;
                 const freshFiltered = filterByRole(
                   freshTasks,

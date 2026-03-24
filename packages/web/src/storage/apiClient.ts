@@ -1,5 +1,6 @@
 import { getAuthToken } from '../stores/authStore';
 import type { StorageAdapter } from './adapter';
+import { enqueueOperation } from './offlineQueue';
 
 export function createApiAdapter(baseUrl: string, token?: string): StorageAdapter {
   const headers = (): HeadersInit => {
@@ -26,22 +27,28 @@ export function createApiAdapter(baseUrl: string, token?: string): StorageAdapte
 
     async writeFile(content: string, ...segments: string[]): Promise<void> {
       const path = segments.join('/');
-      await fetch(`${baseUrl}/api/files?path=${encodeURIComponent(path)}`, {
-        method: 'PUT',
-        headers: headers(),
-        body: JSON.stringify({ content }),
-      });
+      try {
+        const res = await fetch(`${baseUrl}/api/files?path=${encodeURIComponent(path)}`, {
+          method: 'PUT',
+          headers: headers(),
+          body: JSON.stringify({ content }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch {
+        await enqueueOperation({ type: 'writeFile', args: segments, content });
+      }
     },
 
     async deleteFile(...segments: string[]): Promise<void> {
       const path = segments.join('/');
       try {
-        await fetch(`${baseUrl}/api/files?path=${encodeURIComponent(path)}`, {
+        const res = await fetch(`${baseUrl}/api/files?path=${encodeURIComponent(path)}`, {
           method: 'DELETE',
           headers: headers(),
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
       } catch {
-        // ignore
+        await enqueueOperation({ type: 'deleteFile', args: segments });
       }
     },
 

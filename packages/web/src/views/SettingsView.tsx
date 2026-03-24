@@ -1,10 +1,13 @@
 import { motion } from 'framer-motion';
 import {
   Activity,
+  Bell,
   CalendarClock,
   CheckCircle,
   Cloud,
+  Coffee,
   Command,
+  Copy,
   Download,
   ExternalLink,
   FolderOpen,
@@ -13,13 +16,16 @@ import {
   Info,
   Key,
   Loader2,
+  LogOut,
   Moon,
   RefreshCw,
   RotateCcw,
   Server,
   Shield,
+  Sparkles,
   Trash2,
   Upload,
+  User,
   Users,
   Wifi,
   XCircle,
@@ -51,10 +57,21 @@ import {
 import { eventToKeyString } from '../utils/shortcuts';
 import { useIsMobile } from '../utils/useIsMobile';
 
-type SettingsTab = 'general' | 'schedule' | 'shortcuts' | 'sync' | 'data' | 'about' | 'admin';
+type SettingsTab =
+  | 'general'
+  | 'account'
+  | 'ai'
+  | 'schedule'
+  | 'shortcuts'
+  | 'sync'
+  | 'data'
+  | 'about'
+  | 'admin';
 
 const BASE_TABS: { id: SettingsTab; label: string; icon: typeof Key }[] = [
   { id: 'general', label: 'General', icon: Moon },
+  { id: 'account', label: 'Account', icon: User },
+  { id: 'ai', label: 'AI', icon: Sparkles },
   { id: 'schedule', label: 'Schedule', icon: CalendarClock },
   { id: 'shortcuts', label: 'Shortcuts', icon: Command },
   { id: 'sync', label: 'Sync', icon: Cloud },
@@ -141,34 +158,18 @@ function applyTheme(theme: string) {
 
 function GeneralTab() {
   const { t } = useTranslation('settings');
-  const [apiKey, setApiKey] = useState('');
-  const [apiEndpoint, setApiEndpoint] = useState('https://api.openai.com/v1');
-  const [aiSaved, setAiSaved] = useState(false);
   const [theme, setTheme] = useState('system');
 
   const roleSettings = useRoleStore((s) => s.settings);
   const updateRoleSettings = useRoleStore((s) => s.updateSettings);
 
   useEffect(() => {
-    getSetting('ai-api-key').then((v) => {
-      if (v) setApiKey(v);
-    });
-    getSetting('ai-api-endpoint').then((v) => {
-      if (v) setApiEndpoint(v);
-    });
     getSetting('theme').then((v) => {
       const t = v || 'system';
       setTheme(t);
       applyTheme(t);
     });
   }, []);
-
-  const handleSaveAi = async () => {
-    await putSetting('ai-api-key', apiKey);
-    await putSetting('ai-api-endpoint', apiEndpoint);
-    setAiSaved(true);
-    setTimeout(() => setAiSaved(false), 2000);
-  };
 
   const handleThemeChange = async (newTheme: string) => {
     setTheme(newTheme);
@@ -178,56 +179,6 @@ function GeneralTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* AI Configuration */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <Key size={16} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('AI Configuration')}</h3>
-        </div>
-        <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {t(
-            'Enter an OpenAI-compatible API key for smart task extraction, recommendations, and more. The key is stored locally only.',
-          )}
-        </p>
-        <div className="flex gap-2 mb-2">
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-..."
-            className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
-          />
-        </div>
-        <div className="flex items-center gap-2 mb-2">
-          <ExternalLink size={14} className="text-[var(--color-text-tertiary)] shrink-0" />
-          <input
-            type="url"
-            value={apiEndpoint}
-            onChange={(e) => setApiEndpoint(e.target.value)}
-            placeholder="https://api.openai.com/v1"
-            className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <p className="flex-1 text-xs text-[var(--color-text-tertiary)]">
-            {t('Supports OpenAI-compatible API endpoints (e.g. Deepseek, local Ollama, etc.)')}
-          </p>
-          <button
-            type="button"
-            onClick={handleSaveAi}
-            className={`shrink-0 rounded-xl px-4 py-2 text-sm font-medium transition-all ${
-              aiSaved
-                ? 'bg-[var(--color-success)] text-white'
-                : 'bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95'
-            }`}
-          >
-            {aiSaved ? t('Saved') : t('Save')}
-          </button>
-        </div>
-      </section>
-
-      <hr style={{ borderColor: 'var(--color-border)' }} />
-
       {/* Theme */}
       <section>
         <div className="flex items-center gap-2 mb-3">
@@ -359,6 +310,29 @@ function GeneralTab() {
 
       <hr style={{ borderColor: 'var(--color-border)' }} />
 
+      {/* Notifications */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <Bell size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Notifications')}</h3>
+        </div>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-[var(--color-text)]">
+                {t('Task Reminders')}
+              </p>
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                {t('Get notified when deadlines are approaching')}
+              </p>
+            </div>
+            <NotificationToggle />
+          </div>
+        </div>
+      </section>
+
+      <hr style={{ borderColor: 'var(--color-border)' }} />
+
       {/* Onboarding */}
       <section>
         <div className="flex items-center gap-2 mb-3">
@@ -388,6 +362,199 @@ function GeneralTab() {
             {t('Restart Onboarding')}
           </button>
         </div>
+      </section>
+    </div>
+  );
+}
+
+function NotificationToggle() {
+  const { t } = useTranslation('settings');
+  const [enabled, setEnabled] = useState(true);
+  const [permission, setPermission] = useState<NotificationPermission>(
+    typeof Notification !== 'undefined' ? Notification.permission : 'default',
+  );
+
+  useEffect(() => {
+    getSetting('notification-enabled').then((v) => {
+      if (v === 'false') setEnabled(false);
+    });
+  }, []);
+
+  const handleToggle = async (v: boolean) => {
+    setEnabled(v);
+    await putSetting('notification-enabled', String(v));
+    if (v && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      const perm = await Notification.requestPermission();
+      setPermission(perm);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      {permission === 'denied' && (
+        <span className="text-[10px] text-red-400">{t('Blocked by browser')}</span>
+      )}
+      {permission === 'default' && enabled && (
+        <button
+          type="button"
+          onClick={async () => {
+            const perm = await Notification.requestPermission();
+            setPermission(perm);
+          }}
+          className="text-[10px] text-[var(--color-accent)] hover:underline"
+        >
+          {t('Grant permission')}
+        </button>
+      )}
+      <ToggleSwitch checked={enabled} onChange={handleToggle} />
+    </div>
+  );
+}
+
+function AccountTab() {
+  const { t } = useTranslation('settings');
+  const user = useAuthStore((s) => s.user);
+  const authMode = useAuthStore((s) => s.authMode);
+  const logout = useAuthStore((s) => s.logout);
+  const changePassword = useAuthStore((s) => s.changePassword);
+  const showToast = useToastStore((s) => s.showToast);
+
+  const [oldPw, setOldPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [changing, setChanging] = useState(false);
+
+  const handleChangePassword = async () => {
+    if (!newPw || newPw !== confirmPw) {
+      showToast({ type: 'error', message: t('Passwords do not match') });
+      return;
+    }
+    if (newPw.length < 4) {
+      showToast({ type: 'error', message: t('Password too short') });
+      return;
+    }
+    setChanging(true);
+    try {
+      await changePassword(oldPw, newPw);
+      showToast({ type: 'success', message: t('Password changed successfully') });
+      setOldPw('');
+      setNewPw('');
+      setConfirmPw('');
+    } catch (err) {
+      showToast({
+        type: 'error',
+        message: t('Change password failed: {{message}}', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      });
+    } finally {
+      setChanging(false);
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* User Info */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <User size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('User Info')}</h3>
+        </div>
+        <div
+          className="rounded-xl p-4 space-y-2"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-[var(--color-text-tertiary)]">{t('Username')}</span>
+            <span className="text-sm font-medium text-[var(--color-text)]">
+              {user?.username ?? '—'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-[var(--color-text-tertiary)]">{t('Role')}</span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs ${
+                user?.is_admin
+                  ? 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]'
+                  : 'bg-[var(--color-border)] text-[var(--color-text-secondary)]'
+              }`}
+            >
+              {user?.is_admin ? t('Admin') : t('User')}
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <hr style={{ borderColor: 'var(--color-border)' }} />
+
+      {/* Change Password */}
+      {authMode !== 'none' && (
+        <>
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Key size={16} className="text-[var(--color-accent)]" />
+              <h3 className="text-sm font-bold text-[var(--color-text)]">
+                {t('Change Password')}
+              </h3>
+            </div>
+            <div className="space-y-3">
+              <input
+                type="password"
+                value={oldPw}
+                onChange={(e) => setOldPw(e.target.value)}
+                placeholder={t('Current Password')}
+                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+              />
+              <input
+                type="password"
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                placeholder={t('New Password')}
+                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+              />
+              <input
+                type="password"
+                value={confirmPw}
+                onChange={(e) => setConfirmPw(e.target.value)}
+                placeholder={t('Confirm New Password')}
+                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+              />
+              <button
+                type="button"
+                onClick={handleChangePassword}
+                disabled={changing || !oldPw || !newPw || !confirmPw}
+                className="rounded-xl px-4 py-2 text-sm font-medium transition-all bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+              >
+                {changing ? t('Saving...') : t('Change Password')}
+              </button>
+            </div>
+          </section>
+
+          <hr style={{ borderColor: 'var(--color-border)' }} />
+        </>
+      )}
+
+      {/* Logout */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <LogOut size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Log Out')}</h3>
+        </div>
+        <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+          {t('Log out will clear your local session. You can log in again anytime.')}
+        </p>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="flex items-center gap-2 rounded-xl border border-red-200 dark:border-red-800 px-4 py-2 text-sm font-medium text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"
+        >
+          <LogOut size={14} />
+          {t('Log Out')}
+        </button>
       </section>
     </div>
   );
@@ -1190,6 +1357,8 @@ function SyncTab() {
   );
   const [cloudUrl, setCloudUrl] = useState(() => localStorage.getItem('mlt-cloud-url') || '');
   const [modeSaved, setModeSaved] = useState(false);
+  const [serverAuthMode, setServerAuthMode] = useState<string>('none');
+  const [pendingAuthMode, setPendingAuthMode] = useState<string>('none');
 
   const isLanSharing = serverHost === '0.0.0.0';
 
@@ -1209,6 +1378,8 @@ function SyncTab() {
           setServerPort(cfg.port);
           setPendingHost(cfg.host);
           setPendingPort(cfg.port);
+          setServerAuthMode(cfg.auth_mode);
+          setPendingAuthMode(cfg.auth_mode);
         } catch {
           /* ignore */
         }
@@ -1265,9 +1436,11 @@ function SyncTab() {
       const url = await invoke<string>('start_embedded_server', {
         port: pendingPort,
         host: pendingHost,
+        authMode: pendingAuthMode,
       });
       setServerHost(pendingHost);
       setServerPort(pendingPort);
+      setServerAuthMode(pendingAuthMode);
       setServerRunning(true);
       setRestartIsError(false);
       setRestartMsg(t('Server restarted at {{url}}', { url }));
@@ -1283,7 +1456,10 @@ function SyncTab() {
     }
   };
 
-  const hasChanges = pendingHost !== serverHost || pendingPort !== serverPort;
+  const hasChanges =
+    pendingHost !== serverHost ||
+    pendingPort !== serverPort ||
+    pendingAuthMode !== serverAuthMode;
 
   return (
     <div className="flex flex-col gap-6">
@@ -1512,6 +1688,30 @@ function SyncTab() {
                 </button>
               </div>
 
+              {/* Auth mode */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Shield size={15} style={{ color: 'var(--color-text-secondary)' }} />
+                  <div>
+                    <p className="text-sm font-medium text-[var(--color-text)]">
+                      {t('Auth Mode')}
+                    </p>
+                    <p className="text-xs text-[var(--color-text-tertiary)]">
+                      {t('Authentication mode for the embedded server')}
+                    </p>
+                  </div>
+                </div>
+                <select
+                  value={pendingAuthMode}
+                  onChange={(e) => setPendingAuthMode(e.target.value)}
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] outline-none"
+                >
+                  <option value="none">{t('No Auth')}</option>
+                  <option value="single">{t('Single User')}</option>
+                  <option value="multi">{t('Multi User')}</option>
+                </select>
+              </div>
+
               {/* Custom bind address (advanced) */}
               <div>
                 <div className="flex items-center gap-2 mb-2">
@@ -1603,7 +1803,19 @@ function CloudBackupSection() {
         const res = await fetch(`${getSettingsApiBase()}/api/backup/config`, { headers: h });
         if (res.ok) {
           const data = await res.json();
-          if (data.provider) setProvider(data.provider as '' | 's3' | 'webdav');
+          if (data.provider) {
+            setProvider(data.provider as '' | 's3' | 'webdav');
+            setConfig((prev) => ({
+              ...prev,
+              endpoint: data.endpoint ?? '',
+              bucket: data.bucket ?? '',
+              access_key: data.access_key ?? '',
+              secret_key: data.secret_key ?? '',
+              region: data.region ?? '',
+              username: data.username ?? '',
+              password: data.password ?? '',
+            }));
+          }
         }
       } catch {
         /* ignore */
@@ -2056,7 +2268,127 @@ function AdminTab() {
           </table>
         </div>
       </section>
+
+      <hr style={{ borderColor: 'var(--color-border)' }} />
+
+      {/* Attachment Settings */}
+      <AttachmentSettingsSection />
     </div>
+  );
+}
+
+function AttachmentSettingsSection() {
+  const { t } = useTranslation('settings');
+  const showToast = useToastStore((s) => s.showToast);
+  const [allowAttachments, setAllowAttachments] = useState(true);
+  const [maxSizeMB, setMaxSizeMB] = useState(10);
+  const [storage, setStorage] = useState('local');
+  const [imageHostUrl, setImageHostUrl] = useState('');
+
+  useEffect(() => {
+    getSetting('admin:allow-attachments').then((v) => {
+      if (v === 'false') setAllowAttachments(false);
+    });
+    getSetting('admin:attachment-max-size').then((v) => {
+      if (v) setMaxSizeMB(Math.round(Number(v) / (1024 * 1024)));
+    });
+    getSetting('admin:attachment-storage').then((v) => {
+      if (v) setStorage(v);
+    });
+    getSetting('admin:image-host-url').then((v) => {
+      if (v) setImageHostUrl(v);
+    });
+  }, []);
+
+  const handleSave = async () => {
+    await putSetting('admin:allow-attachments', String(allowAttachments));
+    await putSetting('admin:attachment-max-size', String(maxSizeMB * 1024 * 1024));
+    await putSetting('admin:attachment-storage', storage);
+    await putSetting('admin:image-host-url', imageHostUrl);
+    showToast({ type: 'success', message: t('Attachment settings saved') });
+  };
+
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <Upload size={16} className="text-[var(--color-accent)]" />
+        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Attachment Settings')}</h3>
+      </div>
+      <div className="space-y-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <label className="flex items-center justify-between">
+          <span className="text-sm" style={{ color: 'var(--color-text)' }}>{t('Allow attachments')}</span>
+          <input
+            type="checkbox"
+            checked={allowAttachments}
+            onChange={(e) => setAllowAttachments(e.target.checked)}
+            className="h-4 w-4 rounded accent-[var(--color-accent)]"
+          />
+        </label>
+
+        <div>
+          <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('Max file size (MB)')}
+          </label>
+          <input
+            type="number"
+            min={1}
+            max={100}
+            value={maxSizeMB}
+            onChange={(e) => setMaxSizeMB(Number(e.target.value))}
+            className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
+            style={{ color: 'var(--color-text)' }}
+          />
+        </div>
+
+        <div>
+          <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('Storage backend')}
+          </label>
+          <div className="mt-1 flex gap-2">
+            {['local', 's3', 'image-host'].map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setStorage(opt)}
+                className="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                style={{
+                  background: storage === opt ? 'var(--color-accent)' : 'var(--color-bg)',
+                  color: storage === opt ? 'white' : 'var(--color-text-secondary)',
+                  border: '1px solid var(--color-border)',
+                }}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {storage === 'image-host' && (
+          <div>
+            <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('Image host URL')}
+            </label>
+            <input
+              type="url"
+              value={imageHostUrl}
+              onChange={(e) => setImageHostUrl(e.target.value)}
+              placeholder="https://..."
+              className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
+              style={{ color: 'var(--color-text)' }}
+            />
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={handleSave}
+          className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-all hover:scale-[1.02]"
+          style={{ background: 'var(--color-accent)' }}
+        >
+          {t('Save')}
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -2142,6 +2474,22 @@ function AboutTab() {
       <p className="text-xs text-[var(--color-text-tertiary)]">
         {t('This is not a task manager — this is your external execution system.')}
       </p>
+
+      <a
+        href="https://afdian.com/a/xter123"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-2 mt-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors w-fit"
+        style={{
+          background: 'var(--color-surface)',
+          border: '1px solid var(--color-border)',
+          color: 'var(--color-text-secondary)',
+        }}
+      >
+        <Coffee size={16} className="text-[var(--color-accent)]" />
+        {t('Buy me a bubble tea')}
+        <ExternalLink size={12} className="text-[var(--color-text-tertiary)]" />
+      </a>
 
       {tauri && (
         <div
@@ -2244,6 +2592,569 @@ function AboutTab() {
   );
 }
 
+/* ── AI Tab ── */
+
+const MCP_TOOLS = {
+  read: [
+    { name: 'get_overview', desc: 'Global overview' },
+    { name: 'list_tasks', desc: 'List tasks' },
+    { name: 'get_task', desc: 'Get task details' },
+    { name: 'list_stream', desc: 'List stream entries' },
+    { name: 'search', desc: 'Full-text search' },
+  ],
+  write: [
+    { name: 'create_task', desc: 'Create task' },
+    { name: 'update_task', desc: 'Update task' },
+    { name: 'delete_task', desc: 'Delete task' },
+    { name: 'add_stream', desc: 'Add stream entry' },
+  ],
+};
+
+const IDE_CONFIGS: {
+  id: string;
+  label: string;
+  pathHint: string;
+}[] = [
+  {
+    id: 'cursor',
+    label: 'Cursor',
+    pathHint: '.cursor/mcp.json',
+  },
+  {
+    id: 'claude',
+    label: 'Claude Desktop',
+    pathHint: '~/Library/Application Support/Claude/claude_desktop_config.json (macOS)',
+  },
+  {
+    id: 'vscode',
+    label: 'VS Code (Copilot)',
+    pathHint: '.vscode/mcp.json',
+  },
+  {
+    id: 'windsurf',
+    label: 'Windsurf',
+    pathHint: '~/.codeium/windsurf/mcp_config.json',
+  },
+  {
+    id: 'generic',
+    label: 'Generic',
+    pathHint: '',
+  },
+];
+
+const MODEL_SUGGESTIONS = [
+  'gpt-4o',
+  'gpt-4o-mini',
+  'gpt-3.5-turbo',
+  'deepseek-chat',
+  'deepseek-reasoner',
+  'claude-3-sonnet-20240229',
+  'claude-3-haiku-20240307',
+];
+
+function AiTab() {
+  const { t } = useTranslation('settings');
+  const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false);
+  const showToast = useToastStore((s) => s.showToast);
+
+  const [apiKey, setApiKey] = useState('');
+  const [apiEndpoint, setApiEndpoint] = useState('https://api.openai.com/v1');
+  const [aiModel, setAiModel] = useState('');
+  const [aiSaved, setAiSaved] = useState(false);
+
+  const [sharedAvailable, setSharedAvailable] = useState(false);
+  const [sharedAllowUserKey, setSharedAllowUserKey] = useState(true);
+
+  const [adminSharedEnabled, setAdminSharedEnabled] = useState(false);
+  const [adminAllowUserKey, setAdminAllowUserKey] = useState(true);
+  const [adminSharedKey, setAdminSharedKey] = useState('');
+  const [adminSharedEndpoint, setAdminSharedEndpoint] = useState('');
+  const [adminSharedModel, setAdminSharedModel] = useState('');
+  const [adminSaved, setAdminSaved] = useState(false);
+
+  const [selectedIde, setSelectedIde] = useState('cursor');
+  const [copied, setCopied] = useState(false);
+
+  const [disabledTools, setDisabledTools] = useState<string[]>([]);
+  const [toolsSaved, setToolsSaved] = useState(false);
+
+  useEffect(() => {
+    getSetting('ai-api-key').then((v) => {
+      if (v) setApiKey(v);
+    });
+    getSetting('ai-api-endpoint').then((v) => {
+      if (v) setApiEndpoint(v);
+    });
+    getSetting('ai-model').then((v) => {
+      if (v) setAiModel(v);
+    });
+    getSetting('mcp-disabled-tools').then((v) => {
+      if (v) {
+        try {
+          setDisabledTools(JSON.parse(v));
+        } catch { /* ignore */ }
+      }
+    });
+
+    const token = getAuthToken();
+    if (token) {
+      fetch(`${getSettingsApiBase()}/api/ai/shared-config`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.available) {
+            setSharedAvailable(true);
+            setSharedAllowUserKey(d.allow_user_key ?? true);
+          }
+        })
+        .catch(() => {});
+    }
+
+    if (isAdmin) {
+      getSetting('admin:ai-shared-enabled').then((v) => {
+        if (v === 'true') setAdminSharedEnabled(true);
+      });
+      getSetting('admin:ai-allow-user-key').then((v) => {
+        if (v !== null) setAdminAllowUserKey(v !== 'false');
+      });
+      getSetting('admin:ai-shared-key').then((v) => {
+        if (v) setAdminSharedKey(v);
+      });
+      getSetting('admin:ai-shared-endpoint').then((v) => {
+        if (v) setAdminSharedEndpoint(v);
+      });
+      getSetting('admin:ai-shared-model').then((v) => {
+        if (v) setAdminSharedModel(v);
+      });
+    }
+  }, [isAdmin]);
+
+  const handleSaveAi = async () => {
+    await putSetting('ai-api-key', apiKey);
+    await putSetting('ai-api-endpoint', apiEndpoint);
+    await putSetting('ai-model', aiModel);
+    setAiSaved(true);
+    setTimeout(() => setAiSaved(false), 2000);
+  };
+
+  const handleSaveAdmin = async () => {
+    await putSetting('admin:ai-shared-enabled', String(adminSharedEnabled));
+    await putSetting('admin:ai-allow-user-key', String(adminAllowUserKey));
+    await putSetting('admin:ai-shared-key', adminSharedKey);
+    await putSetting('admin:ai-shared-endpoint', adminSharedEndpoint);
+    await putSetting('admin:ai-shared-model', adminSharedModel);
+    setAdminSaved(true);
+    setTimeout(() => setAdminSaved(false), 2000);
+  };
+
+  const handleToggleTool = async (toolName: string) => {
+    const next = disabledTools.includes(toolName)
+      ? disabledTools.filter((t) => t !== toolName)
+      : [...disabledTools, toolName];
+    setDisabledTools(next);
+    await putSetting('mcp-disabled-tools', JSON.stringify(next));
+    setToolsSaved(true);
+    setTimeout(() => setToolsSaved(false), 1500);
+  };
+
+  const token = getAuthToken();
+  const baseUrl =
+    typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
+  const mcpConfig = JSON.stringify(
+    {
+      mcpServers: {
+        'my-little-todo': {
+          url: `${baseUrl}/api/mcp`,
+          headers: {
+            Authorization: `Bearer ${token || '<your-token>'}`,
+          },
+        },
+      },
+    },
+    null,
+    2,
+  );
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(mcpConfig);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      showToast({ type: 'error', message: t('Copy failed') });
+    }
+  };
+
+  const ideConfig = IDE_CONFIGS.find((c) => c.id === selectedIde) ?? IDE_CONFIGS[0];
+  const showUserApiSection = sharedAllowUserKey || !sharedAvailable;
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* AI Configuration */}
+      {showUserApiSection && (
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <Key size={16} className="text-[var(--color-accent)]" />
+            <h3 className="text-sm font-bold text-[var(--color-text)]">
+              {t('AI Configuration')}
+            </h3>
+          </div>
+          {sharedAvailable && !apiKey && (
+            <div
+              className="rounded-lg px-3 py-2 mb-3 text-xs"
+              style={{
+                background: 'var(--color-accent-soft)',
+                color: 'var(--color-accent)',
+              }}
+            >
+              {t('A shared API is provided by the admin. You can also set your own key below.')}
+            </div>
+          )}
+          <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+            {t(
+              'Enter an OpenAI-compatible API key for smart task extraction, recommendations, and more. The key is stored locally only.',
+            )}
+          </p>
+          <div className="flex gap-2 mb-2">
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="sk-..."
+              className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+            />
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <ExternalLink size={14} className="text-[var(--color-text-tertiary)] shrink-0" />
+            <input
+              type="url"
+              value={apiEndpoint}
+              onChange={(e) => setApiEndpoint(e.target.value)}
+              placeholder="https://api.openai.com/v1"
+              className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+            />
+          </div>
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles size={14} className="text-[var(--color-text-tertiary)] shrink-0" />
+            <input
+              type="text"
+              list="model-suggestions"
+              value={aiModel}
+              onChange={(e) => setAiModel(e.target.value)}
+              placeholder={t('Model name (e.g. gpt-4o)')}
+              className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+            />
+            <datalist id="model-suggestions">
+              {MODEL_SUGGESTIONS.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="flex-1 text-xs text-[var(--color-text-tertiary)]">
+              {t('Supports OpenAI-compatible API endpoints (e.g. Deepseek, local Ollama, etc.)')}
+            </p>
+            <button
+              type="button"
+              onClick={handleSaveAi}
+              className={`shrink-0 rounded-xl px-4 py-2 text-sm font-medium transition-all ${
+                aiSaved
+                  ? 'bg-[var(--color-success)] text-white'
+                  : 'bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95'
+              }`}
+            >
+              {aiSaved ? t('Saved') : t('Save')}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {!showUserApiSection && sharedAvailable && (
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <Key size={16} className="text-[var(--color-accent)]" />
+            <h3 className="text-sm font-bold text-[var(--color-text)]">
+              {t('AI Configuration')}
+            </h3>
+          </div>
+          <div
+            className="rounded-lg px-3 py-2 text-xs"
+            style={{
+              background: 'var(--color-accent-soft)',
+              color: 'var(--color-accent)',
+            }}
+          >
+            {t(
+              'AI is configured by the admin. A shared API is available for all users.',
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* Admin AI Management */}
+      {isAdmin && (
+        <>
+          <hr style={{ borderColor: 'var(--color-border)' }} />
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Shield size={16} className="text-[var(--color-accent)]" />
+              <h3 className="text-sm font-bold text-[var(--color-text)]">
+                {t('Admin AI Management')}
+              </h3>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-[var(--color-text)]">
+                    {t('Allow users to set own API key')}
+                  </p>
+                  <p className="text-xs text-[var(--color-text-tertiary)]">
+                    {t('When disabled, users can only use the shared API')}
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={adminAllowUserKey}
+                  onChange={(v) => setAdminAllowUserKey(v)}
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-[var(--color-text)]">
+                    {t('Provide shared API for all users')}
+                  </p>
+                  <p className="text-xs text-[var(--color-text-tertiary)]">
+                    {t('Users without their own key will use this shared API')}
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={adminSharedEnabled}
+                  onChange={(v) => setAdminSharedEnabled(v)}
+                />
+              </div>
+
+              {adminSharedEnabled && (
+                <div className="space-y-2 pl-2 border-l-2 border-[var(--color-border)]">
+                  <input
+                    type="password"
+                    value={adminSharedKey}
+                    onChange={(e) => setAdminSharedKey(e.target.value)}
+                    placeholder={t('Shared API Key')}
+                    className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+                  />
+                  <input
+                    type="url"
+                    value={adminSharedEndpoint}
+                    onChange={(e) => setAdminSharedEndpoint(e.target.value)}
+                    placeholder={t('Shared API Endpoint')}
+                    className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+                  />
+                  <input
+                    type="text"
+                    value={adminSharedModel}
+                    onChange={(e) => setAdminSharedModel(e.target.value)}
+                    placeholder={t('Shared Model Name')}
+                    className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+                  />
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleSaveAdmin}
+                className={`rounded-xl px-4 py-2 text-sm font-medium transition-all ${
+                  adminSaved
+                    ? 'bg-[var(--color-success)] text-white'
+                    : 'bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95'
+                }`}
+              >
+                {adminSaved ? t('Saved') : t('Save Admin Config')}
+              </button>
+            </div>
+          </section>
+        </>
+      )}
+
+      <hr style={{ borderColor: 'var(--color-border)' }} />
+
+      {/* MCP Integration */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <Server size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('MCP Integration')}</h3>
+        </div>
+        <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+          {t(
+            'Connect AI agents (Cursor, Claude Desktop, etc.) to your task system via MCP protocol.',
+          )}
+        </p>
+
+        <div className="space-y-3">
+          {/* IDE selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-[var(--color-text-secondary)] shrink-0">
+              {t('IDE')}
+            </span>
+            <select
+              value={selectedIde}
+              onChange={(e) => setSelectedIde(e.target.value)}
+              className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] outline-none"
+            >
+              {IDE_CONFIGS.map((ide) => (
+                <option key={ide.id} value={ide.id}>
+                  {ide.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Config preview */}
+          <div className="relative">
+            <pre
+              className="rounded-xl p-3 text-xs font-mono overflow-x-auto"
+              style={{
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              {mcpConfig}
+            </pre>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="absolute top-2 right-2 rounded-lg p-1.5 transition-colors hover:bg-[var(--color-surface)]"
+              title={t('Copy')}
+            >
+              {copied ? (
+                <CheckCircle size={14} className="text-emerald-500" />
+              ) : (
+                <Copy size={14} className="text-[var(--color-text-tertiary)]" />
+              )}
+            </button>
+          </div>
+
+          {/* Config file path hint */}
+          {ideConfig.pathHint && (
+            <p className="text-[11px] text-[var(--color-text-tertiary)]">
+              {t('Config file')}: <code className="font-mono">{ideConfig.pathHint}</code>
+            </p>
+          )}
+
+          {/* Skills link */}
+          <a
+            href="https://github.com/X-T-E-R/my-little-todo/blob/main/skills/SKILL.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-[var(--color-accent)] hover:underline w-fit"
+          >
+            <ExternalLink size={12} />
+            {t('View MCP usage guide (Skills)')}
+          </a>
+        </div>
+      </section>
+
+      <hr style={{ borderColor: 'var(--color-border)' }} />
+
+      {/* MCP Tool Toggles */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <Activity size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('MCP Tool Access')}</h3>
+        </div>
+        <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+          {t(
+            'Control which MCP tools are available to AI agents. Disabled tools will not appear in tool listings.',
+          )}
+        </p>
+
+        <div className="space-y-4">
+          {/* Read tools */}
+          <div>
+            <p className="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+              {t('Read Operations')}
+            </p>
+            <div className="space-y-1">
+              {MCP_TOOLS.read.map((tool) => (
+                <div key={tool.name} className="flex items-center justify-between py-1.5">
+                  <div>
+                    <span className="text-sm font-mono text-[var(--color-text)]">{tool.name}</span>
+                    <span className="ml-2 text-xs text-[var(--color-text-tertiary)]">
+                      {t(tool.desc)}
+                    </span>
+                  </div>
+                  <ToggleSwitch
+                    checked={!disabledTools.includes(tool.name)}
+                    onChange={() => handleToggleTool(tool.name)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Write tools */}
+          <div>
+            <p className="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+              {t('Write Operations')}
+            </p>
+            <div className="space-y-1">
+              {MCP_TOOLS.write.map((tool) => (
+                <div key={tool.name} className="flex items-center justify-between py-1.5">
+                  <div>
+                    <span className="text-sm font-mono text-[var(--color-text)]">{tool.name}</span>
+                    <span className="ml-2 text-xs text-[var(--color-text-tertiary)]">
+                      {t(tool.desc)}
+                    </span>
+                  </div>
+                  <ToggleSwitch
+                    checked={!disabledTools.includes(tool.name)}
+                    onChange={() => handleToggleTool(tool.name)}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {toolsSaved && (
+            <span className="text-xs text-emerald-500 flex items-center gap-1">
+              <CheckCircle size={12} />
+              {t('Saved')}
+            </span>
+          )}
+        </div>
+      </section>
+
+      <hr style={{ borderColor: 'var(--color-border)' }} />
+
+      {/* API Usage Statistics (placeholder) */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <Activity size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('API Usage')}</h3>
+        </div>
+        <div
+          className="rounded-xl p-4 text-center"
+          style={{
+            background: 'var(--color-surface)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          <p className="text-xs text-[var(--color-text-tertiary)]">
+            {t('AI features are under development. Usage statistics will appear here once available.')}
+          </p>
+          {isAdmin && (
+            <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+              {t('As admin, you will also see global usage statistics here.')}
+            </p>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 /* ── Shared Components ── */
 
 function ScheduleTab() {
@@ -2256,6 +3167,8 @@ function ScheduleTab() {
 
 const TAB_CONTENT: Record<SettingsTab, () => React.JSX.Element> = {
   general: GeneralTab,
+  account: AccountTab,
+  ai: AiTab,
   schedule: ScheduleTab,
   shortcuts: ShortcutsTab,
   sync: SyncTab,
@@ -2271,10 +3184,12 @@ export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const isMobile = useIsMobile();
   const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false);
+  const authMode = useAuthStore((s) => s.authMode);
   const showShortcuts = hasKeyboardShortcuts();
 
   const TABS = BASE_TABS.filter((tab) => {
     if (tab.id === 'shortcuts' && !showShortcuts) return false;
+    if (tab.id === 'account' && authMode === 'none') return false;
     return true;
   });
 

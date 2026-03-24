@@ -5,6 +5,7 @@ import './styles/globals.css';
 import { App } from './App';
 import { setStorageAdapter } from './storage/adapter';
 import { createApiAdapter } from './storage/apiClient';
+import { createDirectExecutor, startAutoSync } from './storage/offlineQueue';
 import { setSettingsApiBase } from './storage/settingsApi';
 import { useAuthStore } from './stores/authStore';
 import { initPlatform } from './utils/platform';
@@ -38,9 +39,12 @@ async function getApiBase(): Promise<string> {
   return '';
 }
 
+let _apiBaseUrl = '';
+
 async function initStorage() {
   await initPlatform();
   const url = await getApiBase();
+  _apiBaseUrl = url;
   useAuthStore.getState().setApiBase(url);
   setSettingsApiBase(url);
   setStorageAdapter(createApiAdapter(url));
@@ -48,6 +52,8 @@ async function initStorage() {
 
 async function main() {
   await initStorage();
+
+  startAutoSync(createDirectExecutor(_apiBaseUrl));
 
   const root = document.getElementById('root');
   if (!root) {

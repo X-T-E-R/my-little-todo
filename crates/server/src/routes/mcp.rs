@@ -1,7 +1,7 @@
 use axum::{extract::State, http::StatusCode, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::config::AuthMode;
 use crate::AppState;
@@ -239,7 +239,7 @@ pub async fn handle_mcp(
         "notifications/initialized" => {
             return (StatusCode::OK, Json(ok_response(req.id, json!({}))));
         }
-        "tools/list" => handle_tools_list(req.id),
+        "tools/list" => handle_tools_list(&state, &user_id, req.id).await,
         "tools/call" => handle_tools_call(&state, &user_id, req.id, &req.params).await,
         "resources/list" => handle_resources_list(req.id),
         "resources/read" => handle_resources_read(&state, &user_id, req.id, &req.params).await,
@@ -265,120 +265,134 @@ fn handle_initialize(id: Option<Value>) -> JsonRpcResponse {
     )
 }
 
-fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
-    ok_response(
-        id,
+async fn get_disabled_tools(state: &AppState, user_id: &str) -> HashSet<String> {
+    match state.db.get_setting(user_id, "mcp-disabled-tools").await {
+        Ok(Some(json_str)) => serde_json::from_str(&json_str).unwrap_or_default(),
+        _ => HashSet::new(),
+    }
+}
+
+fn all_tool_definitions() -> Vec<Value> {
+    vec![
         json!({
-            "tools": [
-                {
-                    "name": "get_overview",
-                    "description": "获取全局概览：各状态任务计数、紧急任务（3天内DDL）、角色列表、日程时段、今日流记录数。这是了解用户当前状况的首选工具。",
-                    "inputSchema": { "type": "object", "properties": {} },
-                },
-                {
-                    "name": "list_tasks",
-                    "description": "列出任务，可按状态和角色筛选。返回紧凑列表（不含正文），每条任务附带 role_name。",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "status": { "type": "string", "enum": ["inbox", "active", "today", "completed", "archived", "cancelled"], "description": "按状态筛选" },
-                            "role": { "type": "string", "description": "按角色ID筛选" },
-                        },
-                    },
-                },
-                {
-                    "name": "get_task",
-                    "description": "获取单个任务的完整信息，含正文、提交记录、延期记录。",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "id": { "type": "string", "description": "任务ID" },
-                        },
-                        "required": ["id"],
-                    },
-                },
-                {
-                    "name": "create_task",
-                    "description": "创建新任务，默认 status=inbox。ddl_type: hard=外部硬截止不可改, commitment=自我承诺改需理由, soft=建议性可随意改。",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "title": { "type": "string", "description": "任务标题" },
-                            "ddl": { "type": "string", "description": "截止时间 ISO 8601" },
-                            "ddl_type": { "type": "string", "enum": ["hard", "commitment", "soft"] },
-                            "role": { "type": "string", "description": "角色ID" },
-                            "tags": { "type": "array", "items": { "type": "string" } },
-                            "parent": { "type": "string", "description": "父任务ID（创建子任务时使用）" },
-                        },
-                        "required": ["title"],
-                    },
-                },
-                {
-                    "name": "update_task",
-                    "description": "更新任务属性或状态。设 status=completed 完成任务，status=cancelled 取消任务。可附 note 说明变更原因。",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "id": { "type": "string", "description": "任务ID" },
-                            "title": { "type": "string" },
-                            "status": { "type": "string", "enum": ["inbox", "active", "today", "completed", "archived", "cancelled"] },
-                            "ddl": { "type": "string", "description": "新截止时间 ISO 8601" },
-                            "ddl_type": { "type": "string", "enum": ["hard", "commitment", "soft"] },
-                            "role": { "type": "string" },
-                            "tags": { "type": "array", "items": { "type": "string" } },
-                            "note": { "type": "string", "description": "变更备注（如完成说明、延期理由）" },
-                        },
-                        "required": ["id"],
-                    },
-                },
-                {
-                    "name": "delete_task",
-                    "description": "删除一个任务。",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "id": { "type": "string", "description": "任务ID" },
-                        },
-                        "required": ["id"],
-                    },
-                },
-                {
-                    "name": "add_stream",
-                    "description": "添加一条流记录，用于快速捕获想法、笔记、灵感、进展。",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "content": { "type": "string", "description": "内容（支持 markdown）" },
-                            "role": { "type": "string", "description": "关联角色ID" },
-                        },
-                        "required": ["content"],
-                    },
-                },
-                {
-                    "name": "list_stream",
-                    "description": "列出最近的流记录。",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "days": { "type": "integer", "description": "回溯天数，默认7" },
-                        },
-                    },
-                },
-                {
-                    "name": "search",
-                    "description": "全文搜索任务和流记录。",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "query": { "type": "string", "description": "搜索关键词" },
-                            "scope": { "type": "string", "enum": ["all", "tasks", "stream"], "description": "搜索范围，默认 all" },
-                        },
-                        "required": ["query"],
-                    },
-                },
-            ]
+            "name": "get_overview",
+            "description": "获取全局概览：各状态任务计数、紧急任务（3天内DDL）、角色列表、日程时段、今日流记录数。这是了解用户当前状况的首选工具。",
+            "inputSchema": { "type": "object", "properties": {} },
         }),
-    )
+        json!({
+            "name": "list_tasks",
+            "description": "列出任务，可按状态和角色筛选。返回紧凑列表（不含正文），每条任务附带 role_name。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "status": { "type": "string", "enum": ["inbox", "active", "today", "completed", "archived", "cancelled"], "description": "按状态筛选" },
+                    "role": { "type": "string", "description": "按角色ID筛选" },
+                },
+            },
+        }),
+        json!({
+            "name": "get_task",
+            "description": "获取单个任务的完整信息，含正文、提交记录、延期记录。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "任务ID" },
+                },
+                "required": ["id"],
+            },
+        }),
+        json!({
+            "name": "create_task",
+            "description": "创建新任务，默认 status=inbox。ddl_type: hard=外部硬截止不可改, commitment=自我承诺改需理由, soft=建议性可随意改。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "任务标题" },
+                    "ddl": { "type": "string", "description": "截止时间 ISO 8601" },
+                    "ddl_type": { "type": "string", "enum": ["hard", "commitment", "soft"] },
+                    "role": { "type": "string", "description": "角色ID" },
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                    "parent": { "type": "string", "description": "父任务ID（创建子任务时使用）" },
+                },
+                "required": ["title"],
+            },
+        }),
+        json!({
+            "name": "update_task",
+            "description": "更新任务属性或状态。设 status=completed 完成任务，status=cancelled 取消任务。可附 note 说明变更原因。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "任务ID" },
+                    "title": { "type": "string" },
+                    "status": { "type": "string", "enum": ["inbox", "active", "today", "completed", "archived", "cancelled"] },
+                    "ddl": { "type": "string", "description": "新截止时间 ISO 8601" },
+                    "ddl_type": { "type": "string", "enum": ["hard", "commitment", "soft"] },
+                    "role": { "type": "string" },
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                    "note": { "type": "string", "description": "变更备注（如完成说明、延期理由）" },
+                },
+                "required": ["id"],
+            },
+        }),
+        json!({
+            "name": "delete_task",
+            "description": "删除一个任务。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "任务ID" },
+                },
+                "required": ["id"],
+            },
+        }),
+        json!({
+            "name": "add_stream",
+            "description": "添加一条流记录，用于快速捕获想法、笔记、灵感、进展。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "content": { "type": "string", "description": "内容（支持 markdown）" },
+                    "role": { "type": "string", "description": "关联角色ID" },
+                },
+                "required": ["content"],
+            },
+        }),
+        json!({
+            "name": "list_stream",
+            "description": "列出最近的流记录。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "days": { "type": "integer", "description": "回溯天数，默认7" },
+                },
+            },
+        }),
+        json!({
+            "name": "search",
+            "description": "全文搜索任务和流记录。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "搜索关键词" },
+                    "scope": { "type": "string", "enum": ["all", "tasks", "stream"], "description": "搜索范围，默认 all" },
+                },
+                "required": ["query"],
+            },
+        }),
+    ]
+}
+
+async fn handle_tools_list(state: &AppState, user_id: &str, id: Option<Value>) -> JsonRpcResponse {
+    let disabled = get_disabled_tools(state, user_id).await;
+    let tools: Vec<Value> = all_tool_definitions()
+        .into_iter()
+        .filter(|t| {
+            let name = t.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            !disabled.contains(name)
+        })
+        .collect();
+    ok_response(id, json!({ "tools": tools }))
 }
 
 async fn handle_tools_call(
@@ -392,6 +406,15 @@ async fn handle_tools_call(
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
+
+    let disabled = get_disabled_tools(state, user_id).await;
+    if disabled.contains(tool_name) {
+        return err_response(
+            id,
+            -32601,
+            &format!("Tool '{}' is disabled by user settings", tool_name),
+        );
+    }
 
     let result = match tool_name {
         "get_overview" => tool_overview(state, user_id).await,

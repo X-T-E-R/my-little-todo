@@ -16,49 +16,21 @@ Traditional todo apps are "ledgers" that faithfully record your debts. My Little
 - **Multi-Device Sync** — Desktop, web, and mobile — data syncs through a unified API
 - **Native AI Support** — Built-in AI magic button, native MCP support for agent integration
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│              Rust Unified Backend                    │
-│            crates/server (mlt-server)               │
-│  ┌─────────┐  ┌──────────┐  ┌───────────────┐      │
-│  │  Axum   │  │ SQLite / │  │ JWT Auth +    │      │
-│  │  HTTP   │  │ PG/MySQL │  │ Multi-user    │      │
-│  │ Server  │  │ /MongoDB │  │ Support       │      │
-│  └─────────┘  └──────────┘  └───────────────┘      │
-└───────────────────┬─────────────────────────────────┘
-                    │ REST API (/api/*)
-       ┌────────────┼────────────┬──────────────┐
-       │            │            │              │
-  ┌────▼────┐  ┌───▼────┐  ┌───▼────┐  ┌──────▼──────┐
-  │  PC     │  │  Web   │  │ Mobile │  │   Admin     │
-  │ Tauri 2 │  │ React  │  │  PWA   │  │   Panel     │
-  │(embed)  │  │  SPA   │  │        │  │  React SPA  │
-  └─────────┘  └────────┘  └────────┘  └─────────────┘
-```
-
-## Tech Stack
-
-| Layer     | Technology                                      |
-|-----------|--------------------------------------------------|
-| Backend   | Rust + Axum                                      |
-| Database  | SQLite (default) / PostgreSQL / MySQL / MongoDB  |
-| ORM       | sqlx                                             |
-| Auth      | JWT + Argon2                                     |
-| Desktop   | [Tauri 2](https://v2.tauri.app/)                 |
-| Frontend  | React 19 + TypeScript 5                          |
-| Build     | Vite 8                                           |
-| Styling   | TailwindCSS v4                                   |
-| Animation | Framer Motion                                    |
-| State     | Zustand                                          |
-| Linting   | Biome                                            |
-| Monorepo  | pnpm workspaces + Turborepo                      |
-| i18n      | i18next + react-i18next                          |
+<!-- TODO: Add screenshots here -->
 
 ## Quick Start
 
-### Docker Deploy (Recommended)
+### PC Desktop (Tauri) — Easiest
+
+A local app that works out of the box — no server required.
+
+1. Download the installer from [Releases](https://github.com/X-T-E-R/my-little-todo/releases) (Windows .msi/.exe, macOS .dmg, Linux .AppImage)
+2. Install and launch — the first run will guide you through the initial setup
+3. Single-user mode by default, no password required, data stored locally
+4. Enable "LAN access" in settings to let phones or other devices connect via browser
+5. You can also connect to a remote cloud server for multi-device sync
+
+### Docker Deploy — For Servers
 
 No need to clone the repo. Create a `docker-compose.yml` on your server:
 
@@ -96,7 +68,8 @@ Data is stored in `./data/` on the host — easy to backup and inspect.
 docker compose pull && docker compose up -d
 ```
 
-#### Docker Environment Variables
+<details>
+<summary>Docker Environment Variables</summary>
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -110,157 +83,24 @@ docker compose pull && docker compose up -d
 | `DATA_DIR` | `/app/data` | Data storage directory |
 | `STATIC_DIR` | `/app/static` | Frontend static files directory |
 
-### Build from Source
-
-```bash
-git clone https://github.com/X-T-E-R/my-little-todo.git
-cd my-little-todo
-```
-
-#### Prerequisites
-
-1. **Node.js** >= 20
-2. **pnpm** >= 10
-   ```bash
-   corepack enable
-   corepack prepare pnpm@latest --activate
-   ```
-3. **Rust toolchain**
-   ```bash
-   # Windows
-   winget install Rustlang.Rustup
-   # macOS/Linux
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   ```
-4. **System dependencies**
-   - **Windows**: Visual Studio Build Tools 2022 (C++ workload)
-   - **macOS**: Xcode Command Line Tools (`xcode-select --install`)
-   - **Linux**: See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#linux)
-
-#### Install & Dev
-
-```bash
-pnpm install
-
-# Start web dev server (Vite + Rust backend)
-pnpm dev:web
-
-# Start Tauri desktop dev mode
-pnpm --filter @my-little-todo/web dev
-
-# Start standalone Rust server
-cargo run -p mlt-server-bin
-
-# Start admin panel dev
-pnpm dev:admin
-```
-
-> First run compiles Rust crates (~2-5 minutes). Subsequent incremental builds are fast.
-
-#### Build
-
-```bash
-# Desktop installer (MSI/EXE/DMG/AppImage)
-pnpm --filter @my-little-todo/web build
-
-# Standalone server binary
-cargo build --release -p mlt-server-bin
-
-# Admin panel
-pnpm build:admin
-
-# PWA
-pnpm build:pwa
-```
-
-## Usage Guide
-
-### Docker Server Deployment
-
-The recommended way to deploy. Follow the Quick Start above to create `docker-compose.yml` and start the container.
-
-1. After starting, visit `http://your-host:3001/admin` to open the admin panel
-2. On first visit, the system will guide you to create the first admin account
-3. Once the admin is created, visit `http://your-host:3001` to use the web app
-4. For multi-user setups, other users can register through the web app (admin can manage users from the admin panel)
+</details>
 
 To set up a reverse proxy (Nginx / Caddy), point your domain to `localhost:3001` — no special location rules needed.
 
-### Standalone Server (Binary)
+For standalone binary deployment without Docker, see [docs/deployment/binary.md](docs/deployment/binary.md).
 
-For environments without Docker.
-
-1. Build the server and frontend from source:
-   ```bash
-   git clone https://github.com/X-T-E-R/my-little-todo.git
-   cd my-little-todo
-   pnpm install
-
-   # Build the server
-   cargo build --release -p mlt-server-bin
-
-   # Build the frontend
-   pnpm --filter @my-little-todo/core build
-   pnpm --filter @my-little-todo/web build:vite
-   pnpm build:admin
-   ```
-2. Prepare the static files directory:
-   ```bash
-   mkdir -p static/admin
-   cp -r packages/web/dist/* static/
-   cp -r packages/admin/dist/* static/admin/
-   ```
-3. Start the server:
-   ```bash
-   export STATIC_DIR=./static
-   export AUTH_MODE=multi
-   export JWT_SECRET=$(openssl rand -base64 32)
-   ./target/release/mlt-server
-   ```
-   You can also create a `config.toml` file (see `config.example.toml`).
-4. First-time setup: visit `http://localhost:3001/admin` to create the admin, then use the web app at `http://localhost:3001`
-
-### PC Desktop (Tauri)
-
-A local app that works out of the box — no server required.
-
-1. Download the installer from [Releases](https://github.com/X-T-E-R/my-little-todo/releases) (Windows .msi/.exe, macOS .dmg, Linux .AppImage)
-2. Install and launch — the first run will guide you through the initial setup
-3. Single-user mode by default, no password required, data stored locally
-4. Enable "LAN access" in settings to let phones or other devices connect via browser
-5. You can also connect to a remote cloud server for multi-device sync
-
-Build from source:
-```bash
-pnpm --filter @my-little-todo/web build
-```
-
-### PWA Web App
-
-Lightweight option for mobile devices.
+### PWA Web App — For Mobile
 
 1. Open your deployed server URL in a mobile browser (e.g., `https://your-domain.com`)
 2. Log in or register
 3. Use the browser's "Add to Home Screen" feature to install the app
 4. PWA supports offline caching — previously loaded data remains accessible without network
 
-Build the PWA from source:
-```bash
-pnpm build:pwa
-```
+## First-Time Usage
 
-### Mobile App (Capacitor)
-
-Native mobile app (in development).
-
-1. Build from source:
-   ```bash
-   pnpm build:mobile
-   pnpm cap:sync
-   pnpm cap:open:android  # or cap:open:ios
-   ```
-2. Compile and install to your device from Android Studio or Xcode
-3. The app requires a deployed server — configure the server address in settings
+1. **PC users**: Launch the app — the onboarding wizard will guide you through role setup and preferences
+2. **Server users**: Visit `http://your-host:3001/admin` to create the first admin account, then open `http://your-host:3001` to start using
+3. Open the **Stream** view, type whatever's on your mind, and the system helps you organize it into tasks
 
 ## MCP Integration
 
@@ -299,51 +139,22 @@ Add to your MCP client configuration:
 | `list_stream` | List recent stream entries |
 | `search` | Full-text search across tasks and stream (with scope filter) |
 
-## API Reference
+## Support
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET/PUT/DELETE /api/files` | File CRUD |
-| `POST /api/auth/login` | User login |
-| `POST /api/auth/register` | User registration |
-| `GET /api/auth/me` | Current user info |
-| `GET/PUT/DELETE /api/settings` | User settings CRUD |
-| `GET /api/admin/*` | Admin operations |
-| `GET /api/export/json` | Export as JSON |
-| `GET /api/export/markdown` | Export as Markdown |
-| `POST /api/import/json` | Import from JSON |
-| `POST /api/mcp` | MCP protocol endpoint |
+If My Little Todo helps you, consider buying the author a bubble tea!
 
-## Data Storage
+[![Buy me a bubble tea](https://img.shields.io/badge/Buy%20me%20a%20bubble%20tea-afdian-946ce6)](https://afdian.com/a/xter123)
 
-All data is stored in a database (SQLite by default).
+## Development & Contributing
 
-| Layer | Content | Storage |
-|-------|---------|---------|
-| L0 | Bootstrap config (port, DB type, auth mode) | TOML file + env vars |
-| L1 | User settings (roles, shortcuts, schedule, preferences) | DB `settings` table |
-| L2 | Content data (stream entries, tasks, archive) | DB `files` table |
+PRs and issues are welcome!
 
-### Export / Import
+For development setup, build instructions, and contribution guidelines, see:
 
-- Export as JSON / Markdown ZIP / disk directory
-- Exports include version metadata (`_meta.json`)
-- Import from JSON or Markdown ZIP
-- Continuous export mode mirrors data to local directory in real-time
-- Cloud backup via S3 / WebDAV (in progress)
+- [Development Getting Started](docs/development/getting-started.md) — Environment setup, dev commands
+- [Build Guide](docs/development/building.md) — Building desktop, PWA, mobile, and server
 
-## Code Quality
-
-```bash
-pnpm lint        # Lint
-pnpm format      # Format
-pnpm typecheck   # Type check
-pnpm test        # Test
-```
-
-## Contributing
-
-PRs and issues are welcome! Before submitting, please run:
+Before submitting a PR:
 
 ```bash
 pnpm lint        # Lint check

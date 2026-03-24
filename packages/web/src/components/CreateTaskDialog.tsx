@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Calendar, Tag, User, X } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useRoleStore, useTaskStore } from '../stores';
+import { useRoleStore, useStreamStore } from '../stores';
 
 interface Props {
   open: boolean;
@@ -27,7 +27,7 @@ export function CreateTaskDialog({ open, onClose, initialTitle = '' }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const { t } = useTranslation('task');
 
-  const createTask = useTaskStore((s) => s.createTask);
+  const addEntry = useStreamStore((s) => s.addEntry);
   const roles = useRoleStore((s) => s.roles);
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const [roleId, setRoleId] = useState<string | undefined>(currentRoleId ?? undefined);
@@ -36,15 +36,17 @@ export function CreateTaskDialog({ open, onClose, initialTitle = '' }: Props) {
     if (!title.trim()) return;
     setSubmitting(true);
     try {
-      await createTask(title.trim(), {
+      const parsedTags = tags
+        .split(/[,，\s]+/)
+        .map((t) => t.replace(/^#/, '').trim())
+        .filter(Boolean);
+
+      await addEntry(title.trim(), true, {
         ddl: ddlStr ? new Date(ddlStr) : undefined,
         ddlType: ddlStr ? ddlType : undefined,
-        tags: tags
-          .split(/[,，\s]+/)
-          .map((t) => t.replace(/^#/, '').trim())
-          .filter(Boolean),
-        roleId: roleId || undefined,
+        tags: parsedTags.length > 0 ? parsedTags : undefined,
         body: body.trim() || undefined,
+        roleId: roleId || undefined,
       });
       setTitle('');
       setBody('');

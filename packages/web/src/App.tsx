@@ -7,6 +7,7 @@ import { QuickInputBar } from './components/QuickInputBar';
 import { RoleLandingCard } from './components/RoleLandingCard';
 import { RoleSidebar } from './components/RoleSidebar';
 import { TaskDetailPanel } from './components/TaskDetailPanel';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { ToastContainer } from './components/Toast';
 import { getSetting } from './storage/settingsApi';
 import {
@@ -178,7 +179,7 @@ export function App() {
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
               className="absolute inset-0 h-full w-full"
             >
-              {currentView === 'now' && <NowView />}
+              {currentView === 'now' && <NowView onNavigateToStream={() => handleViewChange('stream')} />}
               {currentView === 'stream' && <StreamView />}
               {currentView === 'board' && <BoardView />}
               {currentView === 'settings' && <SettingsView />}
@@ -226,6 +227,7 @@ export function App() {
       </div>
 
       <ToastContainer />
+      <OfflineIndicator />
     </div>
   );
 }

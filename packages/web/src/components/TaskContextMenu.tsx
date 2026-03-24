@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { ConfirmableDeleteItem } from './ContextMenu';
 import { useRoleStore } from '../stores';
 
 interface TaskContextMenuProps {
@@ -181,7 +182,15 @@ export function TaskContextMenu({
 
         <div className="my-1 mx-2" style={{ borderTop: '1px solid var(--color-border)' }} />
 
-        <MenuItem icon={Trash2} label={t('Delete')} onClick={onDelete} danger />
+        <ConfirmableDeleteItem
+          icon={Trash2}
+          label={t('Delete')}
+          confirmLabel={t('Confirm delete?')}
+          onConfirm={() => {
+            onDelete();
+            onClose();
+          }}
+        />
       </motion.div>
     </AnimatePresence>
   );

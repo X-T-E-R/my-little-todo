@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import i18n from '../locales';
 import { putSetting } from '../storage/settingsApi';
 import { useRoleStore } from '../stores';
+import { canChooseMode, canControlServer } from '../utils/platform';
 
 interface Props {
   isReentry?: boolean;
@@ -218,18 +219,9 @@ function QuickConfigStep({
   const [lanAccess, setLanAccess] = useState(false);
   const [useMode, setUseMode] = useState<'local' | 'cloud'>('local');
   const [cloudUrl, setCloudUrl] = useState('');
-  const [isTauriEnv, setIsTauriEnv] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        await import('@tauri-apps/api/core');
-        setIsTauriEnv(true);
-      } catch {
-        setIsTauriEnv(false);
-      }
-    })();
-  }, []);
+  const showModeSelector = canChooseMode();
+  const showServerConfig = canControlServer();
 
   const themeOptions = [
     { key: 'system' as const, label: t('Follow system'), icon: Monitor },
@@ -277,8 +269,8 @@ function QuickConfigStep({
           </select>
         </div>
 
-        {/* Use mode - only in Tauri */}
-        {isTauriEnv && (
+        {/* Use mode - only when platform can choose mode (Tauri PC) */}
+        {showModeSelector && (
           <div>
             <p
               className="text-xs font-medium mb-2"
@@ -378,8 +370,8 @@ function QuickConfigStep({
           </div>
         </div>
 
-        {/* LAN access - only in Tauri local mode */}
-        {isTauriEnv && useMode === 'local' && (
+        {/* LAN access - only when platform can control server and in local mode */}
+        {showServerConfig && useMode === 'local' && (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Wifi size={15} style={{ color: 'var(--color-text-secondary)' }} />

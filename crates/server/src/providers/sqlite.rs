@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
-use super::traits::{DatabaseProvider, NewUser, User};
+use super::traits::{BlobMeta, DatabaseProvider, NewUser, User};
 
 pub struct SqliteProvider {
     pool: SqlitePool,
@@ -109,6 +109,30 @@ impl SqliteProvider {
             .await?;
 
             sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (2)")
+                .execute(&pool)
+                .await?;
+        }
+
+        // --- V3: blobs metadata table ---
+        if current_version < 3 {
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS blobs (
+                    id TEXT PRIMARY KEY,
+                    owner TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+                    size INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )",
+            )
+            .execute(&pool)
+            .await?;
+
+            sqlx::query("CREATE INDEX IF NOT EXISTS idx_blobs_owner ON blobs (owner)")
+                .execute(&pool)
+                .await?;
+
+            sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (3)")
                 .execute(&pool)
                 .await?;
         }
@@ -327,6 +351,77 @@ impl DatabaseProvider for SqliteProvider {
                 .fetch_all(&self.pool)
                 .await?;
         Ok(rows)
+    }
+
+    // --- Blob metadata operations ---
+
+    async fn put_blob_meta(
+        &self,
+        id: &str,
+        owner: &str,
+        filename: &str,
+        mime_type: &str,
+        size: i64,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO blobs (id, owner, filename, mime_type, size) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET filename = excluded.filename, mime_type = excluded.mime_type, size = excluded.size",
+        )
+        .bind(id)
+        .bind(owner)
+        .bind(filename)
+        .bind(mime_type)
+        .bind(size)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_blob_meta(&self, id: &str) -> anyhow::Result<Option<BlobMeta>> {
+        let row: Option<(String, String, String, String, i64, String)> = sqlx::query_as(
+            "SELECT id, owner, filename, mime_type, size, created_at FROM blobs WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| BlobMeta {
+            id: r.0,
+            owner: r.1,
+            filename: r.2,
+            mime_type: r.3,
+            size: r.4,
+            created_at: r.5,
+        }))
+    }
+
+    async fn delete_blob_meta(&self, id: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM blobs WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn list_blob_metas(&self, owner: &str) -> anyhow::Result<Vec<BlobMeta>> {
+        let rows: Vec<(String, String, String, String, i64, String)> = sqlx::query_as(
+            "SELECT id, owner, filename, mime_type, size, created_at FROM blobs WHERE owner = ? ORDER BY created_at DESC",
+        )
+        .bind(owner)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| BlobMeta {
+                id: r.0,
+                owner: r.1,
+                filename: r.2,
+                mime_type: r.3,
+                size: r.4,
+                created_at: r.5,
+            })
+            .collect())
     }
 
     // --- Lifecycle ---

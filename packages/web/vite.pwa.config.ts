@@ -42,11 +42,46 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         runtimeCaching: [
           {
-            urlPattern: /^https?:\/\/.*\/api\//,
+            urlPattern: /\/api\/files\/list/,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'api-file-list',
+              expiration: { maxEntries: 50, maxAgeSeconds: 24 * 60 * 60 },
+            },
+          },
+          {
+            urlPattern: /\/api\/files\?/,
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'api-cache',
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 },
+              cacheName: 'api-files',
+              expiration: { maxEntries: 200, maxAgeSeconds: 24 * 60 * 60 },
+              networkTimeoutSeconds: 5,
+            },
+          },
+          {
+            urlPattern: /\/api\/settings/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'api-settings',
+              expiration: { maxEntries: 20, maxAgeSeconds: 24 * 60 * 60 },
+              networkTimeoutSeconds: 3,
+            },
+          },
+          {
+            urlPattern: /\/api\/blobs\//,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'api-blobs',
+              expiration: { maxEntries: 100, maxAgeSeconds: 30 * 24 * 60 * 60 },
+            },
+          },
+          {
+            urlPattern: /\/api\//,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'api-other',
+              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 },
+              networkTimeoutSeconds: 5,
             },
           },
         ],

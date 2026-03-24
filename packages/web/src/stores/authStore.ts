@@ -18,6 +18,7 @@ interface AuthState {
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, password: string) => Promise<void>;
   logout: () => void;
+  changePassword: (oldPassword: string, newPassword: string) => Promise<void>;
   checkAuth: () => Promise<boolean>;
 }
 
@@ -106,6 +107,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     set({ token: null, user: null });
+  },
+
+  changePassword: async (oldPassword: string, newPassword: string) => {
+    const token = get().token;
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(`${getApiBase()}/api/auth/change-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: 'Change password failed' }));
+      throw new Error(data.error || 'Change password failed');
+    }
   },
 
   checkAuth: async () => {

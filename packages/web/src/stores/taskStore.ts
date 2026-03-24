@@ -2,6 +2,7 @@ import type { Task, TaskStatus } from '@my-little-todo/core';
 import { daysUntil } from '@my-little-todo/core';
 import { create } from 'zustand';
 import i18n from '../locales';
+import { getCachedTasks, setCachedTasks } from '../storage/cacheLayer';
 import {
   addSubtask as addSubtaskInRepo,
   createTask as createTaskInRepo,
@@ -53,10 +54,19 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   load: async () => {
     set({ loading: true, error: null });
     try {
+      const cached = await getCachedTasks();
+      if (cached && get().tasks.length === 0) {
+        set({ tasks: cached as Task[], loading: false });
+      }
       const tasks = await loadAllTasks();
       set({ tasks, loading: false });
+      setCachedTasks(tasks);
     } catch (e) {
-      set({ error: String(e), loading: false });
+      if (get().tasks.length === 0) {
+        set({ error: String(e), loading: false });
+      } else {
+        set({ loading: false });
+      }
     }
   },
 

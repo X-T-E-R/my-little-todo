@@ -6,7 +6,7 @@ pub mod sqlite;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 
-pub use traits::{DatabaseProvider, NewUser, User};
+pub use traits::{BlobMeta, DatabaseProvider, NewUser, User};
 
 use crate::config::{DbType, ServerConfig};
 use std::sync::Arc;

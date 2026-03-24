@@ -140,6 +140,65 @@ pub struct ResetPasswordRequest {
     pub new_password: String,
 }
 
+pub async fn get_shared_ai_config(
+    State(state): State<AppState>,
+    axum::Extension(_user_id): axum::Extension<String>,
+) -> AdminResult<serde_json::Value> {
+    let users = state
+        .db
+        .list_users()
+        .await
+        .map_err(|e| internal(&e.to_string()))?;
+
+    let admin = users.into_iter().find(|u| u.is_admin);
+    let admin_id = match admin {
+        Some(u) => u.id,
+        None => {
+            return Ok(Json(
+                serde_json::json!({ "available": false }),
+            ));
+        }
+    };
+
+    let enabled = state
+        .db
+        .get_setting(&admin_id, "admin:ai-shared-enabled")
+        .await
+        .map_err(|e| internal(&e.to_string()))?;
+
+    if enabled.as_deref() != Some("true") {
+        return Ok(Json(serde_json::json!({ "available": false })));
+    }
+
+    let endpoint = state
+        .db
+        .get_setting(&admin_id, "admin:ai-shared-endpoint")
+        .await
+        .map_err(|e| internal(&e.to_string()))?
+        .unwrap_or_default();
+
+    let model = state
+        .db
+        .get_setting(&admin_id, "admin:ai-shared-model")
+        .await
+        .map_err(|e| internal(&e.to_string()))?
+        .unwrap_or_default();
+
+    let allow_user_key = state
+        .db
+        .get_setting(&admin_id, "admin:ai-allow-user-key")
+        .await
+        .map_err(|e| internal(&e.to_string()))?
+        .unwrap_or_else(|| "true".to_string());
+
+    Ok(Json(serde_json::json!({
+        "available": true,
+        "endpoint": endpoint,
+        "model": model,
+        "allow_user_key": allow_user_key == "true",
+    })))
+}
+
 pub async fn reset_user_password(
     State(state): State<AppState>,
     axum::Extension(user_id): axum::Extension<String>,

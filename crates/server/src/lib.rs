@@ -120,9 +120,39 @@ pub fn create_app(
         ))
         .with_state(state.clone());
 
+    // AI config routes (protected, any user)
+    let ai_routes = Router::new()
+        .route(
+            "/ai/shared-config",
+            get(routes::admin::get_shared_ai_config),
+        )
+        .layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ))
+        .with_state(state.clone());
+
     // MCP routes (protected)
     let mcp_routes = Router::new()
         .route("/mcp", post(routes::mcp::handle_mcp))
+        .layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ))
+        .with_state(state.clone());
+
+    // Blob routes (protected)
+    let blob_routes = Router::new()
+        .route("/blobs/upload", post(routes::blobs::upload_blob))
+        .route("/blobs/list", get(routes::blobs::list_blobs))
+        .route(
+            "/blobs/{id}",
+            get(routes::blobs::get_blob).delete(routes::blobs::delete_blob),
+        )
+        .route(
+            "/blobs/config",
+            get(routes::blobs::get_attachment_config),
+        )
         .layer(axum_mw::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
@@ -155,7 +185,9 @@ pub fn create_app(
         .nest("/api", export_routes)
         .nest("/api", admin_routes)
         .nest("/api", backup_routes)
+        .nest("/api", ai_routes)
         .nest("/api", mcp_routes)
+        .nest("/api", blob_routes)
         .route(
             "/health",
             get(move || async move {

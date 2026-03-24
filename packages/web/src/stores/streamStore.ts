@@ -2,6 +2,7 @@ import type { StreamEntry, StreamEntryType } from '@my-little-todo/core';
 import type { DdlType } from '@my-little-todo/core';
 import { formatDateKey } from '@my-little-todo/core';
 import { create } from 'zustand';
+import { getCachedStreamDays, setCachedStreamEntries } from '../storage/cacheLayer';
 import i18n from '../locales';
 import {
   addStreamEntry,
@@ -20,7 +21,7 @@ interface StreamState {
   addEntry: (
     content: string,
     saveAsTask?: boolean,
-    meta?: { ddl?: Date; ddlType?: DdlType; tags?: string[] },
+    meta?: { ddl?: Date; ddlType?: DdlType; tags?: string[]; body?: string; roleId?: string },
   ) => Promise<StreamEntry>;
   updateEntry: (entry: StreamEntry) => Promise<void>;
   deleteEntry: (entryId: string) => Promise<void>;
@@ -40,20 +41,30 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   load: async () => {
     set({ loading: true, error: null });
     try {
+      const cached = await getCachedStreamDays();
+      if (cached && get().entries.length === 0) {
+        const flatEntries = cached.flatMap((d) => d.entries as StreamEntry[]);
+        if (flatEntries.length > 0) set({ entries: flatEntries, loading: false });
+      }
       const entries = await loadRecentDays(14);
       set({ entries, loading: false });
+      setCachedStreamEntries(entries, (e) => formatDateKey((e as StreamEntry).timestamp));
     } catch (e) {
-      set({ error: String(e), loading: false });
+      if (get().entries.length === 0) {
+        set({ error: String(e), loading: false });
+      } else {
+        set({ loading: false });
+      }
     }
   },
 
   addEntry: async (
     content: string,
     saveAsTask = false,
-    meta?: { ddl?: Date; ddlType?: DdlType; tags?: string[] },
+    meta?: { ddl?: Date; ddlType?: DdlType; tags?: string[]; body?: string; roleId?: string },
   ) => {
     const { useRoleStore } = await import('./roleStore');
-    const roleId = useRoleStore.getState().currentRoleId ?? undefined;
+    const roleId = meta?.roleId ?? useRoleStore.getState().currentRoleId ?? undefined;
     const entryType: StreamEntryType = saveAsTask ? 'task' : 'spark';
     const entry = await addStreamEntry(content, roleId, entryType);
     set((state) => ({
@@ -65,7 +76,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         sourceStreamId: entry.id,
         tags: meta?.tags ?? entry.tags,
         roleId: entry.roleId,
-        body: content,
+        body: meta?.body ?? content,
         ddl: meta?.ddl,
         ddlType: meta?.ddlType,
       });

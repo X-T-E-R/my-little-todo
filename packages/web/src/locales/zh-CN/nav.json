@@ -2,5 +2,7 @@
   "Now": "此刻",
   "Stream": "流",
   "Tasks": "任务",
-  "Settings": "设置"
+  "Settings": "设置",
+  "Offline": "离线模式",
+  "Syncing {{count}} changes...": "正在同步 {{count}} 项变更..."
 }

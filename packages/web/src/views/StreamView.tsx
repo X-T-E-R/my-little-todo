@@ -23,6 +23,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { ContextMenu } from '../components/ContextMenu';
 import { MarkdownToolbar } from '../components/MarkdownToolbar';
+import { uploadBlob, getAttachmentConfig } from '../storage/blobApi';
+import type { AttachmentConfig } from '../storage/blobApi';
 import { OnboardingTip } from '../components/OnboardingTip';
 import { RolePill } from '../components/RolePickerPopover';
 import { useShortcutStore } from '../stores';
@@ -648,14 +650,33 @@ function StreamFilterBar({
 
 /* ── Main StreamView ── */
 
+const DRAFT_KEY = 'mlt-stream-draft';
+
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as {
+      input?: string;
+      saveAsTask?: boolean;
+      metaDdlDate?: string;
+      metaDdlType?: 'soft' | 'commitment' | 'hard';
+      metaTags?: string;
+    };
+  } catch {
+    return {};
+  }
+}
+
 export function StreamView() {
   const { t } = useTranslation('stream');
-  const [input, setInput] = useState('');
+  const draft = useRef(loadDraft()).current;
+  const [input, setInput] = useState(draft.input ?? '');
   const [isFocused, setIsFocused] = useState(false);
-  const [saveAsTask, setSaveAsTask] = useState(false);
-  const [metaDdlDate, setMetaDdlDate] = useState('');
-  const [metaDdlType, setMetaDdlType] = useState<'soft' | 'commitment' | 'hard'>('soft');
-  const [metaTags, setMetaTags] = useState('');
+  const [saveAsTask, setSaveAsTask] = useState(draft.saveAsTask ?? false);
+  const [metaDdlDate, setMetaDdlDate] = useState(draft.metaDdlDate ?? '');
+  const [metaDdlType, setMetaDdlType] = useState<'soft' | 'commitment' | 'hard'>(draft.metaDdlType ?? 'soft');
+  const [metaTags, setMetaTags] = useState(draft.metaTags ?? '');
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [subtaskEntryId, setSubtaskEntryId] = useState<string | null>(null);
   const [ddlEntryId, setDdlEntryId] = useState<string | null>(null);
@@ -727,6 +748,11 @@ export function StreamView() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    const timer = setTimeout(() => textareaRef.current?.focus(), 300);
+    return () => clearTimeout(timer);
+  }, []);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new entries
   useEffect(() => {
     bottomAnchorRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -739,29 +765,95 @@ export function StreamView() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, []);
 
+  useEffect(() => {
+    const data = { input, saveAsTask, metaDdlDate, metaDdlType, metaTags };
+    if (!input && !saveAsTask && !metaDdlDate && !metaTags) {
+      localStorage.removeItem(DRAFT_KEY);
+    } else {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
+    }
+  }, [input, saveAsTask, metaDdlDate, metaDdlType, metaTags]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: resize on input change
   useEffect(() => {
     autoResize();
   }, [input, autoResize]);
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [attachmentConfig, setAttachmentConfig] = useState<AttachmentConfig | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  useEffect(() => {
+    getAttachmentConfig().then(setAttachmentConfig).catch(() => {});
+  }, []);
+
+  const handleFileUpload = useCallback(async (file: File) => {
+    if (!attachmentConfig?.allow_attachments) return;
+    if (file.size > (attachmentConfig?.max_size ?? 10 * 1024 * 1024)) {
+      return;
+    }
+    setIsUploading(true);
+    try {
+      const result = await uploadBlob(file);
+      const isImage = result.mime_type.startsWith('image/');
+      const md = isImage
+        ? `![${result.filename}](${result.url})`
+        : `[${result.filename}](${result.url})`;
+      setInput((prev) => prev ? `${prev}\n${md}` : md);
+    } catch {
+      // upload failed silently
+    } finally {
+      setIsUploading(false);
+    }
+  }, [attachmentConfig]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) handleFileUpload(file);
+        return;
+      }
+    }
+  }, [handleFileUpload]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const files = e.dataTransfer?.files;
+    if (!files?.length) return;
+    handleFileUpload(files[0]);
+  }, [handleFileUpload]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+  }, []);
+
   const handleSubmit = async () => {
-    if (!input.trim()) return;
-    const meta = saveAsTask
-      ? {
-          ddl: metaDdlDate ? new Date(metaDdlDate) : undefined,
-          ddlType: metaDdlDate ? metaDdlType : undefined,
-          tags:
-            metaTags
-              .split(/[\s,]+/)
-              .map((t) => t.trim())
-              .filter(Boolean) || undefined,
-        }
-      : undefined;
-    await addEntry(input.trim(), saveAsTask, meta);
-    setInput('');
-    setMetaDdlDate('');
-    setMetaDdlType('soft');
-    setMetaTags('');
+    if (!input.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const meta = saveAsTask
+        ? {
+            ddl: metaDdlDate ? new Date(metaDdlDate) : undefined,
+            ddlType: metaDdlDate ? metaDdlType : undefined,
+            tags:
+              metaTags
+                .split(/[\s,]+/)
+                .map((t) => t.trim())
+                .filter(Boolean) || undefined,
+          }
+        : undefined;
+      await addEntry(input.trim(), saveAsTask, meta);
+      setInput('');
+      setMetaDdlDate('');
+      setMetaDdlType('soft');
+      setMetaTags('');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSaveEdit = async (entryId: string, content: string) => {
@@ -999,14 +1091,23 @@ export function StreamView() {
               WebkitBackdropFilter: 'blur(12px)',
               border: isFocused ? '1px solid var(--color-accent)' : '1px solid var(--color-border)',
             }}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
           >
             {/* Markdown toolbar (above input) */}
             <MarkdownToolbar textareaRef={textareaRef} />
+
+            {isUploading && (
+              <div className="px-3.5 py-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                {t('Uploading...')}
+              </div>
+            )}
 
             <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={handlePaste}
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               onKeyDown={(e) => {
@@ -1104,7 +1205,7 @@ export function StreamView() {
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={!input.trim()}
+                disabled={!input.trim() || isSubmitting}
                 className="shrink-0 flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold text-white shadow-sm transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:hover:scale-100"
                 style={{ background: 'var(--color-accent)' }}
               >

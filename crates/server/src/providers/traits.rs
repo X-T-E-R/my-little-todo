@@ -11,6 +11,16 @@ pub struct User {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlobMeta {
+    pub id: String,
+    pub owner: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub size: i64,
+    pub created_at: String,
+}
+
 #[derive(Debug)]
 pub struct NewUser {
     pub username: String,
@@ -42,6 +52,19 @@ pub trait DatabaseProvider: Send + Sync {
     async fn put_setting(&self, user_id: &str, key: &str, value: &str) -> anyhow::Result<()>;
     async fn delete_setting(&self, user_id: &str, key: &str) -> anyhow::Result<()>;
     async fn list_settings(&self, user_id: &str) -> anyhow::Result<Vec<(String, String)>>;
+
+    // --- Blob metadata operations ---
+    async fn put_blob_meta(
+        &self,
+        id: &str,
+        owner: &str,
+        filename: &str,
+        mime_type: &str,
+        size: i64,
+    ) -> anyhow::Result<()>;
+    async fn get_blob_meta(&self, id: &str) -> anyhow::Result<Option<BlobMeta>>;
+    async fn delete_blob_meta(&self, id: &str) -> anyhow::Result<()>;
+    async fn list_blob_metas(&self, owner: &str) -> anyhow::Result<Vec<BlobMeta>>;
 
     // --- Lifecycle ---
     async fn close(&self) -> anyhow::Result<()>;

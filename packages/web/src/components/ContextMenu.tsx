@@ -11,7 +11,7 @@ import {
   Trash2,
   UserCircle,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRoleStore } from '../stores';
 
@@ -38,6 +38,44 @@ interface ContextMenuProps {
   onBatchSelect: () => void;
   onPromote?: () => void;
   onDemote?: () => void;
+}
+
+export function ConfirmableDeleteItem({
+  icon: Icon,
+  label,
+  confirmLabel,
+  onConfirm,
+}: {
+  icon: React.FC<{ size?: number }>;
+  label: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  const handleClick = useCallback(() => {
+    if (confirming) {
+      onConfirm();
+    } else {
+      setConfirming(true);
+      timerRef.current = setTimeout(() => setConfirming(false), 3000);
+    }
+  }, [confirming, onConfirm]);
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
+      style={{ color: 'var(--color-danger)' }}
+    >
+      <Icon size={14} />
+      {confirming ? confirmLabel : label}
+    </button>
+  );
 }
 
 export function ContextMenu({
@@ -194,7 +232,15 @@ export function ContextMenu({
 
         <div className="my-1 mx-2" style={{ borderTop: '1px solid var(--color-border)' }} />
 
-        <MenuItem icon={Trash2} label={t('Delete')} onClick={onDelete} danger />
+        <ConfirmableDeleteItem
+          icon={Trash2}
+          label={t('Delete')}
+          confirmLabel={t('Confirm delete?')}
+          onConfirm={() => {
+            onDelete();
+            onClose();
+          }}
+        />
       </motion.div>
     </AnimatePresence>
   );
