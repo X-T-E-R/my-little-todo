@@ -1,4 +1,4 @@
-import { formatTime } from '@my-little-todo/core';
+import { daysUntil, formatTime, isOverdue } from '@my-little-todo/core';
 import type { StreamEntry, StreamEntryType } from '@my-little-todo/core';
 import type { Task } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -310,18 +310,40 @@ function EntryCard({
             {/* Inline task info: DDL pill + subtask count */}
             {linkedTask && (
               <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                {linkedTask.ddl && (
-                  <span
-                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
-                    style={{
-                      background: 'var(--color-warning-soft, rgba(234,179,8,0.1))',
-                      color: 'var(--color-warning, #ca8a04)',
-                    }}
-                  >
-                    <Calendar size={10} />
-                    {formatDdlLabel(linkedTask.ddl)}
-                  </span>
-                )}
+                {linkedTask.ddl && (() => {
+                  const taskCompleted = linkedTask.status === 'completed';
+                  const overdue = isOverdue(linkedTask.ddl);
+                  const days = daysUntil(linkedTask.ddl);
+                  let bg: string;
+                  let fg: string;
+                  let label: string;
+                  if (taskCompleted && overdue) {
+                    bg = 'var(--color-success-soft, rgba(34,197,94,0.1))';
+                    fg = 'var(--color-success, #22c55e)';
+                    label = t('Completed');
+                  } else if (overdue) {
+                    bg = 'var(--color-danger-soft, rgba(239,68,68,0.1))';
+                    fg = 'var(--color-danger, #ef4444)';
+                    label = formatDdlLabel(linkedTask.ddl);
+                  } else if (days <= 2) {
+                    bg = 'var(--color-warning-soft, rgba(234,179,8,0.1))';
+                    fg = 'var(--color-warning, #ca8a04)';
+                    label = formatDdlLabel(linkedTask.ddl);
+                  } else {
+                    bg = 'var(--color-bg)';
+                    fg = 'var(--color-text-secondary)';
+                    label = formatDdlLabel(linkedTask.ddl);
+                  }
+                  return (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
+                      style={{ background: bg, color: fg }}
+                    >
+                      {taskCompleted && overdue ? <Check size={10} /> : <Calendar size={10} />}
+                      {label}
+                    </span>
+                  );
+                })()}
                 {subtaskCount > 0 && (
                   <span
                     className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"

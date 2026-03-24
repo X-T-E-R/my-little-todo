@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "LICENSE"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: lint
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Biome lint & format check
+        run: pnpm biome check .
+
+      - name: TypeScript type check
+        run: pnpm run typecheck
+
+      - name: Cargo clippy
+        run: cargo clippy -p mlt-server -p mlt-server-bin -- -D warnings
+
+  test-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          shared-key: test-rust
+
+      - name: Run Rust tests
+        run: cargo test -p mlt-server -p mlt-server-bin
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+
+      - name: Generate Rust coverage
+        run: cargo tarpaulin -p mlt-server --out json --output-dir coverage-rust
+        continue-on-error: true
+
+      - name: Upload Rust coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-rust
+          path: coverage-rust/
+          retention-days: 14
+
+  test-ts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build core package
+        run: pnpm turbo run build --filter=@my-little-todo/core
+
+      - name: Run TS tests with coverage
+        run: pnpm --filter @my-little-todo/core test:coverage
+
+      - name: Upload TS coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-ts
+          path: packages/core/coverage/
+          retention-days: 14

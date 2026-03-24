@@ -7,6 +7,7 @@ import { setStorageAdapter } from './storage/adapter';
 import { setSettingsApiBase } from './storage/settingsApi';
 import { useAuthStore } from './stores/authStore';
 import { createApiAdapter } from './storage/apiClient';
+import { initPlatform } from './utils/platform';
 
 // Apply saved theme immediately to prevent flash
 {
@@ -38,6 +39,7 @@ async function getApiBase(): Promise<string> {
 }
 
 async function initStorage() {
+  await initPlatform();
   const url = await getApiBase();
   useAuthStore.getState().setApiBase(url);
   setSettingsApiBase(url);

@@ -7,18 +7,15 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/core/package.json packages/core/
 COPY packages/web/package.json packages/web/
-COPY packages/admin/package.json packages/admin/
 
 RUN pnpm install --frozen-lockfile
 
 COPY packages/core packages/core
 COPY packages/web packages/web
-COPY packages/admin packages/admin
 COPY biome.json tsconfig.base.json ./
 
 RUN pnpm --filter @my-little-todo/core build && \
-    pnpm --filter @my-little-todo/web build:vite && \
-    pnpm --filter @my-little-todo/admin build
+    pnpm --filter @my-little-todo/web build:vite
 
 # ── Stage 2: Build Rust server ───────────────────────────────────
 FROM rust:1-bookworm AS rust-builder
@@ -45,7 +42,6 @@ WORKDIR /app
 
 COPY --from=rust-builder /app/target/release/mlt-server /usr/local/bin/mlt-server
 COPY --from=frontend-builder /app/packages/web/dist /app/static
-COPY --from=frontend-builder /app/packages/admin/dist /app/static/admin
 
 ENV PORT=3001 \
     HOST=0.0.0.0 \

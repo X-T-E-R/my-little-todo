@@ -9,6 +9,7 @@
     "fs:allow-appdata-read-recursive",
     "fs:allow-appdata-write-recursive",
     "fs:allow-appdata-meta-recursive",
-    "shell:allow-open"
+    "shell:allow-open",
+    "updater:default"
   ]
 }

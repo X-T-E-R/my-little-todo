@@ -159,3 +159,91 @@ impl ServerConfig {
         toml::to_string_pretty(self).unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_values() {
+        let config = ServerConfig::default();
+        assert_eq!(config.port, 3001);
+        assert_eq!(config.host, "0.0.0.0");
+        assert_eq!(config.auth_mode, AuthMode::Multi);
+        assert_eq!(config.db_type, DbType::Sqlite);
+        assert_eq!(config.data_dir, "./data");
+        assert!(config.database_url.is_none());
+        assert!(config.default_admin_password.is_none());
+        assert!(config.static_dir.is_none());
+        assert!(!config.jwt_secret.is_empty());
+    }
+
+    #[test]
+    fn toml_serialization_roundtrip() {
+        let config = ServerConfig {
+            port: 8080,
+            host: "127.0.0.1".into(),
+            auth_mode: AuthMode::Single,
+            db_type: DbType::Postgres,
+            data_dir: "/tmp/data".into(),
+            database_url: Some("postgres://localhost/test".into()),
+            jwt_secret: "fixed-secret".into(),
+            default_admin_password: Some("admin123".into()),
+            static_dir: Some("/var/www".into()),
+        };
+
+        let toml_str = config.to_toml_string();
+        let parsed: ServerConfig = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(parsed.port, 8080);
+        assert_eq!(parsed.host, "127.0.0.1");
+        assert_eq!(parsed.auth_mode, AuthMode::Single);
+        assert_eq!(parsed.db_type, DbType::Postgres);
+        assert_eq!(parsed.data_dir, "/tmp/data");
+        assert_eq!(parsed.database_url, Some("postgres://localhost/test".into()));
+        assert_eq!(parsed.jwt_secret, "fixed-secret");
+        assert_eq!(parsed.default_admin_password, Some("admin123".into()));
+        assert_eq!(parsed.static_dir, Some("/var/www".into()));
+    }
+
+    #[test]
+    fn toml_deserialization_with_defaults() {
+        let toml_str = r#"
+            port = 9090
+            host = "localhost"
+        "#;
+        let config: ServerConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.port, 9090);
+        assert_eq!(config.host, "localhost");
+        assert_eq!(config.auth_mode, AuthMode::Multi);
+        assert_eq!(config.db_type, DbType::Sqlite);
+    }
+
+    #[test]
+    fn auth_mode_serde() {
+        assert_eq!(
+            serde_json::to_string(&AuthMode::None).unwrap(),
+            "\"none\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AuthMode::Single).unwrap(),
+            "\"single\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AuthMode::Multi).unwrap(),
+            "\"multi\""
+        );
+    }
+
+    #[test]
+    fn db_type_serde() {
+        assert_eq!(
+            serde_json::to_string(&DbType::Sqlite).unwrap(),
+            "\"sqlite\""
+        );
+        assert_eq!(
+            serde_json::to_string(&DbType::Postgres).unwrap(),
+            "\"postgres\""
+        );
+    }
+}

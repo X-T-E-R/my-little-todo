@@ -5,6 +5,8 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "test": "turbo run test",
+    "test:rust": "cargo test -p mlt-server -p mlt-server-bin",
+    "test:all": "concurrently \"cargo test -p mlt-server -p mlt-server-bin\" \"turbo run test\"",
     "lint": "biome check .",
     "dev:pwa": "pnpm --filter @my-little-todo/web dev:pwa",
     "build:pwa": "pnpm --filter @my-little-todo/web build:pwa",

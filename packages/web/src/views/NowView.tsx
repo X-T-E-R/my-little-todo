@@ -1,4 +1,5 @@
 import type { Task, TaskStatus } from '@my-little-todo/core';
+import { daysUntil, isOverdue } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Check,
@@ -706,7 +707,7 @@ export function NowView() {
           )}
         </motion.div>
 
-        {ddlLabel && (
+        {ddlLabel && currentTask.ddl && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -717,7 +718,7 @@ export function NowView() {
               border: '1px solid var(--color-border)',
             }}
           >
-            <Clock size={16} style={{ color: 'var(--color-warning)' }} />
+            <Clock size={16} style={{ color: isOverdue(currentTask.ddl) ? 'var(--color-danger)' : daysUntil(currentTask.ddl) <= 2 ? 'var(--color-warning)' : 'var(--color-text-tertiary)' }} />
             <span className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
               {ddlLabel}
             </span>

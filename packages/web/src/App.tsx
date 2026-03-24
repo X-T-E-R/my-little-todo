@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreateTaskDialog } from './components/CreateTaskDialog';
 import { QuickInputBar } from './components/QuickInputBar';
+import { ToastContainer } from './components/Toast';
 import { RoleLandingCard } from './components/RoleLandingCard';
 import { RoleSidebar } from './components/RoleSidebar';
 import { TaskDetailPanel } from './components/TaskDetailPanel';
@@ -206,6 +207,8 @@ export function App() {
         <CreateTaskDialog open={showCreateTask} onClose={() => setShowCreateTask(false)} />
         <TaskDetailPanel />
       </div>
+
+      <ToastContainer />
     </div>
   );
 }

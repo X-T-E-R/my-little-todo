@@ -1,6 +1,7 @@
 import type React from 'react';
 import { motion } from 'framer-motion';
 import {
+  Activity,
   CalendarClock,
   CheckCircle,
   Cloud,
@@ -17,23 +18,28 @@ import {
   RefreshCw,
   RotateCcw,
   Server,
+  Shield,
+  Trash2,
   Upload,
+  Users,
   Wifi,
   XCircle,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../locales';
 import { ScheduleEditor } from '../components/ScheduleEditor';
-import { getAuthToken } from '../stores/authStore';
+import { getAuthToken, useAuthStore } from '../stores/authStore';
 import { getSetting, putSetting, deleteSetting, getSettingsApiBase } from '../storage/settingsApi';
 import { useScheduleStore, useShortcutStore, useStreamStore, useTaskStore, useRoleStore } from '../stores';
+import { useToastStore } from '../stores/toastStore';
 import { useIsMobile } from '../utils/useIsMobile';
 import { eventToKeyString } from '../utils/shortcuts';
+import { getPlatform, isTauriEnv, canChooseMode, canEditBackendUrl, canControlServer, canExportToFolder, hasKeyboardShortcuts } from '../utils/platform';
 
-type SettingsTab = 'general' | 'schedule' | 'shortcuts' | 'sync' | 'data' | 'about';
+type SettingsTab = 'general' | 'schedule' | 'shortcuts' | 'sync' | 'data' | 'about' | 'admin';
 
-const TABS: { id: SettingsTab; label: string; icon: typeof Key }[] = [
+const BASE_TABS: { id: SettingsTab; label: string; icon: typeof Key }[] = [
   { id: 'general', label: 'General', icon: Moon },
   { id: 'schedule', label: 'Schedule', icon: CalendarClock },
   { id: 'shortcuts', label: 'Shortcuts', icon: Command },
@@ -480,17 +486,8 @@ function DataTab() {
     })();
   }, []);
 
-  const [isTauriDataTab, setIsTauriDataTab] = useState(false);
-  useEffect(() => {
-    (async () => {
-      try {
-        await import('@tauri-apps/api/core');
-        setIsTauriDataTab(true);
-      } catch {
-        setIsTauriDataTab(false);
-      }
-    })();
-  }, []);
+  const isTauriDataTab = canExportToFolder();
+  const showToast = useToastStore((s) => s.showToast);
 
   const handleExport = async (format: 'json' | 'markdown', asZip = false) => {
     setExporting(format);
@@ -541,8 +538,9 @@ function DataTab() {
         a.click();
         URL.revokeObjectURL(url);
       }
+      showToast({ type: 'success', message: t('Export completed successfully') });
     } catch (err) {
-      console.error(err);
+      showToast({ type: 'error', message: t('Export failed: {{message}}', { message: err instanceof Error ? err.message : String(err) }) });
     } finally {
       setExporting(null);
     }
@@ -906,10 +904,10 @@ function DataTab() {
         </div>
       </section>
 
-      <hr style={{ borderColor: 'var(--color-border)' }} />
+      {isTauriDataTab && <hr style={{ borderColor: 'var(--color-border)' }} />}
 
-      {/* Continuous export */}
-      <section>
+      {/* Continuous export — Tauri only */}
+      {isTauriDataTab && <section>
         <div className="flex items-center gap-2 mb-2">
           <RefreshCw size={16} className="text-[var(--color-accent)]" />
           <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Continuous Export')}</h3>
@@ -1025,16 +1023,20 @@ function DataTab() {
             </>
           )}
         </div>
-      </section>
+      </section>}
     </div>
   );
 }
 
 function SyncTab() {
   const { t } = useTranslation('settings');
+  const platform = getPlatform();
+  const showModeSelector = canChooseMode();
+  const showServerConfig = canControlServer();
+  const editableBackend = canEditBackendUrl();
+
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testMsg, setTestMsg] = useState('');
-  const [isTauriEnv, setIsTauriEnv] = useState(false);
   const [serverRunning, setServerRunning] = useState(false);
   const [serverHost, setServerHost] = useState('127.0.0.1');
   const [serverPort, setServerPort] = useState(3001);
@@ -1053,26 +1055,32 @@ function SyncTab() {
   const isLanSharing = serverHost === '0.0.0.0';
 
   useEffect(() => {
-    (async () => {
-      try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const cfg = await invoke<{
-          port: number;
-          host: string;
-          auth_mode: string;
-          running: boolean;
-        }>('get_server_config');
-        setServerRunning(cfg.running);
-        setServerHost(cfg.host);
-        setServerPort(cfg.port);
-        setPendingHost(cfg.host);
-        setPendingPort(cfg.port);
-        setIsTauriEnv(true);
-      } catch {
-        setIsTauriEnv(false);
-      }
-    })();
-  }, []);
+    if (platform === 'tauri') {
+      (async () => {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          const cfg = await invoke<{
+            port: number;
+            host: string;
+            auth_mode: string;
+            running: boolean;
+          }>('get_server_config');
+          setServerRunning(cfg.running);
+          setServerHost(cfg.host);
+          setServerPort(cfg.port);
+          setPendingHost(cfg.host);
+          setPendingPort(cfg.port);
+        } catch { /* ignore */ }
+      })();
+    } else {
+      (async () => {
+        try {
+          const res = await fetch(`${getSettingsApiBase()}/health`, { signal: AbortSignal.timeout(3000) });
+          if (res.ok) setServerRunning(true);
+        } catch { /* not reachable */ }
+      })();
+    }
+  }, [platform]);
 
   const handleTest = async () => {
     setTestStatus('testing');
@@ -1094,7 +1102,7 @@ function SyncTab() {
   };
 
   const handleRestart = async () => {
-    if (!isTauriEnv) return;
+    if (!showServerConfig) return;
     setRestarting(true);
     setRestartMsg('');
     try {
@@ -1123,7 +1131,7 @@ function SyncTab() {
   return (
     <div className="flex flex-col gap-6">
       {/* Usage mode selector — Tauri only */}
-      {isTauriEnv && (
+      {showModeSelector && (
         <section>
           <div className="flex items-center gap-2 mb-3">
             <Server size={16} className="text-[var(--color-accent)]" />
@@ -1205,7 +1213,7 @@ function SyncTab() {
         </section>
       )}
 
-      {isTauriEnv && <hr style={{ borderColor: 'var(--color-border)' }} />}
+      {showModeSelector && <hr style={{ borderColor: 'var(--color-border)' }} />}
 
       {/* Connection status */}
       <section>
@@ -1214,16 +1222,56 @@ function SyncTab() {
           <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Backend Connection')}</h3>
         </div>
         <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {t('Data is read, written, and synced through the API server. The PC desktop version auto-starts an embedded server; the web version uses the current domain.')}
+          {platform === 'web-hosted'
+            ? t('Hosted by the server — the backend address is fixed to the current domain.')
+            : t('Data is read, written, and synced through the API server. The PC desktop version auto-starts an embedded server; the web version uses the current domain.')}
         </p>
 
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
             <div className={`h-2.5 w-2.5 rounded-full shrink-0 ${serverRunning ? 'bg-emerald-500' : 'bg-gray-400'}`} />
             <span className="rounded-lg bg-[var(--color-bg)] px-3 py-2 text-xs font-mono text-[var(--color-text-secondary)] break-all border border-[var(--color-border)] flex-1">
-              {getSettingsApiBase()}
+              {getSettingsApiBase() || window.location.origin}
             </span>
           </div>
+
+          {/* Editable backend URL for capacitor / web-standalone (non-Tauri, non-hosted) */}
+          {!showModeSelector && editableBackend && (
+            <div className="flex flex-col gap-2">
+              <input
+                type="url"
+                value={cloudUrl}
+                onChange={(e) => setCloudUrl(e.target.value)}
+                placeholder="https://your-server.com"
+                className="w-full rounded-xl px-3 py-2 text-xs outline-none transition-colors border"
+                style={{
+                  background: 'var(--color-bg)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)',
+                }}
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.setItem('mlt-cloud-url', cloudUrl);
+                    setModeSaved(true);
+                    setTimeout(() => setModeSaved(false), 3000);
+                  }}
+                  className="rounded-xl border px-4 py-2 text-xs font-medium transition-colors"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                >
+                  {t('Save')}
+                </button>
+                {modeSaved && (
+                  <span className="text-xs text-emerald-500 flex items-center gap-1">
+                    <CheckCircle size={12} />
+                    {t('Saved — restart the app to apply')}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             <button
@@ -1253,7 +1301,7 @@ function SyncTab() {
       </section>
 
       {/* Server config — only in Tauri PC mode */}
-      {isTauriEnv && (
+      {showServerConfig && (
         <>
           <hr style={{ borderColor: 'var(--color-border)' }} />
           <section>
@@ -1536,16 +1584,339 @@ function CloudBackupSection() {
   );
 }
 
+/* ── Admin Tab (visible to admins only) ── */
+
+interface AdminUserItem {
+  id: string;
+  username: string;
+  is_admin: boolean;
+  created_at: string;
+}
+
+function AdminTab() {
+  const { t } = useTranslation('settings');
+  const [stats, setStats] = useState<{ total_users: number; db_type: string; auth_mode: string } | null>(null);
+  const [users, setUsers] = useState<AdminUserItem[]>([]);
+  const [resetId, setResetId] = useState<string | null>(null);
+  const [newPw, setNewPw] = useState('');
+  const [error, setError] = useState('');
+  const showToast = useToastStore((s) => s.showToast);
+
+  const apiHeaders = useCallback((): HeadersInit => {
+    const h: HeadersInit = { 'Content-Type': 'application/json' };
+    const token = getAuthToken();
+    if (token) h.Authorization = `Bearer ${token}`;
+    return h;
+  }, []);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${getSettingsApiBase()}/api/admin/stats`, { headers: apiHeaders() });
+      if (res.ok) setStats(await res.json());
+    } catch { /* ignore */ }
+  }, [apiHeaders]);
+
+  const loadUsers = useCallback(async () => {
+    try {
+      const res = await fetch(`${getSettingsApiBase()}/api/admin/users`, { headers: apiHeaders() });
+      if (res.ok) setUsers(await res.json());
+    } catch { /* ignore */ }
+  }, [apiHeaders]);
+
+  useEffect(() => { loadStats(); loadUsers(); }, [loadStats, loadUsers]);
+
+  const handleDelete = async (id: string, username: string) => {
+    if (!confirm(t('Confirm delete user {{username}}?', { username }))) return;
+    try {
+      const res = await fetch(`${getSettingsApiBase()}/api/admin/users/${id}`, { method: 'DELETE', headers: apiHeaders() });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+      showToast({ type: 'success', message: t('User {{username}} deleted', { username }) });
+      loadUsers();
+      loadStats();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed');
+    }
+  };
+
+  const handleReset = async (id: string) => {
+    if (!newPw) return;
+    try {
+      const res = await fetch(`${getSettingsApiBase()}/api/admin/users/${id}/password`, {
+        method: 'POST',
+        headers: apiHeaders(),
+        body: JSON.stringify({ password: newPw }),
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+      showToast({ type: 'success', message: t('Password reset successfully') });
+      setResetId(null);
+      setNewPw('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Reset failed');
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Server Overview */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <Activity size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Server Overview')}</h3>
+        </div>
+        {stats && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {[
+              { label: t('Total Users'), value: String(stats.total_users), icon: <Users size={16} /> },
+              { label: t('Database Type'), value: stats.db_type, icon: <Activity size={16} /> },
+              { label: t('Auth Mode'), value: stats.auth_mode, icon: <Key size={16} /> },
+            ].map((card) => (
+              <div key={card.label} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                <div className="mb-1.5 flex items-center gap-2 text-[var(--color-text-secondary)]">
+                  {card.icon}
+                  <span className="text-xs">{card.label}</span>
+                </div>
+                <p className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>{card.value}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <hr style={{ borderColor: 'var(--color-border)' }} />
+
+      {/* User Management */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <Users size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('User Management')}</h3>
+        </div>
+        {error && <p className="text-sm text-red-400 mb-2">{error}</p>}
+        <div className="overflow-x-auto rounded-xl border border-[var(--color-border)]">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">{t('Username')}</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">{t('Role')}</th>
+                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">{t('Created At')}</th>
+                <th className="px-4 py-3 text-right font-medium text-[var(--color-text-secondary)]">{t('Actions')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id} className="border-b border-[var(--color-border)] last:border-0">
+                  <td className="px-4 py-3">{u.username}</td>
+                  <td className="px-4 py-3">
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${
+                      u.is_admin
+                        ? 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]'
+                        : 'bg-[var(--color-border)] text-[var(--color-text-secondary)]'
+                    }`}>
+                      {u.is_admin ? t('Admin') : t('User')}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-[var(--color-text-secondary)]">{u.created_at}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      {resetId === u.id ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="password"
+                            value={newPw}
+                            onChange={(e) => setNewPw(e.target.value)}
+                            placeholder={t('New Password')}
+                            className="w-24 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none"
+                          />
+                          <button type="button" onClick={() => handleReset(u.id)} className="rounded bg-[var(--color-accent)] px-2 py-1 text-xs text-white">
+                            {t('Confirm')}
+                          </button>
+                          <button type="button" onClick={() => { setResetId(null); setNewPw(''); }} className="rounded px-2 py-1 text-xs text-[var(--color-text-secondary)]">
+                            {t('Cancel')}
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button type="button" onClick={() => setResetId(u.id)} className="rounded p-1 text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]" title={t('Reset Password')}>
+                            <Key size={14} />
+                          </button>
+                          {!u.is_admin && (
+                            <button type="button" onClick={() => handleDelete(u.id, u.username)} className="rounded p-1 text-[var(--color-text-secondary)] hover:text-red-400" title={t('Delete User')}>
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function AboutTab() {
   const { t } = useTranslation('settings');
+  const showToast = useToastStore((s) => s.showToast);
+  const tauri = isTauriEnv();
+
+  type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error';
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle');
+  const [updateVersion, setUpdateVersion] = useState('');
+  const [updateNotes, setUpdateNotes] = useState('');
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const updateRef = useRef<Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>> | null>(null);
+
+  const handleCheckUpdate = useCallback(async () => {
+    setUpdateStatus('checking');
+    try {
+      const { check } = await import('@tauri-apps/plugin-updater');
+      const update = await check();
+      if (update) {
+        updateRef.current = update;
+        setUpdateVersion(update.version);
+        setUpdateNotes(update.body ?? '');
+        setUpdateStatus('available');
+      } else {
+        setUpdateStatus('idle');
+        showToast({ type: 'info', message: t('Already up to date') });
+      }
+    } catch (e: unknown) {
+      setUpdateStatus('error');
+      showToast({ type: 'error', message: t('Update check failed: {{message}}', { message: String(e) }) });
+    }
+  }, [showToast, t]);
+
+  const handleDownloadAndInstall = useCallback(async () => {
+    const update = updateRef.current;
+    if (!update) return;
+    setUpdateStatus('downloading');
+    setDownloadProgress(0);
+    try {
+      let totalLen = 0;
+      let downloaded = 0;
+      await update.downloadAndInstall((event) => {
+        if (event.event === 'Started' && event.data.contentLength) {
+          totalLen = event.data.contentLength;
+        } else if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength;
+          if (totalLen > 0) setDownloadProgress(Math.round((downloaded / totalLen) * 100));
+        } else if (event.event === 'Finished') {
+          setDownloadProgress(100);
+        }
+      });
+      setUpdateStatus('ready');
+    } catch (e: unknown) {
+      setUpdateStatus('error');
+      showToast({ type: 'error', message: t('Update download failed: {{message}}', { message: String(e) }) });
+    }
+  }, [showToast, t]);
+
+  const handleRelaunch = useCallback(async () => {
+    const { relaunch } = await import('@tauri-apps/plugin-process');
+    await relaunch();
+  }, []);
+
   return (
-    <div className="flex flex-col gap-2 text-sm text-[var(--color-text-secondary)]">
+    <div className="flex flex-col gap-4 text-sm text-[var(--color-text-secondary)]">
       <p>
         My Little Todo <span className="text-[var(--color-text-tertiary)]">v0.1.0</span>
       </p>
       <p className="text-xs text-[var(--color-text-tertiary)]">
         {t('This is not a task manager — this is your external execution system.')}
       </p>
+
+      {tauri && (
+        <div className="flex flex-col gap-3 mt-2 p-3 rounded-lg" style={{ background: 'var(--color-surface)' }}>
+          <div className="flex items-center gap-2 text-xs font-medium text-[var(--color-text-primary)]">
+            <Download size={14} />
+            {t('Auto Update')}
+          </div>
+
+          {updateStatus === 'idle' && (
+            <button
+              type="button"
+              onClick={handleCheckUpdate}
+              className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+              style={{ background: 'var(--color-primary)', color: '#fff' }}
+            >
+              <RefreshCw size={12} />
+              {t('Check for Updates')}
+            </button>
+          )}
+
+          {updateStatus === 'checking' && (
+            <div className="flex items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
+              <Loader2 size={14} className="animate-spin" />
+              {t('Checking for updates...')}
+            </div>
+          )}
+
+          {updateStatus === 'available' && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs">
+                {t('New version available: v{{version}}', { version: updateVersion })}
+              </p>
+              {updateNotes && (
+                <p className="text-xs text-[var(--color-text-tertiary)] whitespace-pre-wrap">{updateNotes}</p>
+              )}
+              <button
+                type="button"
+                onClick={handleDownloadAndInstall}
+                className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                style={{ background: 'var(--color-primary)', color: '#fff' }}
+              >
+                <HardDriveDownload size={12} />
+                {t('Download and Install')}
+              </button>
+            </div>
+          )}
+
+          {updateStatus === 'downloading' && (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2 text-xs text-[var(--color-text-tertiary)]">
+                <Loader2 size={14} className="animate-spin" />
+                {t('Downloading update... {{progress}}%', { progress: downloadProgress })}
+              </div>
+              <div className="w-full h-1.5 rounded-full" style={{ background: 'var(--color-border)' }}>
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${downloadProgress}%`, background: 'var(--color-primary)' }}
+                />
+              </div>
+            </div>
+          )}
+
+          {updateStatus === 'ready' && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-green-600">{t('Update installed successfully')}</p>
+              <button
+                type="button"
+                onClick={handleRelaunch}
+                className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                style={{ background: 'var(--color-primary)', color: '#fff' }}
+              >
+                <RefreshCw size={12} />
+                {t('Restart Now')}
+              </button>
+            </div>
+          )}
+
+          {updateStatus === 'error' && (
+            <button
+              type="button"
+              onClick={handleCheckUpdate}
+              className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors"
+              style={{ background: 'var(--color-primary)', color: '#fff' }}
+            >
+              <RefreshCw size={12} />
+              {t('Retry')}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1565,6 +1936,7 @@ const TAB_CONTENT: Record<SettingsTab, () => React.JSX.Element> = {
   sync: SyncTab,
   data: DataTab,
   about: AboutTab,
+  admin: AdminTab,
 };
 
 /* ── Main Settings View ── */
@@ -1572,8 +1944,20 @@ const TAB_CONTENT: Record<SettingsTab, () => React.JSX.Element> = {
 export function SettingsView() {
   const { t } = useTranslation('settings');
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
-  const ActiveContent = TAB_CONTENT[activeTab];
   const isMobile = useIsMobile();
+  const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false);
+  const showShortcuts = hasKeyboardShortcuts();
+
+  const TABS = BASE_TABS.filter((tab) => {
+    if (tab.id === 'shortcuts' && !showShortcuts) return false;
+    return true;
+  });
+
+  const visibleTabs: typeof TABS = isAdmin
+    ? [...TABS, { id: 'admin', label: 'Admin', icon: Shield }]
+    : TABS;
+
+  const ActiveContent = TAB_CONTENT[activeTab] ?? GeneralTab;
 
   return (
     <div className={`flex h-full bg-[var(--color-bg)] ${isMobile ? 'flex-col' : ''}`}>
@@ -1582,7 +1966,7 @@ export function SettingsView() {
           className="flex items-center gap-0.5 px-2 pt-2 pb-1 overflow-x-auto shrink-0"
           style={{ borderBottom: '1px solid var(--color-border)' }}
         >
-          {TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
@@ -1611,7 +1995,7 @@ export function SettingsView() {
             {t('Settings')}
           </h1>
 
-          {TABS.map((tab) => {
+          {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
@@ -1642,7 +2026,7 @@ export function SettingsView() {
             transition={{ duration: 0.15 }}
           >
             <h2 className="text-base font-bold mb-6" style={{ color: 'var(--color-text)' }}>
-              {t(TABS.find((tab) => tab.id === activeTab)?.label ?? '')}
+              {t(visibleTabs.find((tab) => tab.id === activeTab)?.label ?? '')}
             </h2>
             <ActiveContent />
           </motion.div>
