@@ -1,18 +1,22 @@
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Loader2, LogIn, UserPlus } from 'lucide-react';
+import { Eye, EyeOff, Loader2, LogIn, Settings, UserPlus } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../stores/authStore';
 
+const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
 export function LoginView() {
   const { t } = useTranslation('login');
   const { authMode, needsSetup, login, register } = useAuthStore();
-  const [isRegister, setIsRegister] = useState(needsSetup);
+  const [isRegister, setIsRegister] = useState(needsSetup && isTauri);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const serverNeedsSetup = needsSetup && !isTauri;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,6 +34,38 @@ export function LoginView() {
       setLoading(false);
     }
   };
+
+  if (serverNeedsSetup) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--color-bg)] p-4">
+        <motion.div
+          initial={{ opacity: 0, y: 20, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          className="w-full max-w-sm"
+        >
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8 shadow-xl">
+            <div className="mb-6 text-center">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-accent)]/10">
+                <Settings size={24} className="text-[var(--color-accent)]" />
+              </div>
+              <h1 className="text-xl font-semibold text-[var(--color-text)]">{t('Setup required')}</h1>
+              <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+                {t('Please visit the admin panel to create the first admin account before using this app.')}
+              </p>
+            </div>
+            <a
+              href="/admin"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
+            >
+              <Settings size={16} />
+              {t('Go to Admin Panel')}
+            </a>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   const canRegister = authMode === 'multi' || needsSetup;
   const title = needsSetup

@@ -23,5 +23,11 @@
   "Confirm delete user {{username}}?": "确定删除用户 {{username}}？",
   "Loading...": "加载中...",
   "Admin privileges required": "需要管理员权限",
-  "Log Out": "退出登录"
+  "Log Out": "退出登录",
+  "Initial Setup": "初始设置",
+  "Create the first admin account to get started": "创建第一个管理员账户以开始使用",
+  "Admin Username Placeholder": "请输入管理员用户名",
+  "Password Placeholder": "请输入密码",
+  "Create Admin Account": "创建管理员账户",
+  "Creating...": "创建中..."
 }

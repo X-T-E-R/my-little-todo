@@ -84,9 +84,9 @@ echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
 
 # Start
 docker compose up -d
-
-# Access at http://localhost:3001
 ```
+
+**First-time setup**: Visit `http://localhost:3001/admin` to create the first admin account. Once done, users can access the web app at `http://localhost:3001`.
 
 Data is stored in `./data/` on the host — easy to backup and inspect.
 
@@ -173,23 +173,94 @@ pnpm build:admin
 pnpm build:pwa
 ```
 
-## Deployment Modes
+## Usage Guide
 
-### Mode 1: PC Desktop (Tauri)
+### Docker Server Deployment
 
-- Download and install — works out of the box
-- Embedded Rust backend + SQLite
-- Single-user by default; optional password & multi-user in settings
-- Optional LAN access for mobile / other devices
-- Can also connect to a remote cloud server
+The recommended way to deploy. Follow the Quick Start above to create `docker-compose.yml` and start the container.
 
-### Mode 2: Standalone Server
+1. After starting, visit `http://your-host:3001/admin` to open the admin panel
+2. On first visit, the system will guide you to create the first admin account
+3. Once the admin is created, visit `http://your-host:3001` to use the web app
+4. For multi-user setups, other users can register through the web app (admin can manage users from the admin panel)
 
-- Run `mlt-server` binary or use Docker
-- Configure via `config.toml` or environment variables
-- Multi-user with password auth by default
-- Supports SQLite / PostgreSQL / MySQL / MongoDB
-- Web and mobile clients connect via browser
+To set up a reverse proxy (Nginx / Caddy), point your domain to `localhost:3001` — no special location rules needed.
+
+### Standalone Server (Binary)
+
+For environments without Docker.
+
+1. Build the server and frontend from source:
+   ```bash
+   git clone https://github.com/X-T-E-R/my-little-todo.git
+   cd my-little-todo
+   pnpm install
+
+   # Build the server
+   cargo build --release -p mlt-server-bin
+
+   # Build the frontend
+   pnpm --filter @my-little-todo/core build
+   pnpm --filter @my-little-todo/web build:vite
+   pnpm build:admin
+   ```
+2. Prepare the static files directory:
+   ```bash
+   mkdir -p static/admin
+   cp -r packages/web/dist/* static/
+   cp -r packages/admin/dist/* static/admin/
+   ```
+3. Start the server:
+   ```bash
+   export STATIC_DIR=./static
+   export AUTH_MODE=multi
+   export JWT_SECRET=$(openssl rand -base64 32)
+   ./target/release/mlt-server
+   ```
+   You can also create a `config.toml` file (see `config.example.toml`).
+4. First-time setup: visit `http://localhost:3001/admin` to create the admin, then use the web app at `http://localhost:3001`
+
+### PC Desktop (Tauri)
+
+A local app that works out of the box — no server required.
+
+1. Download the installer from [Releases](https://github.com/X-T-E-R/my-little-todo/releases) (Windows .msi/.exe, macOS .dmg, Linux .AppImage)
+2. Install and launch — the first run will guide you through the initial setup
+3. Single-user mode by default, no password required, data stored locally
+4. Enable "LAN access" in settings to let phones or other devices connect via browser
+5. You can also connect to a remote cloud server for multi-device sync
+
+Build from source:
+```bash
+pnpm --filter @my-little-todo/web build
+```
+
+### PWA Web App
+
+Lightweight option for mobile devices.
+
+1. Open your deployed server URL in a mobile browser (e.g., `https://your-domain.com`)
+2. Log in or register
+3. Use the browser's "Add to Home Screen" feature to install the app
+4. PWA supports offline caching — previously loaded data remains accessible without network
+
+Build the PWA from source:
+```bash
+pnpm build:pwa
+```
+
+### Mobile App (Capacitor)
+
+Native mobile app (in development).
+
+1. Build from source:
+   ```bash
+   pnpm build:mobile
+   pnpm cap:sync
+   pnpm cap:open:android  # or cap:open:ios
+   ```
+2. Compile and install to your device from Android Studio or Xcode
+3. The app requires a deployed server — configure the server address in settings
 
 ## MCP Integration
 

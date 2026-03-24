@@ -84,9 +84,9 @@ echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
 
 # 启动
 docker compose up -d
-
-# 访问 http://localhost:3001
 ```
+
+**首次使用**：访问 `http://localhost:3001/admin` 创建第一个管理员账户。管理员创建完成后，用户即可通过 `http://localhost:3001` 访问 Web 端登录使用。
 
 数据存储在主机的 `./data/` 目录中，方便备份和查看。
 
@@ -173,23 +173,94 @@ pnpm build:admin
 pnpm build:pwa
 ```
 
-## 部署模式
+## 使用指南
 
-### 模式一：PC 桌面端 (Tauri)
+### Docker 服务器部署
 
-- 下载安装 exe/dmg，开箱即用
-- 自带内嵌 Rust 后端 + SQLite 数据库
-- 默认单用户无密码，可在设置中开启密码和多用户
-- 可选开启局域网访问，让手机/其他设备连接
-- 也支持连接远程云端服务器
+最推荐的服务器部署方式。参考上方「快速开始」创建 `docker-compose.yml` 并启动。
 
-### 模式二：纯服务器
+1. 启动容器后，访问 `http://your-host:3001/admin` 进入管理面板
+2. 首次访问时系统会引导你创建第一个管理员账户
+3. 管理员创建完成后，访问 `http://your-host:3001` 即可使用 Web 端
+4. 如需多用户，其他用户可通过 Web 端注册（管理员可在管理面板中管理用户）
 
-- 运行 `mlt-server` 独立二进制，或使用 Docker 部署
-- 通过 `config.toml` 或环境变量配置
-- 默认多用户 + 密码认证
-- 支持 SQLite / PostgreSQL / MySQL / MongoDB
-- 网页端和手机端通过浏览器访问
+如需配置反向代理（Nginx / Caddy），将域名指向 `localhost:3001` 即可，无需额外的 location 规则。
+
+### 纯服务器部署（二进制）
+
+适合不使用 Docker 的场景。
+
+1. 从源码编译服务器和前端：
+   ```bash
+   git clone https://github.com/X-T-E-R/my-little-todo.git
+   cd my-little-todo
+   pnpm install
+
+   # 编译服务器
+   cargo build --release -p mlt-server-bin
+
+   # 构建前端
+   pnpm --filter @my-little-todo/core build
+   pnpm --filter @my-little-todo/web build:vite
+   pnpm build:admin
+   ```
+2. 准备静态文件目录：
+   ```bash
+   mkdir -p static/admin
+   cp -r packages/web/dist/* static/
+   cp -r packages/admin/dist/* static/admin/
+   ```
+3. 启动服务器：
+   ```bash
+   export STATIC_DIR=./static
+   export AUTH_MODE=multi
+   export JWT_SECRET=$(openssl rand -base64 32)
+   ./target/release/mlt-server
+   ```
+   也可创建 `config.toml` 配置文件（参考 `config.example.toml`）。
+4. 首次使用：访问 `http://localhost:3001/admin` 创建管理员，然后通过 `http://localhost:3001` 使用
+
+### PC 桌面端（Tauri）
+
+开箱即用的本地应用，无需服务器。
+
+1. 从 [Releases](https://github.com/X-T-E-R/my-little-todo/releases) 下载对应平台的安装包（Windows .msi/.exe、macOS .dmg、Linux .AppImage）
+2. 安装并启动，首次打开会进入引导设置
+3. 默认单用户模式，无需密码，数据存储在本地
+4. 在设置中可开启「局域网访问」，让手机等设备通过浏览器连接到你的桌面端
+5. 也支持连接远程云端服务器，实现多端同步
+
+从源码构建桌面端：
+```bash
+pnpm --filter @my-little-todo/web build
+```
+
+### PWA 网页应用
+
+适合移动设备上的轻量使用。
+
+1. 在手机或平板浏览器中访问已部署的服务器地址（如 `https://your-domain.com`）
+2. 登录或注册账号
+3. 使用浏览器的「添加到主屏幕」功能将应用安装到桌面
+4. PWA 支持离线缓存，即使断网也能查看已加载的数据
+
+从源码构建 PWA 版本：
+```bash
+pnpm build:pwa
+```
+
+### 移动端（Capacitor）
+
+原生移动端应用（开发中）。
+
+1. 从源码构建：
+   ```bash
+   pnpm build:mobile
+   pnpm cap:sync
+   pnpm cap:open:android  # 或 cap:open:ios
+   ```
+2. 在 Android Studio 或 Xcode 中编译并安装到设备
+3. 应用需要连接到已部署的服务器（在设置中配置服务器地址）
 
 ## MCP 集成
 

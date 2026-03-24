@@ -47,6 +47,75 @@ function LanguageSelector() {
   );
 }
 
+function SetupPage({ onSetup }: { onSetup: () => void }) {
+  const { t } = useTranslation('admin');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const data = await api.register(username, password);
+      api.setToken(data.token);
+      onSetup();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Registration failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="w-full max-w-sm rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-8">
+        <div className="mb-4 flex justify-end">
+          <LanguageSelector />
+        </div>
+        <div className="mb-6 text-center">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-accent)]/10">
+            <Key size={24} className="text-[var(--color-accent)]" />
+          </div>
+          <h1 className="text-xl font-semibold">{t('Initial Setup')}</h1>
+          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+            {t('Create the first admin account to get started')}
+          </p>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <input
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder={t('Admin Username Placeholder')}
+            className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+            required
+            autoFocus
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={t('Password Placeholder')}
+            className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+            required
+          />
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          <button
+            type="submit"
+            disabled={loading || !username || !password}
+            className="w-full rounded-lg bg-[var(--color-accent)] py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {loading ? t('Creating...') : t('Create Admin Account')}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function LoginPage({ onLogin }: { onLogin: () => void }) {
   const { t } = useTranslation('admin');
   const [username, setUsername] = useState('');
@@ -272,27 +341,21 @@ export function AdminApp() {
   const [page, setPage] = useState<Page>('dashboard');
   const [stats, setStats] = useState<Stats | null>(null);
   const [checking, setChecking] = useState(true);
+  const [needsSetup, setNeedsSetup] = useState(false);
 
   useEffect(() => {
-    const token = api.getToken();
-    if (!token) {
-      setChecking(false);
-      return;
-    }
-    api
-      .getMe()
-      .then((u) => {
-        if (!u.is_admin) {
+    Promise.all([api.getAuthMode(), api.getToken() ? api.getMe().catch(() => null) : Promise.resolve(null)])
+      .then(([mode, me]) => {
+        setNeedsSetup(mode.needs_setup);
+        if (me && me.is_admin) {
+          setUser(me);
+          setAuthed(true);
+        } else if (api.getToken()) {
           api.clearToken();
-          setChecking(false);
-          return;
         }
-        setUser(u);
-        setAuthed(true);
         setChecking(false);
       })
       .catch(() => {
-        api.clearToken();
         setChecking(false);
       });
   }, []);
@@ -308,6 +371,19 @@ export function AdminApp() {
     setUser(null);
   };
 
+  const handlePostAuth = () => {
+    api.getMe().then((u) => {
+      if (!u.is_admin) {
+        api.clearToken();
+        alert(t('Admin privileges required'));
+        return;
+      }
+      setUser(u);
+      setAuthed(true);
+      setNeedsSetup(false);
+    });
+  };
+
   if (checking) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -316,22 +392,12 @@ export function AdminApp() {
     );
   }
 
+  if (needsSetup && !authed) {
+    return <SetupPage onSetup={handlePostAuth} />;
+  }
+
   if (!authed) {
-    return (
-      <LoginPage
-        onLogin={() => {
-          api.getMe().then((u) => {
-            if (!u.is_admin) {
-              api.clearToken();
-              alert(t('Admin privileges required'));
-              return;
-            }
-            setUser(u);
-            setAuthed(true);
-          });
-        }}
-      />
-    );
+    return <LoginPage onLogin={handlePostAuth} />;
   }
 
   const navItems: { key: Page; label: string; icon: React.ReactNode }[] = [

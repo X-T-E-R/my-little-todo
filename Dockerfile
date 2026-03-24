@@ -38,10 +38,8 @@ RUN GIT_HASH=${GIT_HASH} cargo build --release -p mlt-server-bin
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libssl3 gosu && \
+    ca-certificates libssl3 && \
     rm -rf /var/lib/apt/lists/*
-
-RUN useradd -u 1000 -m -s /bin/bash mlt
 
 WORKDIR /app
 
@@ -56,15 +54,9 @@ ENV PORT=3001 \
     DATA_DIR=/app/data \
     STATIC_DIR=/app/static
 
-RUN mkdir -p /app/data && chown mlt:mlt /app/data
+RUN mkdir -p /app/data
 
 VOLUME /app/data
 EXPOSE 3001
 
-# Inline entrypoint (avoids CRLF issues from Windows-created .sh files)
-RUN printf '#!/bin/sh\nset -e\ndir="${DATA_DIR:-/app/data}"\nmkdir -p "$dir"\nchown -R mlt:mlt "$dir"\nexec gosu mlt "$@"\n' \
-    > /usr/local/bin/docker-entrypoint.sh && \
-    chmod +x /usr/local/bin/docker-entrypoint.sh
-
-ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["mlt-server"]

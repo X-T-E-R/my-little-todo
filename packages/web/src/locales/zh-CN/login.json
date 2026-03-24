@@ -12,5 +12,8 @@
   "Please wait...": "请稍候...",
   "Register": "注册",
   "Already have an account? Login": "已有账号？去登录",
-  "No account? Register": "没有账号？去注册"
+  "No account? Register": "没有账号？去注册",
+  "Setup required": "需要初始设置",
+  "Please visit the admin panel to create the first admin account before using this app.": "请先访问管理面板创建第一个管理员账户，然后才能使用此应用。",
+  "Go to Admin Panel": "前往管理面板"
 }
