@@ -20,6 +20,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@web': resolve(__dirname, '../web/src'),
+      '@capacitor-community/sqlite': resolve(
+        __dirname,
+        'node_modules/@capacitor-community/sqlite',
+      ),
     },
   },
   define: {
@@ -30,5 +34,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      external: ['@tauri-apps/plugin-sql', '@tauri-apps/api'],
+    },
   },
 });
