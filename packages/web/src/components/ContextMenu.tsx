@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   Calendar,
   CheckSquare,
+  ChevronRight,
   ClipboardCopy,
   ListPlus,
   Pencil,
@@ -39,6 +40,7 @@ interface ContextMenuProps {
   onChangeType?: (type: StreamEntryType) => void;
   onMarkComplete?: () => void;
   isCompleted?: boolean;
+  onSetParent?: () => void;
 }
 
 export function ConfirmableDeleteItem({
@@ -79,6 +81,51 @@ export function ConfirmableDeleteItem({
   );
 }
 
+function CascadeSubmenu({
+  parentRef,
+  children,
+}: {
+  parentRef: React.RefObject<HTMLDivElement | null>;
+  children: React.ReactNode;
+}) {
+  const subRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+
+  useEffect(() => {
+    if (!parentRef.current) return;
+    const rect = parentRef.current.getBoundingClientRect();
+    let left = rect.right + 4;
+    const top = rect.top;
+    if (left + 180 > window.innerWidth) {
+      left = rect.left - 184;
+    }
+    setPos({
+      left: Math.max(4, left),
+      top: Math.min(top, window.innerHeight - 250),
+    });
+  }, [parentRef]);
+
+  return (
+    <motion.div
+      ref={subRef}
+      initial={{ opacity: 0, x: -8 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: -8 }}
+      transition={{ duration: 0.12 }}
+      className="fixed z-[101] rounded-xl p-1 shadow-xl"
+      style={{
+        left: pos.left,
+        top: pos.top,
+        background: 'var(--color-surface)',
+        border: '1px solid var(--color-border)',
+        minWidth: '160px',
+      }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 export function ContextMenu({
   x,
   y,
@@ -95,13 +142,15 @@ export function ContextMenu({
   onChangeType,
   onMarkComplete,
   isCompleted,
+  onSetParent,
 }: ContextMenuProps) {
   const { t } = useTranslation('task');
   const { t: tStream } = useTranslation('stream');
-  const [roleSubmenu, setRoleSubmenu] = useState(false);
-  const [typeSubmenu, setTypeSubmenu] = useState(false);
+  const [openSub, setOpenSub] = useState<'type' | 'role' | null>(null);
   const roles = useRoleStore((s) => s.roles);
   const menuRef = useRef<HTMLDivElement>(null);
+  const typeRowRef = useRef<HTMLDivElement>(null);
+  const roleRowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -148,6 +197,32 @@ export function ContextMenu({
     </button>
   );
 
+  const SubMenuItem = ({
+    icon: Icon,
+    label,
+    subKey,
+    rowRef,
+  }: {
+    icon: React.FC<{ size?: number }>;
+    label: string;
+    subKey: 'type' | 'role';
+    rowRef: React.RefObject<HTMLDivElement | null>;
+  }) => (
+    <div ref={rowRef}>
+      <button
+        type="button"
+        onMouseEnter={() => setOpenSub(subKey)}
+        onClick={() => setOpenSub(openSub === subKey ? null : subKey)}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
+        style={{ color: 'var(--color-text)' }}
+      >
+        <Icon size={14} />
+        <span className="flex-1">{label}</span>
+        <ChevronRight size={12} style={{ color: 'var(--color-text-tertiary)' }} />
+      </button>
+    </div>
+  );
+
   return (
     <AnimatePresence>
       <motion.div
@@ -164,6 +239,7 @@ export function ContextMenu({
           border: '1px solid var(--color-border)',
           minWidth: '180px',
         }}
+        onMouseLeave={() => setOpenSub(null)}
       >
         <MenuItem icon={Pencil} label={t('Edit content')} onClick={onEdit} />
         <MenuItem icon={CheckSquare} label={t('Open detail')} onClick={onOpenDetail} />
@@ -174,98 +250,23 @@ export function ContextMenu({
         <MenuItem icon={Calendar} label={t('Set due date')} onClick={onSetDdl} />
 
         {onMarkComplete && (
-          <MenuItem icon={CheckSquare} label={tStream(isCompleted ? 'Mark incomplete' : 'Mark complete')} onClick={onMarkComplete} />
+          <MenuItem
+            icon={CheckSquare}
+            label={tStream(isCompleted ? 'Mark incomplete' : 'Mark complete')}
+            onClick={onMarkComplete}
+          />
         )}
 
         {onChangeType && (
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setTypeSubmenu(!typeSubmenu)}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
-              style={{ color: 'var(--color-text)' }}
-            >
-              <RefreshCw size={14} />
-              <span className="flex-1">{tStream('Change type')}</span>
-              <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                {typeSubmenu ? '▲' : '▼'}
-              </span>
-            </button>
-            {typeSubmenu && (
-              <div className="ml-5 py-0.5">
-                {ENTRY_TYPE_KEYS.filter((k) => k !== entry.entryType).map((k) => {
-                  const meta = ENTRY_TYPE_META[k];
-                  const TypeIcon = meta.icon;
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => {
-                        onChangeType(k);
-                        onClose();
-                      }}
-                      className="flex w-full items-center gap-2 px-2 py-1 text-left text-[12px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      <TypeIcon size={12} />
-                      {tStream(meta.labelKey)}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <SubMenuItem icon={RefreshCw} label={tStream('Change type')} subKey="type" rowRef={typeRowRef} />
         )}
 
-        {/* Role submenu */}
         {roles.length > 0 && (
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setRoleSubmenu(!roleSubmenu)}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
-              style={{ color: 'var(--color-text)' }}
-            >
-              <UserCircle size={14} />
-              <span className="flex-1">{t('Switch role')}</span>
-              <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                {roleSubmenu ? '▲' : '▼'}
-              </span>
-            </button>
-            {roleSubmenu && (
-              <div className="ml-5 py-0.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onChangeRole(undefined);
-                    onClose();
-                  }}
-                  className="flex w-full items-center gap-2 px-2 py-1 text-left text-[12px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
-                  style={{ color: 'var(--color-text-tertiary)' }}
-                >
-                  {t('No role')}
-                </button>
-                {roles.map((role) => (
-                  <button
-                    key={role.id}
-                    type="button"
-                    onClick={() => {
-                      onChangeRole(role.id);
-                      onClose();
-                    }}
-                    className="flex w-full items-center gap-2 px-2 py-1 text-left text-[12px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <span
-                      className="h-2.5 w-2.5 rounded-full shrink-0"
-                      style={{ background: role.color ?? 'var(--color-accent)' }}
-                    />
-                    {role.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <SubMenuItem icon={UserCircle} label={t('Switch role')} subKey="role" rowRef={roleRowRef} />
+        )}
+
+        {onSetParent && (
+          <MenuItem icon={ListPlus} label={t('Set as subtask...')} onClick={onSetParent} />
         )}
 
         <div className="my-1 mx-2" style={{ borderTop: '1px solid var(--color-border)' }} />
@@ -284,6 +285,66 @@ export function ContextMenu({
             onClose();
           }}
         />
+
+        {/* Cascade submenus */}
+        <AnimatePresence>
+          {openSub === 'type' && onChangeType && (
+            <CascadeSubmenu parentRef={typeRowRef}>
+              {ENTRY_TYPE_KEYS.filter((k) => k !== entry.entryType).map((k) => {
+                const meta = ENTRY_TYPE_META[k];
+                const TypeIcon = meta.icon;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => {
+                      onChangeType(k);
+                      onClose();
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    <TypeIcon size={13} />
+                    {tStream(meta.labelKey)}
+                  </button>
+                );
+              })}
+            </CascadeSubmenu>
+          )}
+          {openSub === 'role' && (
+            <CascadeSubmenu parentRef={roleRowRef}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChangeRole(undefined);
+                  onClose();
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
+                style={{ color: 'var(--color-text-tertiary)' }}
+              >
+                {t('No role')}
+              </button>
+              {roles.map((role) => (
+                <button
+                  key={role.id}
+                  type="button"
+                  onClick={() => {
+                    onChangeRole(role.id);
+                    onClose();
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] transition-colors hover:bg-[var(--color-bg)] rounded-md"
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  <span
+                    className="h-2.5 w-2.5 rounded-full shrink-0"
+                    style={{ background: role.color ?? 'var(--color-accent)' }}
+                  />
+                  {role.name}
+                </button>
+              ))}
+            </CascadeSubmenu>
+          )}
+        </AnimatePresence>
       </motion.div>
     </AnimatePresence>
   );

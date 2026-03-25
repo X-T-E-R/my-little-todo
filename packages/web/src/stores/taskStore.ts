@@ -43,10 +43,12 @@ interface TaskState {
   addSubtask: (parentId: string, title: string) => Promise<Task | null>;
   extractSubtask: (subtaskId: string) => Promise<void>;
   promoteSubtask: (subtaskId: string, promoted: boolean) => Promise<void>;
+  reparentTask: (childId: string, newParentId: string) => Promise<void>;
   selectTask: (id: string | null) => void;
 }
 
 let _taskLoadPromise: Promise<void> | null = null;
+const _statusVersions = new Map<string, number>();
 
 export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
@@ -90,6 +92,9 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     const task = prev.find((t) => t.id === id);
     if (!task) return;
 
+    const version = (_statusVersions.get(id) ?? 0) + 1;
+    _statusVersions.set(id, version);
+
     const now = new Date();
     const optimistic = {
       ...task,
@@ -101,16 +106,20 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     set((state) => ({
       tasks: state.tasks.map((t) => (t.id === id ? optimistic : t)),
     }));
+    setCachedTasks(get().tasks);
 
     try {
       const updated = await updateStatusInRepo(id, status);
-      if (updated) {
+      if (updated && _statusVersions.get(id) === version) {
         set((state) => ({
           tasks: state.tasks.map((t) => (t.id === id ? updated : t)),
         }));
+        setCachedTasks(get().tasks);
       }
     } catch {
-      set({ tasks: prev });
+      if (_statusVersions.get(id) === version) {
+        set({ tasks: prev });
+      }
     }
   },
 
@@ -208,6 +217,43 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       set((state) => ({
         tasks: state.tasks.map((t) => (t.id === subtaskId ? task : t)),
       }));
+    }
+  },
+
+  reparentTask: async (childId, newParentId) => {
+    const prev = get().tasks;
+    const child = prev.find((t) => t.id === childId);
+    if (!child) return;
+    const oldParentId = child.parentId;
+    if (oldParentId === newParentId) return;
+
+    set((state) => ({
+      tasks: state.tasks.map((t) => {
+        if (t.id === childId) {
+          return { ...t, parentId: newParentId };
+        }
+        if (t.id === oldParentId) {
+          return { ...t, subtaskIds: (t.subtaskIds ?? []).filter((id) => id !== childId) };
+        }
+        if (t.id === newParentId) {
+          return { ...t, subtaskIds: [...(t.subtaskIds ?? []), childId] };
+        }
+        return t;
+      }),
+    }));
+
+    try {
+      const tasks = get().tasks;
+      const updatedChild = tasks.find((t) => t.id === childId);
+      const updatedNewParent = tasks.find((t) => t.id === newParentId);
+      const updatedOldParent = oldParentId ? tasks.find((t) => t.id === oldParentId) : null;
+      const saves: Promise<void>[] = [];
+      if (updatedChild) saves.push(saveTask(updatedChild));
+      if (updatedNewParent) saves.push(saveTask(updatedNewParent));
+      if (updatedOldParent) saves.push(saveTask(updatedOldParent));
+      await Promise.all(saves);
+    } catch {
+      set({ tasks: prev });
     }
   },
 

@@ -83,5 +83,9 @@
   "Independent": "独立",
   "Mark as independent task": "标记为独立任务",
   "Demote to subtask": "回归子任务",
-  "Parent: {{title}}": "父任务：{{title}}"
+  "Parent: {{title}}": "父任务：{{title}}",
+  "Set as subtask...": "设为子任务...",
+  "Select parent task": "选择父任务",
+  "Search tasks...": "搜索任务...",
+  "No tasks found": "未找到任务"
 }

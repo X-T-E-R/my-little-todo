@@ -20,7 +20,9 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { ContextMenu } from '../components/ContextMenu';
+import { DndReparentProvider, DndTaskWrapper } from '../components/DndReparentContext';
 import { MarkdownToolbar } from '../components/MarkdownToolbar';
+import { ParentTaskPicker } from '../components/ParentTaskPicker';
 import { OnboardingTip } from '../components/OnboardingTip';
 import { RolePill } from '../components/RolePickerPopover';
 import { getAttachmentConfig, uploadBlob } from '../storage/blobApi';
@@ -721,6 +723,7 @@ export function StreamView() {
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [subtaskEntryId, setSubtaskEntryId] = useState<string | null>(null);
   const [ddlEntryId, setDdlEntryId] = useState<string | null>(null);
+  const [parentPickerTargetId, setParentPickerTargetId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -748,6 +751,7 @@ export function StreamView() {
   const loadTasks = useTaskStore((s) => s.load);
   const selectTask = useTaskStore((s) => s.selectTask);
   const updateStatus = useTaskStore((s) => s.updateStatus);
+  const reparentTask = useTaskStore((s) => s.reparentTask);
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const roles = useRoleStore((s) => s.roles);
   const currentRole = currentRoleId ? roles.find((r) => r.id === currentRoleId) : undefined;
@@ -1013,6 +1017,7 @@ export function StreamView() {
       </div>
 
       {/* Stream entries */}
+      <DndReparentProvider>
       <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-2 pb-52 scroll-smooth">
         <div className="mx-auto max-w-2xl space-y-3">
           {loading && filtered.length === 0 && (
@@ -1054,8 +1059,8 @@ export function StreamView() {
               </div>
 
               <div className="space-y-2 mt-1">
-                {group.entries.map((entry) => (
-                  <div key={entry.id}>
+                {group.entries.map((entry) => {
+                  const entryCard = (
                     <EntryCard
                       entry={entry}
                       linkedTask={
@@ -1085,6 +1090,17 @@ export function StreamView() {
                           : undefined
                       }
                     />
+                  );
+
+                  return (
+                  <div key={entry.id}>
+                    {entry.extractedTaskId ? (
+                      <DndTaskWrapper taskId={entry.extractedTaskId}>
+                        {entryCard}
+                      </DndTaskWrapper>
+                    ) : (
+                      entryCard
+                    )}
                     {subtaskEntryId === entry.id && (
                       <div className="ml-14 mt-1">
                         <InlineSubtaskInput
@@ -1102,7 +1118,8 @@ export function StreamView() {
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
@@ -1110,6 +1127,7 @@ export function StreamView() {
           <div ref={bottomAnchorRef} />
         </div>
       </div>
+      </DndReparentProvider>
 
       {/* Gradient fade overlay */}
       <div
@@ -1375,6 +1393,22 @@ export function StreamView() {
                 }
               : undefined
           }
+          onSetParent={
+            contextMenu.entry.extractedTaskId
+              ? () => setParentPickerTargetId(contextMenu.entry.extractedTaskId!)
+              : undefined
+          }
+        />
+      )}
+
+      {parentPickerTargetId && (
+        <ParentTaskPicker
+          childId={parentPickerTargetId}
+          onSelect={async (parentId) => {
+            await reparentTask(parentPickerTargetId, parentId);
+            setParentPickerTargetId(null);
+          }}
+          onClose={() => setParentPickerTargetId(null)}
         />
       )}
 

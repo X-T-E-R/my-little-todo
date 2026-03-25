@@ -129,12 +129,14 @@ function subtaskDdlLabel(
 
 function SubtaskRow({
   subtask,
+  depth,
   onToggle,
   onExtract,
   onPromote,
   onOpen,
 }: {
   subtask: Task;
+  depth?: number;
   onToggle: () => void;
   onExtract: () => void;
   onPromote: () => void;
@@ -145,11 +147,14 @@ function SubtaskRow({
   const isMultiLine = subtask.title.includes('\n');
   const ddlInfo = subtask.ddl && !done ? subtaskDdlLabel(subtask.ddl, t) : null;
   const isPromoted = !!subtask.promoted;
+  const d = depth ?? 0;
 
   return (
     <div
-      className="group flex items-start gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-[var(--color-bg)] relative"
+      className="group flex items-start gap-2 rounded-lg py-1.5 transition-colors hover:bg-[var(--color-bg)] relative"
       style={{
+        paddingLeft: `${8 + d * 16}px`,
+        paddingRight: 8,
         background: ddlInfo?.overdue ? 'var(--color-danger-soft)' : isPromoted ? 'var(--color-accent-soft)' : undefined,
         borderLeft: ddlInfo?.overdue ? '2px solid var(--color-danger)' : isPromoted ? '2px solid var(--color-accent)' : '2px solid transparent',
       }}
@@ -157,20 +162,22 @@ function SubtaskRow({
       <button
         type="button"
         onClick={onToggle}
-        className="flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors mt-0.5"
+        className="flex shrink-0 items-center justify-center rounded border transition-colors mt-0.5"
         style={{
+          width: d > 0 ? 14 : 16,
+          height: d > 0 ? 14 : 16,
           borderColor: done ? 'var(--color-success)' : 'var(--color-border)',
           background: done ? 'var(--color-success)' : 'transparent',
         }}
       >
-        {done && <Check size={10} className="text-white" />}
+        {done && <Check size={d > 0 ? 8 : 10} className="text-white" />}
       </button>
       <button
         type="button"
         onClick={onOpen}
-        className={`flex-1 text-left text-[13px] ${isMultiLine ? 'whitespace-pre-wrap line-clamp-3' : 'truncate'}`}
+        className={`flex-1 text-left ${d > 0 ? 'text-[12px]' : 'text-[13px]'} ${isMultiLine ? 'whitespace-pre-wrap line-clamp-3' : 'truncate'}`}
         style={{
-          color: done ? 'var(--color-text-tertiary)' : 'var(--color-text)',
+          color: done ? 'var(--color-text-tertiary)' : d > 0 ? 'var(--color-text-secondary)' : 'var(--color-text)',
           textDecoration: done ? 'line-through' : 'none',
         }}
       >
@@ -205,25 +212,104 @@ function SubtaskRow({
           {ddlInfo.text}
         </span>
       )}
-      <button
-        type="button"
-        onClick={onPromote}
-        title={isPromoted ? t('Demote to subtask') : t('Mark as independent task')}
-        className="opacity-0 group-hover:opacity-100 rounded p-0.5 transition-opacity mt-0.5"
-        style={{ color: isPromoted ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }}
-      >
-        <Eye size={12} />
-      </button>
-      <button
-        type="button"
-        onClick={onExtract}
-        title={t('Extract as independent task')}
-        className="opacity-0 group-hover:opacity-100 rounded p-0.5 transition-opacity mt-0.5"
-        style={{ color: 'var(--color-text-tertiary)' }}
-      >
-        <ExternalLink size={12} />
-      </button>
+      {d === 0 && (
+        <>
+          <button
+            type="button"
+            onClick={onPromote}
+            title={isPromoted ? t('Demote to subtask') : t('Mark as independent task')}
+            className="opacity-0 group-hover:opacity-100 rounded p-0.5 transition-opacity mt-0.5"
+            style={{ color: isPromoted ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }}
+          >
+            <Eye size={12} />
+          </button>
+          <button
+            type="button"
+            onClick={onExtract}
+            title={t('Extract as independent task')}
+            className="opacity-0 group-hover:opacity-100 rounded p-0.5 transition-opacity mt-0.5"
+            style={{ color: 'var(--color-text-tertiary)' }}
+          >
+            <ExternalLink size={12} />
+          </button>
+        </>
+      )}
     </div>
+  );
+}
+
+function SubtaskTree({
+  subtaskIds,
+  tasks,
+  depth,
+  maxDepth,
+  onToggle,
+  onExtract,
+  onPromote,
+  onOpen,
+}: {
+  subtaskIds: string[];
+  tasks: Task[];
+  depth: number;
+  maxDepth: number;
+  onToggle: (sub: Task) => void;
+  onExtract: (id: string) => void;
+  onPromote: (id: string, promoted: boolean) => void;
+  onOpen: (id: string) => void;
+}) {
+  const { t } = useTranslation('task');
+  const resolved = subtaskIds
+    .map((id) => tasks.find((t) => t.id === id))
+    .filter((t): t is Task => t !== undefined);
+
+  if (resolved.length === 0) return null;
+
+  return (
+    <>
+      {resolved.map((sub) => {
+        const childIds = sub.subtaskIds ?? [];
+        const showChildren = depth < maxDepth && childIds.length > 0;
+        const truncatedCount = depth >= maxDepth ? childIds.length : 0;
+
+        return (
+          <div key={sub.id}>
+            <SubtaskRow
+              subtask={sub}
+              depth={depth}
+              onToggle={() => onToggle(sub)}
+              onExtract={() => onExtract(sub.id)}
+              onPromote={() => onPromote(sub.id, !sub.promoted)}
+              onOpen={() => onOpen(sub.id)}
+            />
+            {showChildren && (
+              <SubtaskTree
+                subtaskIds={childIds}
+                tasks={tasks}
+                depth={depth + 1}
+                maxDepth={maxDepth}
+                onToggle={onToggle}
+                onExtract={onExtract}
+                onPromote={onPromote}
+                onOpen={onOpen}
+              />
+            )}
+            {truncatedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => onOpen(sub.id)}
+                className="text-[11px] py-0.5 hover:underline"
+                style={{
+                  paddingLeft: `${8 + (depth + 1) * 16}px`,
+                  color: 'var(--color-text-tertiary)',
+                }}
+              >
+                +{truncatedCount} {t('Subtasks').toLowerCase()}...
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -521,14 +607,28 @@ export function TaskDetailPanel() {
   const [localTitle, setLocalTitle] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const bodyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTaskRef = useRef<{ id: string; body: string } | null>(null);
   const streamEntries = useStreamStore((s) => s.entries);
 
-  const taskId = task?.id;
-  useEffect(() => {
+  const flushPendingBody = useRef(() => {
     if (bodyTimerRef.current) {
       clearTimeout(bodyTimerRef.current);
       bodyTimerRef.current = null;
     }
+    if (pendingTaskRef.current) {
+      const { id, body } = pendingTaskRef.current;
+      pendingTaskRef.current = null;
+      const t = useTaskStore.getState().tasks.find((x) => x.id === id);
+      if (t && t.body !== body) {
+        useTaskStore.getState().updateTask({ ...t, body });
+      }
+    }
+  });
+
+  const taskId = task?.id;
+
+  useEffect(() => {
+    flushPendingBody.current();
     if (!taskId) return;
     const t = tasks.find((x) => x.id === taskId);
     if (t) {
@@ -536,7 +636,7 @@ export function TaskDetailPanel() {
       setLocalBody(t.body);
       setConfirmDelete(false);
     }
-  }, [taskId, tasks]);
+  }, [taskId]);
 
   if (!task) return null;
 
@@ -546,9 +646,16 @@ export function TaskDetailPanel() {
 
   const handleBodyChange = (body: string) => {
     setLocalBody(body);
+    pendingTaskRef.current = { id: task.id, body };
     if (bodyTimerRef.current) clearTimeout(bodyTimerRef.current);
     bodyTimerRef.current = setTimeout(() => {
-      updateTask({ ...task, body });
+      if (pendingTaskRef.current?.id === task.id) {
+        const current = useTaskStore.getState().tasks.find((x) => x.id === task.id);
+        if (current && current.body !== body) {
+          updateTask({ ...current, body });
+        }
+        pendingTaskRef.current = null;
+      }
     }, 500);
   };
 
@@ -772,16 +879,19 @@ export function TaskDetailPanel() {
                   className="rounded-xl overflow-hidden"
                   style={{ border: '1px solid var(--color-border)' }}
                 >
-                  {subtasks.map((sub) => (
-                    <SubtaskRow
-                      key={sub.id}
-                      subtask={sub}
-                      onToggle={() => handleToggleSubtask(sub)}
-                      onExtract={() => handleExtractSubtask(sub.id)}
-                      onPromote={() => promoteSubtask(sub.id, !sub.promoted)}
-                      onOpen={() => selectTask(sub.id)}
-                    />
-                  ))}
+                  <SubtaskTree
+                    subtaskIds={task.subtaskIds ?? []}
+                    tasks={tasks}
+                    depth={0}
+                    maxDepth={2}
+                    onToggle={handleToggleSubtask}
+                    onExtract={handleExtractSubtask}
+                    onPromote={(id, promoted) => promoteSubtask(id, promoted)}
+                    onOpen={(id) => {
+                      flushPendingBody.current();
+                      selectTask(id);
+                    }}
+                  />
                   <AddSubtaskInput onAdd={handleAddSubtask} />
                 </div>
               </div>
@@ -886,7 +996,10 @@ export function TaskDetailPanel() {
               {task.parentId && (
                 <button
                   type="button"
-                  onClick={() => task.parentId && selectTask(task.parentId)}
+                  onClick={() => {
+                    flushPendingBody.current();
+                    if (task.parentId) selectTask(task.parentId);
+                  }}
                   className="flex items-center gap-1 text-xs font-medium"
                   style={{ color: 'var(--color-accent)' }}
                 >

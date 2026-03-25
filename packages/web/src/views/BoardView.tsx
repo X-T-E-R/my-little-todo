@@ -16,6 +16,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CalendarView } from '../components/CalendarView';
 import { RolePill } from '../components/RolePickerPopover';
+import { DndReparentProvider, DndTaskWrapper } from '../components/DndReparentContext';
+import { ParentTaskPicker } from '../components/ParentTaskPicker';
 import { TaskContextMenu } from '../components/TaskContextMenu';
 import {
   filterByRole,
@@ -681,12 +683,14 @@ export function BoardView() {
     deleteTask,
     addSubtask,
     updateStatus,
+    reparentTask,
   } = useTaskStore();
   const scheduleBlocks = useScheduleStore((s) => s.blocks);
   const loadSchedules = useScheduleStore((s) => s.load);
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const filtered = useMemo(() => filterByRole(tasks, currentRoleId), [tasks, currentRoleId]);
   const [postponingTask, setPostponingTask] = useState<Task | null>(null);
+  const [parentPickerTargetId, setParentPickerTargetId] = useState<string | null>(null);
   const [submittingTask, setSubmittingTask] = useState<Task | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
   const [showNoDdl, setShowNoDdl] = useState(true);
@@ -760,6 +764,7 @@ export function BoardView() {
   const onTimeRate = completed.length > 0 ? Math.round((onTimeCount / completed.length) * 100) : 0;
 
   return (
+    <DndReparentProvider>
     <div
       className="h-full overflow-y-auto px-4 py-6 scroll-smooth"
       style={{ background: 'var(--color-bg)' }}
@@ -883,6 +888,7 @@ export function BoardView() {
                   <AnimatePresence>
                     {group.tasks.map((item, index) => (
                       <div key={item.id}>
+                        <DndTaskWrapper taskId={item.id}>
                         <TaskCard
                           task={item}
                           index={index}
@@ -892,6 +898,7 @@ export function BoardView() {
                           onClick={handleClickTask}
                           onContextMenu={handleContextMenu}
                         />
+                        </DndTaskWrapper>
                         {subtaskInputId === item.id && (
                           <BoardInlineSubtaskInput
                             onAdd={(title) => handleAddSubtaskInline(item.id, title)}
@@ -953,6 +960,7 @@ export function BoardView() {
                     >
                       {noDdlTasks.map((task, i) => (
                         <div key={task.id}>
+                          <DndTaskWrapper taskId={task.id}>
                           <motion.div
                             initial={{ opacity: 0, x: -10 }}
                             animate={{ opacity: 1, x: 0 }}
@@ -1051,6 +1059,7 @@ export function BoardView() {
 
                             <BoardSubtaskPreview task={task} />
                           </motion.div>
+                          </DndTaskWrapper>
                           {subtaskInputId === task.id && (
                             <BoardInlineSubtaskInput
                               onAdd={(title) => handleAddSubtaskInline(task.id, title)}
@@ -1227,9 +1236,22 @@ export function BoardView() {
             const { promoteSubtask } = useTaskStore.getState();
             promoteSubtask(contextMenu.task.id, !contextMenu.task.promoted);
           } : undefined}
+          onSetParent={() => setParentPickerTargetId(contextMenu.task.id)}
+        />
+      )}
+
+      {parentPickerTargetId && (
+        <ParentTaskPicker
+          childId={parentPickerTargetId}
+          onSelect={async (parentId) => {
+            await reparentTask(parentPickerTargetId, parentId);
+            setParentPickerTargetId(null);
+          }}
+          onClose={() => setParentPickerTargetId(null)}
         />
       )}
     </div>
+    </DndReparentProvider>
   );
 }
 
