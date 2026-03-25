@@ -30,6 +30,37 @@ pub fn sign_token(
     Ok(token)
 }
 
+/// Sign a long-lived API token. `duration_secs == 0` means no expiration (100 years).
+pub fn sign_long_lived_token(
+    user_id: &str,
+    username: &str,
+    is_admin: bool,
+    secret: &str,
+    duration_secs: u64,
+) -> anyhow::Result<(String, usize)> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let exp = if duration_secs == 0 {
+        (now + 100 * 365 * 24 * 3600) as usize
+    } else {
+        (now + duration_secs) as usize
+    };
+    let claims = Claims {
+        sub: user_id.to_string(),
+        username: username.to_string(),
+        is_admin,
+        exp,
+    };
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )?;
+    Ok((token, exp))
+}
+
 pub fn verify_token(token: &str, secret: &str) -> anyhow::Result<Claims> {
     let data = decode::<Claims>(
         token,

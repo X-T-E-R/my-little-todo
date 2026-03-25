@@ -10,6 +10,7 @@ import {
   ChevronRight,
   List,
   ListPlus,
+  MoreHorizontal,
   X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -568,6 +569,18 @@ function TaskCard({
             )}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            onContextMenu({ preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any, task);
+          }}
+          className="rounded-md p-1.5 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
+          style={{ color: 'var(--color-text-tertiary)' }}
+        >
+          <MoreHorizontal size={16} />
+        </button>
       </div>
 
       {totalSubtasks > 0 && (
@@ -1051,8 +1064,21 @@ export function BoardView() {
                                   })()}
                                 </div>
                               </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  handleContextMenu({ preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any, task);
+                                }}
+                                className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
+                                style={{ color: 'var(--color-text-tertiary)' }}
+                              >
+                                <MoreHorizontal size={14} />
+                              </button>
                               <ChevronRight
                                 size={16}
+                                className="hidden sm:block"
                                 style={{ color: 'var(--color-text-tertiary)' }}
                               />
                             </div>
@@ -1176,9 +1202,21 @@ export function BoardView() {
                               )}
                             </div>
                           </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              handleContextMenu({ preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any, item);
+                            }}
+                            className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
+                            style={{ color: 'var(--color-text-tertiary)' }}
+                          >
+                            <MoreHorizontal size={14} />
+                          </button>
                           <ChevronRight
                             size={16}
-                            className="opacity-0 transition-opacity group-hover:opacity-100"
+                            className="hidden sm:block opacity-0 transition-opacity group-hover:opacity-100"
                             style={{ color: 'var(--color-text-tertiary)' }}
                           />
                         </motion.div>

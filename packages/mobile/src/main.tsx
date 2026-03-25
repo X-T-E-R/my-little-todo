@@ -1,15 +1,24 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import '@web/locales';
 import '@web/styles/globals.css';
 import { App } from '@web/App';
-import { loadStorageConfig, setStorageAdapter } from '@web/storage/adapter';
-import { createApiAdapter } from '@web/storage/apiClient';
+import { ErrorBoundary } from '@web/components/ErrorBoundary';
+import { setDataStore } from '@web/storage/dataStore';
+import { initPlatform } from '@web/utils/platform';
 
-export async function initStorage(overrideUrl?: string, overrideToken?: string) {
-  const config = loadStorageConfig();
-  const url = overrideUrl ?? config.apiUrl;
-  const token = overrideToken ?? config.apiToken;
-  setStorageAdapter(createApiAdapter(url, token || undefined), 'api');
+{
+  const savedTheme = localStorage.getItem('mlt-theme');
+  if (savedTheme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  else if (savedTheme === 'light') document.documentElement.setAttribute('data-theme', 'light');
+}
+
+async function initStorage() {
+  await initPlatform();
+
+  const { createCapacitorSqliteDataStore } = await import('@web/storage/capacitorSqliteStore');
+  const store = await createCapacitorSqliteDataStore();
+  setDataStore(store);
 }
 
 async function main() {
@@ -20,7 +29,9 @@ async function main() {
 
   createRoot(root).render(
     <StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </StrictMode>,
   );
 }

@@ -712,44 +712,47 @@ export function TaskDetailPanel() {
               if (isMobile && info.offset.y > 100) selectTask(null);
             }}
             className={`fixed z-50 overflow-y-auto shadow-2xl ${
-              isMobile ? 'inset-0' : 'right-0 top-0 bottom-0 w-full max-w-md'
+              isMobile ? 'inset-x-0 bottom-0 top-[10%]' : 'right-0 top-0 bottom-0 w-full max-w-md'
             }`}
             style={{
               background: 'var(--color-surface)',
               borderLeft: isMobile ? 'none' : '1px solid var(--color-border)',
-              paddingTop: isMobile ? 'var(--safe-area-top)' : undefined,
+              borderTopLeftRadius: isMobile ? '24px' : '0',
+              borderTopRightRadius: isMobile ? '24px' : '0',
               paddingBottom: isMobile ? 'var(--safe-area-bottom)' : undefined,
             }}
           >
-            {/* Drag handle for mobile */}
-            {isMobile && (
-              <div className="flex justify-center py-2">
-                <div
-                  className="w-10 h-1 rounded-full"
-                  style={{ background: 'var(--color-border-hover)' }}
-                />
-              </div>
-            )}
             {/* Header */}
             <div
-              className="sticky top-0 z-10 flex items-center justify-between px-5 py-4"
+              className="sticky top-0 z-20 flex flex-col px-5 py-3"
               style={{
                 background: 'var(--color-surface)',
                 borderBottom: '1px solid var(--color-border)',
               }}
             >
-              <span className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
-                {t('Task Detail')}
-              </span>
-              <button
-                type="button"
-                onClick={() => selectTask(null)}
-                aria-label={t('Close')}
-                className="rounded-lg p-1"
-                style={{ color: 'var(--color-text-tertiary)' }}
-              >
-                <X size={18} />
-              </button>
+              {/* Drag handle for mobile */}
+              {isMobile && (
+                <div className="flex justify-center mb-3">
+                  <div
+                    className="w-12 h-1.5 rounded-full"
+                    style={{ background: 'var(--color-border-hover)' }}
+                  />
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('Task Detail')}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => selectTask(null)}
+                  aria-label={t('Close')}
+                  className="rounded-lg p-1"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             <div className="px-5 py-4 space-y-5">

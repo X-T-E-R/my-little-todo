@@ -4,6 +4,8 @@ import {
   type DragEndEvent,
   type DragStartEvent,
   PointerSensor,
+  useDraggable,
+  useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';

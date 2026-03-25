@@ -20,6 +20,10 @@ Thumbs.db
 .env
 .env.local
 
+# Android release signing (local only; CI uses GitHub Secrets)
+packages/mobile/android/app/release.keystore
+packages/mobile/android/GITHUB_SECRETS_FOR_CI.local.txt
+
 # Tauri signing keys
 packages/web/~/
 *.key

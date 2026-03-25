@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+def packageSlurper = new groovy.json.JsonSlurper()
+def packageJson = packageSlurper.parseText(file('../../package.json').text)
+def versionParts = packageJson.version.toString().split('\\.')
+def computedVersionCode = versionParts[0].toInteger() * 10000 +
+        versionParts[1].toInteger() * 100 +
+        versionParts[2].toInteger()
+
 android {
     namespace "com.mylittletodo.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +14,8 @@ android {
         applicationId "com.mylittletodo.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode computedVersionCode
+        versionName packageJson.version.toString()
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +23,25 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            def ksFile = System.getenv("MLT_KEYSTORE_FILE")
+            if (ksFile) {
+                storeFile file(ksFile)
+                storePassword System.getenv("MLT_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("MLT_KEY_ALIAS")
+                keyPassword System.getenv("MLT_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            def ksFile = System.getenv("MLT_KEYSTORE_FILE")
+            if (ksFile) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

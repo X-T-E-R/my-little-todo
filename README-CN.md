@@ -13,7 +13,8 @@
 - **DDL 驱动** — 截止日期分三级硬度（硬性/承诺/弹性），延期需要写理由
 - **专注此刻** — 打开应用只看到一件事 + 两个按钮（"开始做" / "不想做"）
 - **学习而非惩罚** — 你的每一次拒绝、拖延、不按计划执行都是训练数据，不是错误
-- **多端同步** — PC 桌面端、网页端、手机端，数据通过统一 API 同步
+- **本地优先** — 桌面端和移动端数据存储在本地 SQLite 中，可选通过 API 服务器、WebDAV 或 S3 同步
+- **多平台** — Tauri 桌面端（Windows/macOS/Linux）、Android 应用、Web PWA，共享同一套 UI
 - **原生 AI 支持** — 内置 AI 魔法按钮，原生支持 MCP、方便 Agent 调用和编辑
 
 <!-- TODO: 添加截图 -->
@@ -22,13 +23,15 @@
 
 ### PC 桌面端（Tauri）— 最简单
 
-开箱即用的本地应用，无需服务器。
+本地优先的开箱即用应用，无需服务器。
 
 1. 从 [Releases](https://github.com/X-T-E-R/my-little-todo/releases) 下载对应平台的安装包（Windows .msi/.exe、macOS .dmg、Linux .AppImage）
 2. 安装并启动，首次打开会进入引导设置
-3. 默认单用户模式，无需密码，数据存储在本地
-4. 在设置中可开启「局域网访问」，让手机等设备通过浏览器连接到你的桌面端
-5. 也支持连接远程云端服务器，实现多端同步
+3. 数据存储在本地 SQLite 数据库中，无需账户或服务器
+4. 可在设置 → 云同步中配置同步方式实现多端同步：
+   - **API 服务器** — 与 My Little Todo 服务器同步（支持用户名密码或 API Token 认证）
+   - **WebDAV** — 通过任意 WebDAV 兼容服务器同步
+   - **S3** — 同步到 S3 兼容对象存储（AWS/MinIO/R2）
 
 ### Docker 部署 — 适合服务器
 
@@ -58,7 +61,7 @@ echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
 docker compose up -d
 ```
 
-**首次使用**：访问 `http://localhost:3001/admin` 创建第一个管理员账户。管理员创建完成后，用户即可通过 `http://localhost:3001` 访问 Web 端登录使用。初始化后的管理功能（用户管理、统计）也可在主应用的设置页面中操作。
+**首次使用**：访问 `http://localhost:3001/admin` 创建第一个管理员账户。管理员创建完成后，用户即可通过 `http://localhost:3001` 访问 Web 端登录使用。管理功能（用户管理、统计）在 `/admin` 页面管理。
 
 数据存储在主机的 `./data/` 目录中，方便备份和查看。
 
@@ -69,7 +72,7 @@ docker compose pull && docker compose up -d
 ```
 
 <details>
-<summary>Docker 环境变量</summary>
+<summary>Docker 环境变量（仅服务器模式）</summary>
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
@@ -85,9 +88,36 @@ docker compose pull && docker compose up -d
 
 </details>
 
+<details>
+<summary>同步 API 与认证</summary>
+
+桌面端和移动端可通过 `/api/sync/*` 端点与服务器同步。认证方式：
+
+- **用户名和密码** — 客户端自动通过 `POST /api/auth/login` 登录并缓存 JWT
+- **API Token** — 通过 `POST /api/auth/api-token` 生成长期 Token（需已有 JWT）。可选有效期：30 天、90 天、1 年、永不过期
+
+也可以在 Web 管理界面生成 API Token：设置 → 账户 → API Token。
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/sync/changes?since={version}` | GET | 拉取指定版本后的变更 |
+| `/api/sync/status` | GET | 获取当前同步版本号 |
+| `/api/sync/push` | POST | 推送本地变更到服务器 |
+| `/api/auth/api-token` | POST | 生成长期 API Token |
+
+所有同步端点需要 `Authorization: Bearer <token>` 请求头。
+
+</details>
+
 如需配置反向代理（Nginx / Caddy），将域名指向 `localhost:3001` 即可，无需额外的 location 规则。
 
 不使用 Docker 的纯二进制部署请参考 [docs/deployment/binary.md](docs/deployment/binary.md)。
+
+### Android 应用
+
+1. 从 [Releases](https://github.com/X-T-E-R/my-little-todo/releases) 下载 APK 安装包
+2. 安装并启动，数据存储在本地 SQLite 中
+3. 应用启动时会自动检查更新
 
 ### PWA 网页应用 — 适合手机
 
@@ -98,8 +128,8 @@ docker compose pull && docker compose up -d
 
 ## 首次使用
 
-1. **PC 用户**：启动应用后，引导向导会带你设置角色和偏好
-2. **服务器用户**：访问 `http://your-host:3001/admin` 创建管理员账户，然后打开 `http://your-host:3001` 开始使用。初始化后可在主应用的 设置 > 管理 中管理用户
+1. **桌面端 / Android 用户**：启动应用后，引导向导会带你设置角色和偏好。所有数据存储在本地。
+2. **服务器（网页）用户**：访问 `http://your-host:3001/admin` 创建管理员账户，然后打开 `http://your-host:3001` 开始使用。
 3. 打开**流**视图，随手输入你脑中的想法，系统会帮你整理成任务
 
 ## MCP 集成
@@ -172,10 +202,10 @@ pnpm typecheck   # 确保类型正确
 - [x] v0.5 — 启动引导 + 上下文提示
 - [x] v0.6 — 云备份 UI + ZIP 导出导入 + PC 云端模式
 - [x] v0.7 — Docker 部署 + MCP 支持 + 国际化
-- [ ] v0.8 — AI 集成：流文本自动提取任务、智能推荐
-- [ ] v0.9 — 学习引擎：行为追踪、模式识别
-- [ ] v1.0 — 完整桌面版：系统托盘、全局快捷键、云备份完善
-- [ ] v2.0 — 移动端原生应用
+- [x] v0.8 — 本地优先架构 + 原生 SQLite + 同步引擎 + Android 应用
+- [ ] v0.9 — AI 集成：流文本自动提取任务、智能推荐
+- [ ] v1.0 — 完整桌面版 + 学习引擎：行为追踪、模式识别
+- [ ] v2.0 — iOS 原生应用
 
 ## 设计哲学
 

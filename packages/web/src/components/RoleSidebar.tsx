@@ -280,10 +280,13 @@ export function RoleSidebar({ horizontal = false }: { horizontal?: boolean }) {
   if (horizontal) {
     return (
       <div
-        className="flex items-center gap-1 px-2 py-1.5 overflow-x-auto shrink-0"
+        className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto shrink-0 no-scrollbar"
         style={{
           background: 'var(--color-surface)',
           borderBottom: '1px solid var(--color-border)',
+          WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
         }}
       >
         <HorizontalChip

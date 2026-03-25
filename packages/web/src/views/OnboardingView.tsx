@@ -5,24 +5,20 @@ import {
   Briefcase,
   Check,
   ChevronRight,
-  Cloud,
   Heart,
   Home,
-  Laptop,
   Monitor,
   Moon,
   Palette,
   Rocket,
   Sun,
   Users,
-  Wifi,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../locales';
 import { putSetting } from '../storage/settingsApi';
 import { useRoleStore } from '../stores';
-import { canChooseMode, canControlServer } from '../utils/platform';
 
 interface Props {
   isReentry?: boolean;
@@ -216,12 +212,9 @@ function QuickConfigStep({
 }) {
   const { t } = useTranslation('onboarding');
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
-  const [lanAccess, setLanAccess] = useState(false);
-  const [useMode, setUseMode] = useState<'local' | 'cloud'>('local');
-  const [cloudUrl, setCloudUrl] = useState('');
-
-  const showModeSelector = canChooseMode();
-  const showServerConfig = canControlServer();
+  const [lanAccess] = useState(false);
+  const [useMode] = useState<'local' | 'cloud'>('local');
+  const [cloudUrl] = useState('');
 
   const themeOptions = [
     { key: 'system' as const, label: t('Follow system'), icon: Monitor },
@@ -269,76 +262,6 @@ function QuickConfigStep({
           </select>
         </div>
 
-        {/* Use mode - only when platform can choose mode (Tauri PC) */}
-        {showModeSelector && (
-          <div>
-            <p
-              className="text-xs font-medium mb-2"
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              {t('Usage mode')}
-            </p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setUseMode('local')}
-                className="flex flex-1 flex-col items-center gap-1.5 rounded-xl py-3 text-xs font-medium transition-all"
-                style={{
-                  background: useMode === 'local' ? 'var(--color-accent)' : 'var(--color-surface)',
-                  color: useMode === 'local' ? 'white' : 'var(--color-text-secondary)',
-                  border:
-                    useMode === 'local'
-                      ? '1px solid var(--color-accent)'
-                      : '1px solid var(--color-border)',
-                }}
-              >
-                <Laptop size={16} />
-                {t('Local mode')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setUseMode('cloud')}
-                className="flex flex-1 flex-col items-center gap-1.5 rounded-xl py-3 text-xs font-medium transition-all"
-                style={{
-                  background: useMode === 'cloud' ? 'var(--color-accent)' : 'var(--color-surface)',
-                  color: useMode === 'cloud' ? 'white' : 'var(--color-text-secondary)',
-                  border:
-                    useMode === 'cloud'
-                      ? '1px solid var(--color-accent)'
-                      : '1px solid var(--color-border)',
-                }}
-              >
-                <Cloud size={16} />
-                {t('Connect to cloud')}
-              </button>
-            </div>
-            {useMode === 'local' && (
-              <p className="mt-1.5 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                {t('Data stored locally, this PC acts as server')}
-              </p>
-            )}
-            {useMode === 'cloud' && (
-              <div className="mt-2">
-                <input
-                  type="url"
-                  value={cloudUrl}
-                  onChange={(e) => setCloudUrl(e.target.value)}
-                  placeholder="https://your-server.com"
-                  className="w-full rounded-xl px-3 py-2 text-xs outline-none transition-colors"
-                  style={{
-                    background: 'var(--color-bg)',
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text)',
-                  }}
-                />
-                <p className="mt-1.5 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {t("Connect to remote server, don't start local backend")}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Theme */}
         <div>
           <p className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-secondary)' }}>
@@ -370,34 +293,6 @@ function QuickConfigStep({
           </div>
         </div>
 
-        {/* LAN access - only when platform can control server and in local mode */}
-        {showServerConfig && useMode === 'local' && (
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Wifi size={15} style={{ color: 'var(--color-text-secondary)' }} />
-              <div>
-                <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-                  {t('Allow LAN access')}
-                </p>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {t('Let phone and other devices connect to this PC')}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setLanAccess(!lanAccess)}
-              className="relative h-6 w-11 rounded-full transition-colors shrink-0"
-              style={{ background: lanAccess ? 'var(--color-accent)' : 'var(--color-border)' }}
-            >
-              <motion.div
-                className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"
-                animate={{ left: lanAccess ? '22px' : '2px' }}
-                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-              />
-            </button>
-          </div>
-        )}
       </div>
 
       <div className="flex flex-col items-center gap-2 w-full max-w-sm mt-2">

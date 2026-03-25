@@ -9,6 +9,7 @@ import {
   Clock,
   Filter,
   ListPlus,
+  MoreHorizontal,
   Pencil,
   Send,
   Sparkles,
@@ -415,7 +416,7 @@ function EntryCard({
 
             <div className="flex-1" />
 
-            <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
               {!isTask && (
                 <button
                   type="button"
@@ -465,6 +466,19 @@ function EntryCard({
                 title={t('Set deadline')}
               >
                 <Calendar size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  onContextMenu({ preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any, entry);
+                }}
+                className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)]"
+                style={{ color: 'var(--color-text-tertiary)' }}
+                title={t('More')}
+              >
+                <MoreHorizontal size={13} />
               </button>
             </div>
           </div>
@@ -591,9 +605,9 @@ function StreamFilterBar({
   const isFiltering = typeFilter !== 'all' || tagFilter.size > 0;
 
   return (
-    <div className="flex items-center gap-2 flex-wrap">
+    <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 -mb-1">
       <div
-        className="flex items-center gap-1 rounded-lg p-0.5"
+        className="flex items-center gap-1 rounded-lg p-0.5 shrink-0"
         style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
       >
         {[
@@ -624,7 +638,7 @@ function StreamFilterBar({
         <button
           type="button"
           onClick={() => setShowTags(!showTags)}
-          className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors"
+          className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors shrink-0"
           style={{
             background:
               showTags || tagFilter.size > 0 ? 'var(--color-accent-soft)' : 'var(--color-surface)',
@@ -645,7 +659,7 @@ function StreamFilterBar({
             onTypeFilterChange('all');
             onTagFilterChange(new Set());
           }}
-          className="text-[10px] font-medium"
+          className="text-[10px] font-medium shrink-0"
           style={{ color: 'var(--color-text-tertiary)' }}
         >
           {t('Clear filters')}

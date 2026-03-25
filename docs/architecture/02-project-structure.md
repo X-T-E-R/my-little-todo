@@ -17,7 +17,7 @@ my-little-todo/
 │   ├── core/                        #   纯 TS 核心逻辑
 │   ├── web/                         #   React 桌面/Web 应用
 │   ├── admin/                       #   管理员面板 SPA
-│   └── mobile/                      #   移动端 PWA (Capacitor)
+│   └── mobile/                      #   Android 移动端 (Capacitor)
 │
 ├── docs/                            # 设计与技术文档
 │   ├── design-philosophy/           #   设计宪法/画像/辩论/骨架
@@ -34,15 +34,15 @@ my-little-todo/
 
 ---
 
-## crates/server — Rust 统一后端
+## crates/server — Rust 后端
 
-PC 桌面端和独立服务器共享这个 crate。所有 HTTP 路由、数据库操作、认证逻辑都在这里。
+独立服务器使用的 crate。包含所有 HTTP 路由、数据库操作、认证逻辑和同步 API。
 
 ```
 crates/server/
 ├── Cargo.toml
 └── src/
-    ├── lib.rs                       # App 组装 (create_app) + start() 函数
+    ├── lib.rs                       # App 组装 (create_app) + start()
     ├── config.rs                    # ServerConfig (TOML + env 加载)
     ├── utils.rs                     # 路径校验、工具函数
     ├── export.rs                    # 持续导出 / 批量导出功能
@@ -67,6 +67,7 @@ crates/server/
         ├── data.rs                  #   /api/settings, /api/export, /api/import
         ├── blobs.rs                 #   /api/blobs (附件上传/下载)
         ├── backup.rs               #   /api/backup (云备份配置)
+        ├── sync.rs                  #   /api/sync (push/pull/status 同步端点)
         └── mcp.rs                   #   /api/mcp (MCP 协议端点)
 ```
 
@@ -129,9 +130,9 @@ packages/core/
 
 ---
 
-## packages/web — React 桌面/Web 应用
+## packages/web — React 桌面/Web/移动端 共享应用
 
-桌面端 (Tauri) 和网页端共用同一套代码。区别仅在入口 (`main.tsx` 中检测 Tauri 环境)。
+桌面端 (Tauri)、Android (Capacitor) 和网页端共用同一套 React 代码。区别在入口 (`main.tsx` 中按平台初始化不同 DataStore) 和条件 UI (通过 `isNativeClient()` 区分)。
 
 ```
 packages/web/
@@ -141,7 +142,7 @@ packages/web/
 │   │   ├── StreamView.tsx           #   "流" — 随手记录
 │   │   ├── BoardView.tsx            #   "任务" — 任务管理
 │   │   ├── SettingsView.tsx         #   "设置" — 分页设置
-│   │   ├── LoginView.tsx            #   登录页
+│   │   ├── LoginView.tsx            #   登录页 (lazy-loaded, Web 专用)
 │   │   └── OnboardingView.tsx       #   启动引导
 │   │
 │   ├── components/                  # 通用 UI 组件
@@ -149,36 +150,46 @@ packages/web/
 │   │   ├── RoleLandingCard.tsx      #   角色着陆卡片
 │   │   ├── CreateTaskDialog.tsx     #   新建任务弹窗
 │   │   ├── TaskDetailPanel.tsx      #   任务详情面板
-│   │   ├── ContextMenu.tsx          #   右键菜单
-│   │   ├── MarkdownToolbar.tsx      #   Markdown 编辑工具栏
-│   │   ├── ScheduleEditor.tsx       #   时间表编辑器
-│   │   ├── OnboardingTip.tsx        #   上下文引导提示
+│   │   ├── SyncIndicator.tsx        #   同步状态指示器
+│   │   ├── ErrorBoundary.tsx        #   全局错误边界
 │   │   └── ...
 │   │
 │   ├── stores/                      # Zustand 状态管理
 │   │   ├── taskStore.ts             #   任务
 │   │   ├── streamStore.ts           #   流条目
 │   │   ├── roleStore.ts             #   角色
-│   │   ├── scheduleStore.ts         #   时间表
-│   │   ├── behaviorStore.ts         #   行为数据
+│   │   ├── authStore.ts             #   认证 (Web 端用, 原生跳过)
 │   │   └── ...
 │   │
-│   ├── storage/                     # 存储适配层
-│   │   ├── adapter.ts               #   StorageAdapter 接口 + API 实现
-│   │   ├── apiClient.ts             #   HTTP API 客户端
+│   ├── storage/                     # 存储抽象层
+│   │   ├── dataStore.ts             #   DataStore 接口定义
+│   │   ├── apiDataStore.ts          #   Web 端: HTTP API 实现
+│   │   ├── tauriSqliteStore.ts      #   Tauri: 本地 SQLite 实现
+│   │   ├── capacitorSqliteStore.ts  #   Android: 本地 SQLite 实现
+│   │   ├── sqliteSchema.ts          #   共享 SQLite 表结构
+│   │   ├── adapter.ts               #   StorageAdapter (兼容层)
 │   │   ├── settingsApi.ts           #   设置 API 封装
-│   │   ├── roleRepo.ts              #   角色仓库
-│   │   ├── shortcutRepo.ts          #   快捷键仓库
-│   │   └── index.ts
+│   │   └── migrateLegacy.ts         #   旧数据迁移
+│   │
+│   ├── sync/                        # 同步引擎
+│   │   ├── types.ts                 #   SyncTarget 接口定义
+│   │   ├── syncEngine.ts            #   同步调度器
+│   │   ├── apiSyncTarget.ts         #   API 服务器同步
+│   │   ├── webdavSyncTarget.ts      #   WebDAV 同步
+│   │   └── s3SyncTarget.ts          #   S3 兼容存储同步
 │   │
 │   ├── utils/                       # 工具函数
+│   │   ├── platform.ts              #   平台检测 (isNativeClient, getPlatform)
+│   │   └── ...
+│   │
 │   ├── styles/globals.css           #   全局样式 + CSS 变量主题
 │   ├── locales/                     #   i18n 翻译文件 (en / zh-CN)
 │   ├── App.tsx                      #   根组件
-│   └── main.tsx                     #   入口
+│   └── main.tsx                     #   入口 (按平台初始化 DataStore)
 │
-├── src-tauri/                       # Tauri Rust 端
-│   ├── src/lib.rs                   #   start_embedded_server + get_server_config
+├── src-tauri/                       # Tauri 桌面端配置
+│   ├── src/lib.rs                   #   Tauri 插件注册 (sql, updater)
+│   ├── capabilities/default.json    #   权限声明 (sql:allow-*)
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 │
@@ -211,8 +222,8 @@ packages/admin/
 ```
 ┌─────────────────────────────────────────────────────┐
 │                     views/                          │
-│  NowView  StreamView  BoardView  Settings  Login    │
-│  Onboarding                                         │
+│  NowView  StreamView  BoardView  Settings           │
+│  Onboarding  LoginView (lazy, Web only)              │
 └──────────────────────┬──────────────────────────────┘
                        │ 使用
           ┌────────────┼────────────┐
@@ -224,19 +235,25 @@ packages/admin/
                                       │ 调用
                                ┌──────▼──────┐
                                │ storage/    │
-                               │ adapter +   │
-                               │ apiClient   │
+                               │ DataStore   │  ← 统一接口
+                               │ 接口        │
                                └──────┬──────┘
-                                      │ HTTP
-                               ┌──────▼──────┐
-                               │ Rust 后端   │
-                               │ /api/*      │
-                               └──────┬──────┘
-                                      │ 操作
-                               ┌──────▼──────┐
-                               │  数据库     │
-                               │ (SQLite等)  │
-                               └─────────────┘
+                                      │
+                    ┌─────────────────┼──────────────────┐
+                    │                 │                   │
+             ┌──────▼──────┐  ┌──────▼──────┐  ┌────────▼────────┐
+             │ ApiDataStore│  │ TauriSqlite │  │ CapacitorSqlite │
+             │ (Web)       │  │ DataStore   │  │ DataStore       │
+             └──────┬──────┘  └──────┬──────┘  └────────┬────────┘
+                    │ HTTP           │ SQL               │ SQL
+             ┌──────▼──────┐  ┌──────▼──────┐  ┌────────▼────────┐
+             │ Rust 后端   │  │ 本地 SQLite │  │ 本地 SQLite     │
+             │ /api/*      │  └─────────────┘  └─────────────────┘
+             └──────┬──────┘
+                    │              ┌──────────────┐
+             ┌──────▼──────┐      │ sync/        │ ← 可选
+             │ 服务器数据库 │ ←───│ SyncEngine   │
+             └─────────────┘      └──────────────┘
 ```
 
 ---
@@ -257,8 +274,9 @@ packages/admin/
 - `core` 不依赖 `web` / `admin` / `mobile`
 - `web` 可以导入 `core`
 - `stores/` 调用 `storage/`，`views/` 使用 `stores/` + `components/`
+- `sync/` 调用 `storage/`（DataStore 接口）
 - Rust: `crates/server-bin` 依赖 `crates/server`
-- Tauri `src-tauri` 依赖 `crates/server`
+- Tauri `src-tauri` **不再** 依赖 `crates/server`（纯插件配置）
 - **禁止循环依赖**
 
 ### 状态管理分层
@@ -268,18 +286,16 @@ packages/admin/
   │ 读取
   ▼
 Zustand Store (stores/)
-  │ HTTP 调用
+  │ 调用
   ▼
-Storage Adapter (storage/)
+DataStore 接口 (storage/)
   │
-  ▼
-REST API (/api/*)
-  │
-  ▼
-Rust 后端 (crates/server)
-  │
-  ▼
-数据库
+  ├── Web → ApiDataStore → REST API → Rust 后端 → 数据库
+  ├── Tauri → TauriSqliteDataStore → 本地 SQLite
+  └── Android → CapacitorSqliteDataStore → 本地 SQLite
+                    │ (可选)
+                    ▼
+              SyncEngine → SyncTarget → 远端
 ```
 
 ---

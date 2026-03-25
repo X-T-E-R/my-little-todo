@@ -46,8 +46,10 @@ pnpm dev:admin
 ```
 
 `pnpm dev:web` starts:
-- Rust backend on `http://127.0.0.1:3001`
+- Rust backend on `http://127.0.0.1:3001` (for web/API mode testing)
 - Vite dev server on `http://localhost:5173` (proxies `/api` and `/health` to the backend)
+
+> **Note**: For Tauri desktop development, the app uses local SQLite directly (no backend server needed). The dev server is only required when testing web/API mode.
 
 ### Code quality
 
@@ -105,9 +107,9 @@ my-little-todo/
 │   └── server-bin/             #   Standalone server binary
 ├── packages/                   # Frontend (pnpm workspace)
 │   ├── core/                   #   Pure TS models & utilities
-│   ├── web/                    #   React desktop/web app
-│   ├── admin/                  #   Admin panel SPA
-│   └── mobile/                 #   Mobile app (Capacitor)
+│   ├── web/                    #   React desktop/web/mobile shared app
+│   ├── admin/                  #   Admin panel SPA (server only)
+│   └── mobile/                 #   Android app (Capacitor)
 ├── docs/                       # Design & architecture docs
 ├── config.example.toml         # Server config template
 └── docker-compose.yml          # Docker deployment
@@ -130,5 +132,55 @@ For detailed structure and conventions, see [architecture/02-project-structure.m
 
 - The Vite dev server proxies `/api` to the Rust backend, so you can use relative paths in the browser.
 - Tauri desktop mode is detected via `__TAURI_INTERNALS__` in `window`. In browser dev mode, the app runs in pure HTTP/API mode.
+- Native clients (Tauri, Android) use local SQLite via `DataStore` interface — no server connection needed.
+- Use `isNativeClient()` from `utils/platform.ts` to conditionally show/hide server-only UI.
 - The `packages/core` package has no React dependency — it contains only pure TypeScript models and utilities shared across all frontends.
 - Hot reload works for frontend changes; Rust backend changes require restarting `pnpm dev:web`.
+
+### Storage Architecture
+
+The app uses a `DataStore` abstraction layer with three implementations:
+
+| Implementation | Platform | Data Source |
+|---|---|---|
+| `ApiDataStore` | Web browser | Server REST API |
+| `TauriSqliteDataStore` | Tauri desktop | Local SQLite (`@tauri-apps/plugin-sql`) |
+| `CapacitorSqliteDataStore` | Android | Local SQLite (`@capacitor-community/sqlite`) |
+
+All implementations support soft deletion (`deleted_at` + `version` fields) for sync compatibility.
+
+### Sync Development
+
+Native clients can sync with an API server. When developing/testing sync features:
+
+```bash
+# Start the backend server with auth disabled for easy testing
+AUTH_MODE=none pnpm dev:web
+```
+
+Or with authentication enabled (default `multi` mode):
+
+```bash
+pnpm dev:web
+# Register a user at http://localhost:5173, then configure sync in Settings → Cloud Sync
+```
+
+The `ApiServerSyncTarget` supports two authentication modes:
+
+- **Token mode**: paste a JWT or long-lived API token directly
+- **Credentials mode**: the client auto-logs in with username/password and caches the JWT
+
+To generate a long-lived API token for testing:
+
+```bash
+# First get a JWT via login
+TOKEN=$(curl -s -X POST http://127.0.0.1:3001/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}' | jq -r .token)
+
+# Then generate a long-lived token (0 = never expires)
+curl -s -X POST http://127.0.0.1:3001/api/auth/api-token \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"duration": 0}'
+```

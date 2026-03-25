@@ -13,7 +13,8 @@ Traditional todo apps are "ledgers" that faithfully record your debts. My Little
 - **DDL-Driven** — Deadlines have 3 hardness levels (hard / commitment / soft); delays require a reason
 - **Focus on Now** — Open the app and see only one thing + two buttons ("Start" / "Skip")
 - **Learn, Not Punish** — Every rejection, procrastination, and deviation is training data, not a mistake
-- **Multi-Device Sync** — Desktop, web, and mobile — data syncs through a unified API
+- **Local-First** — Desktop and mobile apps store data in local SQLite; optionally sync via API server, WebDAV, or S3
+- **Multi-Platform** — Tauri desktop (Windows/macOS/Linux), Android app, web PWA — all sharing the same UI
 - **Native AI Support** — Built-in AI magic button, native MCP support for agent integration
 
 <!-- TODO: Add screenshots here -->
@@ -22,13 +23,15 @@ Traditional todo apps are "ledgers" that faithfully record your debts. My Little
 
 ### PC Desktop (Tauri) — Easiest
 
-A local app that works out of the box — no server required.
+A local-first app that works out of the box — no server required.
 
 1. Download the installer from [Releases](https://github.com/X-T-E-R/my-little-todo/releases) (Windows .msi/.exe, macOS .dmg, Linux .AppImage)
 2. Install and launch — the first run will guide you through the initial setup
-3. Single-user mode by default, no password required, data stored locally
-4. Enable "LAN access" in settings to let phones or other devices connect via browser
-5. You can also connect to a remote cloud server for multi-device sync
+3. Data is stored in a local SQLite database — no account or server needed
+4. Optionally configure a sync method in Settings → Sync to sync across devices:
+   - **API Server** — sync with a My Little Todo server (supports username/password or API token auth)
+   - **WebDAV** — sync via any WebDAV-compatible server
+   - **S3** — sync to S3-compatible object storage (AWS/MinIO/R2)
 
 ### Docker Deploy — For Servers
 
@@ -58,7 +61,7 @@ echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
 docker compose up -d
 ```
 
-**First-time setup**: Visit `http://localhost:3001/admin` to create the first admin account. Once done, users can access the web app at `http://localhost:3001`. After initial setup, admin tasks (user management, stats) can also be accessed from the Settings page within the main app.
+**First-time setup**: Visit `http://localhost:3001/admin` to create the first admin account. Once done, users can access the web app at `http://localhost:3001`. Admin tasks (user management, stats) are managed at the `/admin` page.
 
 Data is stored in `./data/` on the host — easy to backup and inspect.
 
@@ -69,7 +72,7 @@ docker compose pull && docker compose up -d
 ```
 
 <details>
-<summary>Docker Environment Variables</summary>
+<summary>Docker Environment Variables (server mode only)</summary>
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -85,9 +88,36 @@ docker compose pull && docker compose up -d
 
 </details>
 
+<details>
+<summary>Sync API & Authentication</summary>
+
+Desktop and mobile clients can sync with the server using the `/api/sync/*` endpoints. Authentication options:
+
+- **Username & Password** — the client auto-logs in via `POST /api/auth/login` and caches the JWT
+- **API Token** — generate a long-lived token via `POST /api/auth/api-token` (requires an existing JWT). Available durations: 30 days, 90 days, 1 year, or never-expires
+
+You can also generate API tokens from the web UI: Settings → Account → API Token.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/sync/changes?since={version}` | GET | Pull changes since a version |
+| `/api/sync/status` | GET | Get current sync version |
+| `/api/sync/push` | POST | Push local changes to server |
+| `/api/auth/api-token` | POST | Generate long-lived API token |
+
+All sync endpoints require `Authorization: Bearer <token>` header.
+
+</details>
+
 To set up a reverse proxy (Nginx / Caddy), point your domain to `localhost:3001` — no special location rules needed.
 
 For standalone binary deployment without Docker, see [docs/deployment/binary.md](docs/deployment/binary.md).
+
+### Android App
+
+1. Download the APK from [Releases](https://github.com/X-T-E-R/my-little-todo/releases)
+2. Install and launch — data is stored locally in SQLite
+3. The app checks for updates automatically on launch
 
 ### PWA Web App — For Mobile
 
@@ -98,8 +128,8 @@ For standalone binary deployment without Docker, see [docs/deployment/binary.md]
 
 ## First-Time Usage
 
-1. **PC users**: Launch the app — the onboarding wizard will guide you through role setup and preferences
-2. **Server users**: Visit `http://your-host:3001/admin` to create the first admin account, then open `http://your-host:3001` to start using. After setup, you can manage users directly from Settings > Admin in the main app
+1. **Desktop / Android users**: Launch the app — the onboarding wizard will guide you through role setup and preferences. All data is stored locally.
+2. **Server (web) users**: Visit `http://your-host:3001/admin` to create the first admin account, then open `http://your-host:3001` to start using.
 3. Open the **Stream** view, type whatever's on your mind, and the system helps you organize it into tasks
 
 ## MCP Integration
@@ -170,10 +200,10 @@ pnpm typecheck   # Type check
 - [x] v0.5 — Onboarding + contextual tips
 - [x] v0.6 — Cloud backup UI + ZIP export/import + PC cloud mode
 - [x] v0.7 — Docker deployment + MCP support + i18n
-- [ ] v0.8 — AI integration: auto-extract tasks from stream, smart recommendations
-- [ ] v0.9 — Learning engine: behavior tracking, pattern recognition
-- [ ] v1.0 — Full desktop: system tray, global shortcuts, cloud backup
-- [ ] v2.0 — Native mobile app
+- [x] v0.8 — Local-first architecture + native SQLite + sync engine + Android app
+- [ ] v0.9 — AI integration: auto-extract tasks from stream, smart recommendations
+- [ ] v1.0 — Full desktop + learning engine: behavior tracking, pattern recognition
+- [ ] v2.0 — iOS native app
 
 ## Design Philosophy
 

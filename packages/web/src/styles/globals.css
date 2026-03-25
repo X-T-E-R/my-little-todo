@@ -150,6 +150,14 @@ button:focus-visible,
   background: var(--color-border-hover);
 }
 
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
 /* Markdown preview styling */
 .markdown-preview h1 {
   font-size: 1.5em;

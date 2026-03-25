@@ -3,12 +3,13 @@ import { createRoot } from 'react-dom/client';
 import './locales';
 import './styles/globals.css';
 import { App } from './App';
-import { setStorageAdapter } from './storage/adapter';
-import { createApiAdapter } from './storage/apiClient';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { createApiDataStore } from './storage/apiDataStore';
+import { setDataStore } from './storage/dataStore';
 import { createDirectExecutor, startAutoSync } from './storage/offlineQueue';
 import { setSettingsApiBase } from './storage/settingsApi';
 import { useAuthStore } from './stores/authStore';
-import { initPlatform } from './utils/platform';
+import { getPlatform, initPlatform } from './utils/platform';
 
 // Apply saved theme immediately to prevent flash
 {
@@ -17,43 +18,51 @@ import { initPlatform } from './utils/platform';
   else if (savedTheme === 'light') document.documentElement.setAttribute('data-theme', 'light');
 }
 
-async function getApiBase(): Promise<string> {
-  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
-    const useMode = localStorage.getItem('mlt-use-mode');
-    const cloudUrl = localStorage.getItem('mlt-cloud-url');
-
-    if (useMode === 'cloud' && cloudUrl) {
-      return cloudUrl;
-    }
-
-    const { invoke } = await import('@tauri-apps/api/core');
-    try {
-      const host = localStorage.getItem('mlt-lan-access') === 'true' ? '0.0.0.0' : '127.0.0.1';
-      const url = await invoke<string>('start_embedded_server', { host });
-      return url;
-    } catch {
-      return 'http://127.0.0.1:3001';
-    }
-  }
-  // Browser mode: use relative paths (works with Vite proxy in dev and same-origin Rust serve in production)
-  return '';
-}
-
 let _apiBaseUrl = '';
 
 async function initStorage() {
   await initPlatform();
-  const url = await getApiBase();
-  _apiBaseUrl = url;
-  useAuthStore.getState().setApiBase(url);
-  setSettingsApiBase(url);
-  setStorageAdapter(createApiAdapter(url));
+  const platform = getPlatform();
+
+  if (platform === 'tauri') {
+    const { createTauriSqliteDataStore } = await import('./storage/tauriSqliteStore');
+    const store = await createTauriSqliteDataStore();
+    setDataStore(store);
+
+    const { migrateLegacyData } = await import('./storage/migrateLegacy');
+    await migrateLegacyData(store);
+  } else if (platform === 'capacitor') {
+    // Phase 6: will be replaced with CapacitorSqliteDataStore
+    const url = localStorage.getItem('mlt-cloud-url') || '';
+    _apiBaseUrl = url;
+    useAuthStore.getState().setApiBase(url);
+    setSettingsApiBase(url);
+    setDataStore(createApiDataStore(url));
+  } else {
+    // web-hosted / web-standalone: API server IS the storage
+    const url = '';
+    _apiBaseUrl = url;
+    useAuthStore.getState().setApiBase(url);
+    setSettingsApiBase(url);
+    setDataStore(createApiDataStore(url));
+  }
 }
 
 async function main() {
   await initStorage();
 
-  startAutoSync(createDirectExecutor(_apiBaseUrl));
+  // Offline queue replay only applies to API-based stores
+  if (_apiBaseUrl !== undefined && getPlatform() !== 'tauri') {
+    startAutoSync(createDirectExecutor(_apiBaseUrl));
+  }
+
+  // Initialize sync engine from saved config (native clients)
+  if (getPlatform() === 'tauri' || getPlatform() === 'capacitor') {
+    const { initSyncFromConfig } = await import('./sync/syncManager');
+    initSyncFromConfig().catch((err) =>
+      console.warn('[SyncEngine] Failed to initialize from config:', err),
+    );
+  }
 
   const root = document.getElementById('root');
   if (!root) {
@@ -61,9 +70,21 @@ async function main() {
   }
   createRoot(root).render(
     <StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </StrictMode>,
   );
 }
 
-main();
+main().catch((err) => {
+  console.error('Fatal initialization error:', err);
+  const root = document.getElementById('root');
+  if (root) {
+    root.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;flex-direction:column;gap:12px;padding:24px;text-align:center">
+      <h2 style="margin:0;color:#e11d48">Initialization Failed</h2>
+      <pre style="margin:0;font-size:13px;color:#666;max-width:600px;overflow:auto;white-space:pre-wrap">${String(err)}</pre>
+      <button onclick="location.reload()" style="padding:8px 20px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer;font-size:13px">Reload</button>
+    </div>`;
+  }
+});

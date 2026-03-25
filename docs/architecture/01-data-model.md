@@ -174,6 +174,8 @@ L0 决定了服务器如何启动，运行后不可热更改（需重启）。
 
 ### SQLite 实现 (默认)
 
+服务器端 Schema：
+
 ```sql
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -188,6 +190,8 @@ CREATE TABLE IF NOT EXISTS files (
     path TEXT NOT NULL,
     content TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    deleted_at TEXT,
     PRIMARY KEY (user_id, path)
 );
 
@@ -196,6 +200,8 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT NOT NULL,
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    deleted_at TEXT,
     PRIMARY KEY (user_id, key)
 );
 
@@ -205,9 +211,42 @@ CREATE TABLE IF NOT EXISTS blobs (
     filename TEXT NOT NULL,
     mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
     size INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    deleted_at TEXT
 );
 ```
+
+原生客户端本地 Schema（`TauriSqliteDataStore` / `CapacitorSqliteDataStore`）：
+
+```sql
+CREATE TABLE IF NOT EXISTS files (
+    path TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    deleted_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    deleted_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS blobs (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+    size INTEGER NOT NULL DEFAULT 0,
+    data BLOB,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT
+);
+```
+
+> 原生客户端的本地表不含 `user_id` 列——单用户场景，无需区分。
 
 ### DatabaseProvider trait
 
@@ -257,9 +296,22 @@ pub trait DatabaseProvider: Send + Sync {
 |------|------|------|
 | GET | `/api/auth/mode` | 获取认证模式 + needs_setup |
 | POST | `/api/auth/register` | 注册 |
-| POST | `/api/auth/login` | 登录，返回 JWT |
+| POST | `/api/auth/login` | 登录，返回 JWT（7 天有效） |
 | GET | `/api/auth/me` | 获取当前用户 |
 | POST | `/api/auth/change-password` | 修改密码 |
+| POST | `/api/auth/api-token` | 生成长期 API Token（需已认证） |
+
+**API Token 生成**：`POST /api/auth/api-token`，请求体：
+
+```json
+{ "duration": 31536000 }
+```
+
+`duration` 为有效期秒数，0 表示永不过期。返回：
+
+```json
+{ "token": "eyJ...", "expires_at": 1742913600 }
+```
 
 ### 文件 (L2)
 
@@ -299,7 +351,7 @@ pub trait DatabaseProvider: Send + Sync {
 | GET | `/api/admin/storage` | 存储信息 |
 | POST | `/api/admin/migrate` | 数据迁移 |
 
-> 管理员功能在主 Web 应用的设置页 AdminTab 中也可访问，无需单独打开 `/admin` 面板。
+> 管理员功能通过独立的 `/admin` 页面管理，仅用于服务器模式。
 
 ### Blob / 附件
 
@@ -333,6 +385,19 @@ pub trait DatabaseProvider: Send + Sync {
 |------|------|------|
 | POST | `/api/mcp` | MCP (Model Context Protocol) 端点 |
 
+### 同步
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/sync/push` | 客户端推送变更到服务器 |
+| GET | `/api/sync/changes?since={version}` | 客户端拉取服务器变更（自指定版本号） |
+| GET | `/api/sync/status` | 获取当前同步版本号 |
+
+所有同步端点需要 `Authorization: Bearer <token>` 请求头。客户端支持两种认证方式：
+
+- **Token 模式**：直接填入长期 API Token 或 JWT
+- **账号密码模式**：客户端自动调用 `/api/auth/login` 获取 JWT，缓存并在过期 / 401 时自动重新登录
+
 ### 健康检查
 
 | 方法 | 路径 | 说明 |
@@ -343,6 +408,8 @@ pub trait DatabaseProvider: Send + Sync {
 
 ## 五、数据流全景
 
+### Web 客户端（服务器模式）
+
 ```
 用户操作 (UI)
    │
@@ -350,7 +417,7 @@ pub trait DatabaseProvider: Send + Sync {
 Zustand Store (前端状态)
    │
    ▼
-REST API 调用 (fetch + JWT)
+ApiDataStore → REST API 调用 (fetch + JWT)
    │
    ▼
 Axum 路由 (Rust 后端)
@@ -363,12 +430,27 @@ DatabaseProvider (trait)
    ├──→ SQLite (默认)
    ├──→ PostgreSQL
    └──→ MySQL
-           │
-           ▼
-      数据持久化
-           │
-           ├──→ 持续导出 (可选，镜像到磁盘)
-           └──→ 云备份 (可选，S3/WebDAV)
+```
+
+### 原生客户端（本地优先）
+
+```
+用户操作 (UI)
+   │
+   ▼
+Zustand Store (前端状态)
+   │
+   ▼
+TauriSqliteDataStore / CapacitorSqliteDataStore
+   │
+   ▼
+本地 SQLite 数据库
+   │
+   ├──→ SyncEngine (可选，后台同步)
+   │      │
+   │      ├──→ ApiServerSyncTarget → 服务器 /api/sync/* (Token 或 账号密码认证)
+   │      ├──→ WebDavSyncTarget → WebDAV 服务器
+   │      └──→ S3SyncTarget → S3 兼容存储
 ```
 
 ### 前端存储层
@@ -380,35 +462,35 @@ DatabaseProvider (trait)
 Zustand Store (stores/)
   │ 调用
   ▼
-StorageAdapter (storage/adapter.ts)
-  │ HTTP 请求
-  ▼
-apiClient.ts ──→ REST API ──→ Rust 后端
-settingsApi.ts ──→ /api/settings ──→ Rust 后端
+DataStore 接口 (storage/dataStore.ts)
+  │
+  ├── ApiDataStore ──→ REST API ──→ Rust 后端 (Web)
+  ├── TauriSqliteDataStore ──→ 本地 SQLite (Tauri)
+  └── CapacitorSqliteDataStore ──→ 本地 SQLite (Android)
 ```
 
-### 认证流程
+### 启动流程
 
 ```
 App 启动
   │
-  ├── 检查 authMode (/api/auth/mode)
+  ├── 原生客户端？
   │     │
-  │     ├── "none" → 跳过认证，直接进入
+  │     ├── 是 → authChecked=true，跳过认证
+  │     │        初始化本地 DataStore (SQLite)
   │     │
-  │     └── "single"/"multi" → 检查 localStorage 中的 token
+  │     └── 否 → 检查 authMode (/api/auth/mode)
   │           │
-  │           ├── 有 token → 验证 (/api/auth/me) → 进入 or 登录页
+  │           ├── "none" → 跳过认证，直接进入
   │           │
-  │           └── 无 token → 显示登录页
+  │           └── "single"/"multi" → 检查 token
   │                 │
-  │                 ├── Tauri + needs_setup → 直接显示注册表单
-  │                 └── 非 Tauri + needs_setup → 引导到 /admin 创建管理员
+  │                 ├── 有 token → 验证 → 进入 or 登录页
+  │                 └── 无 token → 显示登录页
   │
-  ├── 检查 onboarding-completed 设置
+  ├── 检查 onboarding-completed
   │     │
   │     ├── 未完成 → 显示引导流程
-  │     │
   │     └── 已完成 → 进入主界面
   │
   └── 加载数据 (stream, tasks, roles, shortcuts, schedules)

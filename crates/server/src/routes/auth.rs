@@ -228,3 +228,42 @@ pub async fn change_password(
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }
+
+#[derive(Deserialize)]
+pub struct ApiTokenRequest {
+    /// Duration in seconds. 0 = never expires.
+    pub duration: Option<u64>,
+}
+
+#[derive(Serialize)]
+pub struct ApiTokenResponse {
+    pub token: String,
+    pub expires_at: usize,
+}
+
+/// POST /api/auth/api-token — generate a long-lived API token for sync / MCP usage.
+pub async fn generate_api_token(
+    State(state): State<AppState>,
+    axum::Extension(user_id): axum::Extension<String>,
+    Json(body): Json<ApiTokenRequest>,
+) -> AuthResult<ApiTokenResponse> {
+    let user = state
+        .db
+        .get_user_by_id(&user_id)
+        .await
+        .map_err(|e| internal(&e.to_string()))?
+        .ok_or_else(|| unauthorized("User not found"))?;
+
+    let duration_secs = body.duration.unwrap_or(365 * 24 * 3600);
+
+    let (token, expires_at) = jwt::sign_long_lived_token(
+        &user.id,
+        &user.username,
+        user.is_admin,
+        &state.config.jwt_secret,
+        duration_secs,
+    )
+    .map_err(|e| internal(&e.to_string()))?;
+
+    Ok(Json(ApiTokenResponse { token, expires_at }))
+}

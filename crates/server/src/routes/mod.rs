@@ -5,3 +5,4 @@ pub mod blobs;
 pub mod data;
 pub mod files;
 pub mod mcp;
+pub mod sync;

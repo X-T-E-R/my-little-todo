@@ -76,7 +76,7 @@ export function CreateTaskDialog({ open, onClose, initialTitle = '' }: Props) {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-            className="fixed inset-x-4 top-[20%] z-50 mx-auto max-w-lg rounded-2xl p-6 shadow-2xl"
+            className="fixed inset-x-4 top-[5%] sm:top-[20%] z-50 mx-auto max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl p-6 shadow-2xl"
             style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
           >
             <div className="flex items-center justify-between mb-5">

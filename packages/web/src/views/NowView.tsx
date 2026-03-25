@@ -184,7 +184,7 @@ function FocusModeView({
           className="text-center"
         >
           <h1
-            className="text-3xl sm:text-4xl font-extrabold tracking-tight leading-tight"
+            className="text-2xl sm:text-4xl font-extrabold tracking-tight leading-tight"
             style={{ color: 'var(--color-text)' }}
           >
             {task.title}
@@ -706,7 +706,7 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
           <button
             type="button"
             onClick={() => selectTask(currentTask.id)}
-            className="text-4xl sm:text-5xl font-extrabold tracking-tight leading-tight transition-colors hover:text-[var(--color-accent)]"
+            className="text-3xl sm:text-5xl font-extrabold tracking-tight leading-tight transition-colors hover:text-[var(--color-accent)]"
             style={{ color: 'var(--color-text)' }}
           >
             {currentTask.title}

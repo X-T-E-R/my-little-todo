@@ -23,11 +23,8 @@ import {
   Server,
   Shield,
   Sparkles,
-  Trash2,
   Upload,
   User,
-  Users,
-  Wifi,
   XCircle,
 } from 'lucide-react';
 import type React from 'react';
@@ -35,7 +32,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScheduleEditor } from '../components/ScheduleEditor';
 import i18n from '../locales';
+import { getDataStore } from '../storage/dataStore';
 import { deleteSetting, getSetting, getSettingsApiBase, putSetting } from '../storage/settingsApi';
+import { getSyncEngine, initSyncFromConfig } from '../sync';
+import type { ConflictStrategy } from '../sync';
 import {
   useRoleStore,
   useScheduleStore,
@@ -45,13 +45,14 @@ import {
 } from '../stores';
 import { getAuthToken, useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
+import { checkGitHubUpdate } from '../utils/githubUpdater';
 import {
-  canChooseMode,
-  canControlServer,
   canEditBackendUrl,
   canExportToFolder,
   getPlatform,
   hasKeyboardShortcuts,
+  isCapacitorEnv,
+  isNativeClient,
   isTauriEnv,
 } from '../utils/platform';
 import { eventToKeyString } from '../utils/shortcuts';
@@ -65,8 +66,7 @@ type SettingsTab =
   | 'shortcuts'
   | 'sync'
   | 'data'
-  | 'about'
-  | 'admin';
+  | 'about';
 
 const BASE_TABS: { id: SettingsTab; label: string; icon: typeof Key }[] = [
   { id: 'general', label: 'General', icon: Moon },
@@ -534,6 +534,14 @@ function AccountTab() {
         </>
       )}
 
+      {/* API Token */}
+      {authMode !== 'none' && (
+        <>
+          <ApiTokenSection />
+          <hr style={{ borderColor: 'var(--color-border)' }} />
+        </>
+      )}
+
       {/* Logout */}
       <section>
         <div className="flex items-center gap-2 mb-3">
@@ -672,15 +680,17 @@ function DataTab() {
 
   useEffect(() => {
     (async () => {
-      try {
-        const token = getAuthToken();
-        const h: HeadersInit = { 'Content-Type': 'application/json' };
-        if (token) h.Authorization = `Bearer ${token}`;
-        const apiBase = getSettingsApiBase();
-        const res = await fetch(`${apiBase}/api/admin/storage`, { headers: h });
-        if (res.ok) setStorageInfo(await res.json());
-      } catch {
-        /* not admin or not available */
+      if (!isNativeClient()) {
+        try {
+          const token = getAuthToken();
+          const h: HeadersInit = { 'Content-Type': 'application/json' };
+          if (token) h.Authorization = `Bearer ${token}`;
+          const apiBase = getSettingsApiBase();
+          const res = await fetch(`${apiBase}/api/admin/storage`, { headers: h });
+          if (res.ok) setStorageInfo(await res.json());
+        } catch {
+          /* not admin or not available */
+        }
       }
 
       const savedPath = await getSetting('auto-export-path');
@@ -694,16 +704,34 @@ function DataTab() {
   const isTauriDataTab = canExportToFolder();
   const showToast = useToastStore((s) => s.showToast);
 
+  const collectLocalExportData = async () => {
+    const store = getDataStore();
+    const paths = await store.listFiles();
+    const files: { path: string; content: string }[] = [];
+    for (const p of paths) {
+      const content = await store.readFile(p);
+      if (content !== null) files.push({ path: p, content });
+    }
+    const allSettings = await store.getAllSettings();
+    return { files, settings: Object.entries(allSettings) };
+  };
+
   const handleExport = async (format: 'json' | 'markdown', asZip = false) => {
     setExporting(format);
     try {
-      const token = getAuthToken();
-      const h: HeadersInit = {};
-      if (token) h.Authorization = `Bearer ${token}`;
-      const apiBase = getSettingsApiBase();
-      const res = await fetch(`${apiBase}/api/export/${format}`, { headers: h });
-      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
-      const data = await res.json();
+      let data: unknown;
+
+      if (isNativeClient()) {
+        data = await collectLocalExportData();
+      } else {
+        const token = getAuthToken();
+        const h: HeadersInit = {};
+        if (token) h.Authorization = `Bearer ${token}`;
+        const apiBase = getSettingsApiBase();
+        const res = await fetch(`${apiBase}/api/export/${format}`, { headers: h });
+        if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+        data = await res.json();
+      }
 
       const dateSuffix = new Date().toISOString().slice(0, 10);
 
@@ -727,9 +755,10 @@ function DataTab() {
         if (format === 'json') {
           zip.file('export.json', JSON.stringify(data, null, 2));
         } else {
+          const raw = data as { files?: { path: string; content: string }[] };
           const entries: { path: string; content: string }[] = Array.isArray(data)
-            ? data
-            : data.files || [];
+            ? (data as { path: string; content: string }[])
+            : raw.files || [];
           for (const entry of entries) {
             zip.file(entry.path, entry.content);
           }
@@ -744,7 +773,7 @@ function DataTab() {
         URL.revokeObjectURL(url);
       } else {
         const withMeta = {
-          ...data,
+          ...(data as Record<string, unknown>),
           _meta: { version: APP_VERSION, exported_at: new Date().toISOString() },
         };
         const blob = new Blob([JSON.stringify(withMeta, null, 2)], { type: 'application/json' });
@@ -774,11 +803,6 @@ function DataTab() {
     setImporting(true);
     setImportResult('');
     try {
-      const token = getAuthToken();
-      const h: HeadersInit = { 'Content-Type': 'application/json' };
-      if (token) h.Authorization = `Bearer ${token}`;
-      const apiBase = getSettingsApiBase();
-
       let payload: { files: { path: string; content: string }[]; settings?: [string, string][] };
 
       if (file.name.endsWith('.zip')) {
@@ -814,31 +838,59 @@ function DataTab() {
         payload = JSON.parse(text);
       }
 
-      const res = await fetch(`${apiBase}/api/import/json`, {
-        method: 'POST',
-        headers: h,
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        let msg: string;
-        try {
-          msg = JSON.parse(text).error ?? text;
-        } catch {
-          msg = text || `HTTP ${res.status}`;
+      if (isNativeClient()) {
+        const store = getDataStore();
+        let filesImported = 0;
+        let settingsImported = 0;
+        for (const f of payload.files) {
+          await store.writeFile(f.content, f.path);
+          filesImported++;
         }
-        setImportIsError(true);
-        setImportResult(t('Error: {{message}}', { message: msg }));
-        return;
+        if (payload.settings) {
+          for (const [key, value] of payload.settings) {
+            await store.putSetting(key, value);
+            settingsImported++;
+          }
+        }
+        setImportIsError(false);
+        setImportResult(
+          t('Import succeeded: {{fileCount}} files, {{settingsCount}} settings', {
+            fileCount: filesImported,
+            settingsCount: settingsImported,
+          }),
+        );
+      } else {
+        const token = getAuthToken();
+        const h: HeadersInit = { 'Content-Type': 'application/json' };
+        if (token) h.Authorization = `Bearer ${token}`;
+        const apiBase = getSettingsApiBase();
+        const res = await fetch(`${apiBase}/api/import/json`, {
+          method: 'POST',
+          headers: h,
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          let msg: string;
+          try {
+            msg = JSON.parse(text).error ?? text;
+          } catch {
+            msg = text || `HTTP ${res.status}`;
+          }
+          setImportIsError(true);
+          setImportResult(t('Error: {{message}}', { message: msg }));
+          return;
+        }
+        const result = await res.json();
+        setImportIsError(false);
+        setImportResult(
+          t('Import succeeded: {{fileCount}} files, {{settingsCount}} settings', {
+            fileCount: result.files_imported,
+            settingsCount: result.settings_imported ?? 0,
+          }),
+        );
       }
-      const result = await res.json();
-      setImportIsError(false);
-      setImportResult(
-        t('Import succeeded: {{fileCount}} files, {{settingsCount}} settings', {
-          fileCount: result.files_imported,
-          settingsCount: result.settings_imported ?? 0,
-        }),
-      );
+
       await Promise.all([
         useStreamStore.getState().load(),
         useTaskStore.getState().load(),
@@ -910,10 +962,12 @@ function DataTab() {
     mongodb: 'MongoDB',
   };
 
+  const native = isNativeClient();
+
   return (
     <div className="flex flex-col gap-6">
-      {/* Current storage info */}
-      {storageInfo && (
+      {/* Server storage info */}
+      {!native && storageInfo && (
         <section>
           <div className="flex items-center gap-2 mb-3">
             <FolderOpen size={16} className="text-[var(--color-accent)]" />
@@ -944,7 +998,25 @@ function DataTab() {
         </section>
       )}
 
-      {storageInfo && <hr style={{ borderColor: 'var(--color-border)' }} />}
+      {/* Native local storage info */}
+      {native && (
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <HardDriveDownload size={16} className="text-[var(--color-accent)]" />
+            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Current Storage')}</h3>
+          </div>
+          <div className="flex gap-4 text-xs text-[var(--color-text-secondary)]">
+            <span>
+              {t('Backend Type')}: <strong>SQLite</strong>
+            </span>
+            <span>
+              {t('Auth Mode')}: <strong>none</strong>
+            </span>
+          </div>
+        </section>
+      )}
+
+      <hr style={{ borderColor: 'var(--color-border)' }} />
 
       {/* Export */}
       <section>
@@ -967,81 +1039,70 @@ function DataTab() {
           >
             {exporting === 'json' ? t('Exporting...') : t('Export JSON')}
           </button>
-          {isTauriDataTab ? (
-            <>
-              <button
-                type="button"
-                onClick={async () => {
-                  const dir = window.prompt(
-                    t('Select export folder'),
-                    'C:\\Users\\me\\Documents\\my-little-todo-export',
-                  );
-                  if (!dir) return;
-                  setExporting('markdown');
-                  try {
-                    const token = getAuthToken();
-                    const h: HeadersInit = { 'Content-Type': 'application/json' };
-                    if (token) h.Authorization = `Bearer ${token}`;
-                    const res = await fetch(`${getSettingsApiBase()}/api/export/disk`, {
-                      method: 'POST',
-                      headers: h,
-                      body: JSON.stringify({ path: dir }),
-                    });
-                    if (res.ok) {
-                      const data = await res.json();
-                      setFullExportIsError(false);
-                      setFullExportResult(
-                        t('Exported {{count}} files to folder', { count: data.files_exported }),
-                      );
-                    } else {
-                      const text = await res.text();
-                      let msg: string;
-                      try {
-                        msg = JSON.parse(text).error ?? text;
-                      } catch {
-                        msg = text || `HTTP ${res.status}`;
-                      }
-                      setFullExportIsError(true);
-                      setFullExportResult(t('Export failed: {{message}}', { message: msg }));
-                    }
-                  } catch (err) {
-                    setFullExportIsError(true);
-                    setFullExportResult(
-                      t('Export failed: {{message}}', {
-                        message: err instanceof Error ? err.message : String(err),
-                      }),
-                    );
-                  } finally {
-                    setExporting(null);
-                  }
-                }}
-                disabled={exporting !== null}
-                className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] disabled:opacity-50"
-              >
-                <span className="flex items-center gap-1.5">
-                  <FolderOpen size={14} />
-                  {exporting === 'markdown' ? t('Exporting...') : t('Export Markdown (Folder)')}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleExport('markdown', true)}
-                disabled={exporting !== null}
-                className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] disabled:opacity-50"
-              >
-                {exporting === 'markdown' ? t('Exporting...') : t('Export Markdown (ZIP)')}
-              </button>
-            </>
-          ) : (
+          {!native && isTauriDataTab && (
             <button
               type="button"
-              onClick={() => handleExport('markdown', true)}
+              onClick={async () => {
+                const dir = window.prompt(
+                  t('Select export folder'),
+                  'C:\\Users\\me\\Documents\\my-little-todo-export',
+                );
+                if (!dir) return;
+                setExporting('markdown');
+                try {
+                  const token = getAuthToken();
+                  const h: HeadersInit = { 'Content-Type': 'application/json' };
+                  if (token) h.Authorization = `Bearer ${token}`;
+                  const res = await fetch(`${getSettingsApiBase()}/api/export/disk`, {
+                    method: 'POST',
+                    headers: h,
+                    body: JSON.stringify({ path: dir }),
+                  });
+                  if (res.ok) {
+                    const data = await res.json();
+                    setFullExportIsError(false);
+                    setFullExportResult(
+                      t('Exported {{count}} files to folder', { count: data.files_exported }),
+                    );
+                  } else {
+                    const text = await res.text();
+                    let msg: string;
+                    try {
+                      msg = JSON.parse(text).error ?? text;
+                    } catch {
+                      msg = text || `HTTP ${res.status}`;
+                    }
+                    setFullExportIsError(true);
+                    setFullExportResult(t('Export failed: {{message}}', { message: msg }));
+                  }
+                } catch (err) {
+                  setFullExportIsError(true);
+                  setFullExportResult(
+                    t('Export failed: {{message}}', {
+                      message: err instanceof Error ? err.message : String(err),
+                    }),
+                  );
+                } finally {
+                  setExporting(null);
+                }
+              }}
               disabled={exporting !== null}
               className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] disabled:opacity-50"
             >
-              {exporting === 'markdown' ? t('Exporting...') : t('Export Markdown (ZIP)')}
+              <span className="flex items-center gap-1.5">
+                <FolderOpen size={14} />
+                {exporting === 'markdown' ? t('Exporting...') : t('Export Markdown (Folder)')}
+              </span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => handleExport('markdown', true)}
+            disabled={exporting !== null}
+            className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] disabled:opacity-50"
+          >
+            {exporting === 'markdown' ? t('Exporting...') : t('Export Markdown (ZIP)')}
+          </button>
         </div>
         {fullExportResult && (
           <p
@@ -1107,10 +1168,10 @@ function DataTab() {
         )}
       </section>
 
-      <hr style={{ borderColor: 'var(--color-border)' }} />
+      {!native && <hr style={{ borderColor: 'var(--color-border)' }} />}
 
-      {/* Migration */}
-      <section>
+      {/* Migration — server mode only */}
+      {!native && <section>
         <h3 className="text-sm font-bold text-[var(--color-text)] mb-1">{t('Data Migration')}</h3>
         <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
           {t(
@@ -1188,12 +1249,12 @@ function DataTab() {
             </p>
           )}
         </div>
-      </section>
+      </section>}
 
-      {isTauriDataTab && <hr style={{ borderColor: 'var(--color-border)' }} />}
+      {!native && isTauriDataTab && <hr style={{ borderColor: 'var(--color-border)' }} />}
 
-      {/* Continuous export — Tauri only */}
-      {isTauriDataTab && (
+      {/* Continuous export — Tauri only, server mode */}
+      {!native && isTauriDataTab && (
         <section>
           <div className="flex items-center gap-2 mb-2">
             <RefreshCw size={16} className="text-[var(--color-accent)]" />
@@ -1333,72 +1394,35 @@ function DataTab() {
 function SyncTab() {
   const { t } = useTranslation('settings');
   const platform = getPlatform();
-  const showModeSelector = canChooseMode();
-  const showServerConfig = canControlServer();
-  const editableBackend = canEditBackendUrl();
+  const native = isNativeClient();
 
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testMsg, setTestMsg] = useState('');
   const [serverRunning, setServerRunning] = useState(false);
-  const [serverHost, setServerHost] = useState('127.0.0.1');
-  const [serverPort, setServerPort] = useState(3001);
-  const [pendingHost, setPendingHost] = useState('127.0.0.1');
-  const [pendingPort, setPendingPort] = useState(3001);
-  const [restarting, setRestarting] = useState(false);
-  const [restartMsg, setRestartMsg] = useState('');
-  const [restartIsError, setRestartIsError] = useState(false);
-
-  const [useMode, setUseMode] = useState<'local' | 'cloud'>(
-    () => (localStorage.getItem('mlt-use-mode') as 'local' | 'cloud') || 'local',
-  );
   const [cloudUrl, setCloudUrl] = useState(() => localStorage.getItem('mlt-cloud-url') || '');
-  const [modeSaved, setModeSaved] = useState(false);
-  const [serverAuthMode, setServerAuthMode] = useState<string>('none');
-  const [pendingAuthMode, setPendingAuthMode] = useState<string>('none');
-
-  const isLanSharing = serverHost === '0.0.0.0';
+  const [urlSaved, setUrlSaved] = useState(false);
 
   useEffect(() => {
-    if (platform === 'tauri') {
-      (async () => {
-        try {
-          const { invoke } = await import('@tauri-apps/api/core');
-          const cfg = await invoke<{
-            port: number;
-            host: string;
-            auth_mode: string;
-            running: boolean;
-          }>('get_server_config');
-          setServerRunning(cfg.running);
-          setServerHost(cfg.host);
-          setServerPort(cfg.port);
-          setPendingHost(cfg.host);
-          setPendingPort(cfg.port);
-          setServerAuthMode(cfg.auth_mode);
-          setPendingAuthMode(cfg.auth_mode);
-        } catch {
-          /* ignore */
-        }
-      })();
-    } else {
-      (async () => {
-        try {
-          const res = await fetch(`${getSettingsApiBase()}/health`, {
-            signal: AbortSignal.timeout(3000),
-          });
-          if (res.ok) setServerRunning(true);
-        } catch {
-          /* not reachable */
-        }
-      })();
-    }
-  }, [platform]);
+    if (native) return;
+    (async () => {
+      try {
+        const res = await fetch(`${getSettingsApiBase()}/health`, {
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.ok) setServerRunning(true);
+      } catch {
+        /* server not reachable */
+      }
+    })();
+  }, [native]);
 
   const handleTest = async () => {
     setTestStatus('testing');
     setTestMsg('');
     try {
-      const res = await fetch(`${getSettingsApiBase()}/health`);
+      const res = await fetch(`${getSettingsApiBase()}/health`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (res.ok) {
         const data = await res.json();
         setTestStatus('success');
@@ -1417,363 +1441,232 @@ function SyncTab() {
     }
   };
 
-  const handleRestart = async () => {
-    if (!showServerConfig) return;
-    setRestarting(true);
-    setRestartMsg('');
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      try {
-        await invoke('stop_embedded_server');
-      } catch {
-        /* might not be running */
-      }
-      await new Promise((r) => setTimeout(r, 300));
-      const url = await invoke<string>('start_embedded_server', {
-        port: pendingPort,
-        host: pendingHost,
-        authMode: pendingAuthMode,
-      });
-      setServerHost(pendingHost);
-      setServerPort(pendingPort);
-      setServerAuthMode(pendingAuthMode);
-      setServerRunning(true);
-      setRestartIsError(false);
-      setRestartMsg(t('Server restarted at {{url}}', { url }));
-    } catch (err) {
-      setRestartIsError(true);
-      setRestartMsg(
-        t('Restart failed: {{message}}', {
-          message: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    } finally {
-      setRestarting(false);
-    }
-  };
-
-  const hasChanges =
-    pendingHost !== serverHost || pendingPort !== serverPort || pendingAuthMode !== serverAuthMode;
-
   return (
     <div className="flex flex-col gap-6">
-      {/* Usage mode selector — Tauri only */}
-      {showModeSelector && (
+      {native ? (
         <section>
           <div className="flex items-center gap-2 mb-3">
-            <Server size={16} className="text-[var(--color-accent)]" />
-            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Usage Mode')}</h3>
+            <HardDriveDownload size={16} className="text-[var(--color-accent)]" />
+            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Local Storage')}</h3>
           </div>
-          <div className="flex gap-2 mb-3">
-            <button
-              type="button"
-              onClick={() => setUseMode('local')}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-medium transition-all border"
-              style={{
-                background: useMode === 'local' ? 'var(--color-accent)' : 'var(--color-surface)',
-                color: useMode === 'local' ? 'white' : 'var(--color-text-secondary)',
-                borderColor: useMode === 'local' ? 'var(--color-accent)' : 'var(--color-border)',
-              }}
-            >
-              {t('Local mode')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setUseMode('cloud')}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-medium transition-all border"
-              style={{
-                background: useMode === 'cloud' ? 'var(--color-accent)' : 'var(--color-surface)',
-                color: useMode === 'cloud' ? 'white' : 'var(--color-text-secondary)',
-                borderColor: useMode === 'cloud' ? 'var(--color-accent)' : 'var(--color-border)',
-              }}
-            >
-              {t('Connect to cloud')}
-            </button>
-          </div>
-          {useMode === 'cloud' && (
-            <input
-              type="url"
-              value={cloudUrl}
-              onChange={(e) => setCloudUrl(e.target.value)}
-              placeholder="https://your-server.com"
-              className="w-full rounded-xl px-3 py-2 text-xs outline-none transition-colors border mb-3"
-              style={{
-                background: 'var(--color-bg)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)',
-              }}
-            />
-          )}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.setItem('mlt-use-mode', useMode);
-                if (useMode === 'cloud' && cloudUrl) {
-                  localStorage.setItem('mlt-cloud-url', cloudUrl);
-                } else {
-                  localStorage.removeItem('mlt-cloud-url');
-                }
-                setModeSaved(true);
-                setTimeout(() => setModeSaved(false), 3000);
-              }}
-              className="rounded-xl border px-4 py-2 text-xs font-medium transition-colors"
-              style={{
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-secondary)',
-              }}
-            >
-              {t('Save')}
-            </button>
-            {modeSaved && (
-              <span className="text-xs text-emerald-500 flex items-center gap-1">
-                <CheckCircle size={12} />
-                {t('Saved — restart the app to apply')}
-              </span>
-            )}
-          </div>
-          <p className="text-[11px] mt-2" style={{ color: 'var(--color-text-tertiary)' }}>
-            {useMode === 'local'
-              ? t('Data stored locally, this PC acts as server')
-              : t("Connect to remote server, don't start local backend")}
+          <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+            {t('Data is stored locally in SQLite. Configure sync targets below to keep data in sync across devices.')}
           </p>
+        </section>
+      ) : (
+        <section>
+          <div className="flex items-center gap-2 mb-3">
+            <Cloud size={16} className="text-[var(--color-accent)]" />
+            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Backend Connection')}</h3>
+          </div>
+          <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+            {platform === 'web-hosted'
+              ? t('Hosted by the server — the backend address is fixed to the current domain.')
+              : t('Data is stored and synced through the API server.')}
+          </p>
+
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <div
+                className={`h-2.5 w-2.5 rounded-full shrink-0 ${serverRunning ? 'bg-emerald-500' : 'bg-gray-400'}`}
+              />
+              <span className="rounded-lg bg-[var(--color-bg)] px-3 py-2 text-xs font-mono text-[var(--color-text-secondary)] break-all border border-[var(--color-border)] flex-1">
+                {getSettingsApiBase() || window.location.origin}
+              </span>
+            </div>
+
+            {canEditBackendUrl() && (
+              <div className="flex flex-col gap-2">
+                <input
+                  type="url"
+                  value={cloudUrl}
+                  onChange={(e) => setCloudUrl(e.target.value)}
+                  placeholder="https://your-server.com"
+                  className="w-full rounded-xl px-3 py-2 text-xs outline-none transition-colors border"
+                  style={{
+                    background: 'var(--color-bg)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)',
+                  }}
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.setItem('mlt-cloud-url', cloudUrl);
+                      setUrlSaved(true);
+                      setTimeout(() => setUrlSaved(false), 3000);
+                    }}
+                    className="rounded-xl border px-4 py-2 text-xs font-medium transition-colors"
+                    style={{
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                  >
+                    {t('Save')}
+                  </button>
+                  {urlSaved && (
+                    <span className="text-xs text-emerald-500 flex items-center gap-1">
+                      <CheckCircle size={12} />
+                      {t('Saved — restart the app to apply')}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleTest}
+                disabled={testStatus === 'testing'}
+                className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium transition-colors hover:bg-[var(--color-bg)]"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                {testStatus === 'testing' && <Loader2 size={14} className="animate-spin" />}
+                {testStatus === 'success' && <CheckCircle size={14} className="text-emerald-500" />}
+                {testStatus === 'error' && <XCircle size={14} className="text-red-500" />}
+                {t('Test Connection')}
+              </button>
+              {testMsg && (
+                <span
+                  className="text-xs"
+                  style={{
+                    color:
+                      testStatus === 'success'
+                        ? 'var(--color-success, #22c55e)'
+                        : 'var(--color-danger, #ef4444)',
+                  }}
+                >
+                  {testMsg}
+                </span>
+              )}
+            </div>
+          </div>
         </section>
       )}
 
-      {showModeSelector && <hr style={{ borderColor: 'var(--color-border)' }} />}
-
-      {/* Connection status */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <Cloud size={16} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Backend Connection')}</h3>
-        </div>
-        <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {platform === 'web-hosted'
-            ? t('Hosted by the server — the backend address is fixed to the current domain.')
-            : t(
-                'Data is read, written, and synced through the API server. The PC desktop version auto-starts an embedded server; the web version uses the current domain.',
-              )}
-        </p>
-
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            <div
-              className={`h-2.5 w-2.5 rounded-full shrink-0 ${serverRunning ? 'bg-emerald-500' : 'bg-gray-400'}`}
-            />
-            <span className="rounded-lg bg-[var(--color-bg)] px-3 py-2 text-xs font-mono text-[var(--color-text-secondary)] break-all border border-[var(--color-border)] flex-1">
-              {getSettingsApiBase() || window.location.origin}
-            </span>
-          </div>
-
-          {/* Editable backend URL for capacitor / web-standalone (non-Tauri, non-hosted) */}
-          {!showModeSelector && editableBackend && (
-            <div className="flex flex-col gap-2">
-              <input
-                type="url"
-                value={cloudUrl}
-                onChange={(e) => setCloudUrl(e.target.value)}
-                placeholder="https://your-server.com"
-                className="w-full rounded-xl px-3 py-2 text-xs outline-none transition-colors border"
-                style={{
-                  background: 'var(--color-bg)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)',
-                }}
-              />
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    localStorage.setItem('mlt-cloud-url', cloudUrl);
-                    setModeSaved(true);
-                    setTimeout(() => setModeSaved(false), 3000);
-                  }}
-                  className="rounded-xl border px-4 py-2 text-xs font-medium transition-colors"
-                  style={{
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)',
-                  }}
-                >
-                  {t('Save')}
-                </button>
-                {modeSaved && (
-                  <span className="text-xs text-emerald-500 flex items-center gap-1">
-                    <CheckCircle size={12} />
-                    {t('Saved — restart the app to apply')}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleTest}
-              disabled={testStatus === 'testing'}
-              className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium transition-colors hover:bg-[var(--color-bg)]"
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              {testStatus === 'testing' && <Loader2 size={14} className="animate-spin" />}
-              {testStatus === 'success' && <CheckCircle size={14} className="text-emerald-500" />}
-              {testStatus === 'error' && <XCircle size={14} className="text-red-500" />}
-              {t('Test Connection')}
-            </button>
-            {testMsg && (
-              <span
-                className="text-xs"
-                style={{
-                  color:
-                    testStatus === 'success'
-                      ? 'var(--color-success, #22c55e)'
-                      : 'var(--color-danger, #ef4444)',
-                }}
-              >
-                {testMsg}
-              </span>
-            )}
-          </div>
-        </div>
-      </section>
-
-      {/* Server config — only in Tauri PC mode */}
-      {showServerConfig && (
-        <>
-          <hr style={{ borderColor: 'var(--color-border)' }} />
-          <section>
-            <div className="flex items-center gap-2 mb-3">
-              <Server size={16} className="text-[var(--color-accent)]" />
-              <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Embedded Server')}</h3>
-            </div>
-
-            <div className="space-y-4">
-              {/* LAN sharing toggle */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Wifi size={15} style={{ color: 'var(--color-text-secondary)' }} />
-                  <div>
-                    <p className="text-sm font-medium text-[var(--color-text)]">
-                      {t('Allow LAN Access')}
-                    </p>
-                    <p className="text-xs text-[var(--color-text-tertiary)]">
-                      {isLanSharing
-                        ? t('Other devices can connect via LAN')
-                        : t('Local access only')}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setPendingHost(pendingHost === '0.0.0.0' ? '127.0.0.1' : '0.0.0.0')
-                  }
-                  className="relative h-6 w-11 rounded-full transition-colors shrink-0"
-                  style={{
-                    background:
-                      pendingHost === '0.0.0.0' ? 'var(--color-accent)' : 'var(--color-border)',
-                  }}
-                >
-                  <motion.div
-                    className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"
-                    animate={{ left: pendingHost === '0.0.0.0' ? '22px' : '2px' }}
-                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                  />
-                </button>
-              </div>
-
-              {/* Auth mode */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Shield size={15} style={{ color: 'var(--color-text-secondary)' }} />
-                  <div>
-                    <p className="text-sm font-medium text-[var(--color-text)]">{t('Auth Mode')}</p>
-                    <p className="text-xs text-[var(--color-text-tertiary)]">
-                      {t('Authentication mode for the embedded server')}
-                    </p>
-                  </div>
-                </div>
-                <select
-                  value={pendingAuthMode}
-                  onChange={(e) => setPendingAuthMode(e.target.value)}
-                  className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] outline-none"
-                >
-                  <option value="none">{t('No Auth')}</option>
-                  <option value="single">{t('Single User')}</option>
-                  <option value="multi">{t('Multi User')}</option>
-                </select>
-              </div>
-
-              {/* Custom bind address (advanced) */}
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Globe size={15} style={{ color: 'var(--color-text-secondary)' }} />
-                  <p className="text-xs font-medium text-[var(--color-text-secondary)]">
-                    {t('Listen Address and Port')}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={pendingHost}
-                    onChange={(e) => setPendingHost(e.target.value)}
-                    placeholder="127.0.0.1"
-                    className="flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-accent)] transition-colors"
-                  />
-                  <input
-                    type="number"
-                    value={pendingPort}
-                    onChange={(e) => setPendingPort(Number(e.target.value))}
-                    className="w-24 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm font-mono outline-none focus:border-[var(--color-accent)] transition-colors"
-                  />
-                </div>
-                <p className="mt-1.5 text-[11px] text-[var(--color-text-tertiary)]">
-                  {t(
-                    '127.0.0.1 = local only · 0.0.0.0 = all interfaces · or specify a network interface IP',
-                  )}
-                </p>
-              </div>
-
-              {/* Apply button */}
-              {hasChanges && (
-                <button
-                  type="button"
-                  onClick={handleRestart}
-                  disabled={restarting}
-                  className="rounded-xl px-4 py-2 text-sm font-medium transition-all bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50"
-                >
-                  {restarting ? t('Restarting...') : t('Apply and Restart Server')}
-                </button>
-              )}
-
-              {restartMsg && (
-                <p
-                  className={`text-xs rounded-lg p-3 ${
-                    restartIsError
-                      ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
-                      : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
-                  }`}
-                >
-                  {restartMsg}
-                </p>
-              )}
-            </div>
-          </section>
-        </>
-      )}
-
       <hr style={{ borderColor: 'var(--color-border)' }} />
-
-      <CloudBackupSection />
+      <CloudSyncSection />
     </div>
   );
 }
 
-function CloudBackupSection() {
+function ApiTokenSection() {
   const { t } = useTranslation('settings');
-  const [provider, setProvider] = useState<'' | 's3' | 'webdav'>('');
+  const [duration, setDuration] = useState('31536000');
+  const [generatedToken, setGeneratedToken] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const showToast = useToastStore((s) => s.showToast);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const authToken = getAuthToken();
+      const h: HeadersInit = { 'Content-Type': 'application/json' };
+      if (authToken) h.Authorization = `Bearer ${authToken}`;
+      const res = await fetch(`${getSettingsApiBase()}/api/auth/api-token`, {
+        method: 'POST',
+        headers: h,
+        body: JSON.stringify({ duration: Number(duration) || 0 }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setGeneratedToken(data.token);
+    } catch (err) {
+      showToast({
+        type: 'error',
+        message: t('Error: {{message}}', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(generatedToken);
+      showToast({ type: 'success', message: t('Copied!') });
+    } catch {
+      showToast({ type: 'error', message: t('Copy failed') });
+    }
+  };
+
+  const inputClass =
+    'w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors';
+
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <Key size={16} className="text-[var(--color-accent)]" />
+        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('API Token')}</h3>
+      </div>
+      <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+        {t('Generate a long-lived token for sync clients, MCP integrations, or API access.')}
+      </p>
+
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
+            {t('Token Validity')}
+          </label>
+          <select value={duration} onChange={(e) => setDuration(e.target.value)} className={inputClass}>
+            <option value="2592000">{t('30 days')}</option>
+            <option value="7776000">{t('90 days')}</option>
+            <option value="31536000">{t('1 year')}</option>
+            <option value="0">{t('Never expires')}</option>
+          </select>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={generating}
+          className="rounded-xl px-4 py-2 text-sm font-medium transition-all bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+        >
+          {generating ? t('Saving...') : t('Generate Token')}
+        </button>
+
+        {generatedToken && (
+          <div className="space-y-2">
+            <textarea
+              readOnly
+              value={generatedToken}
+              rows={3}
+              className={`${inputClass} font-mono text-xs`}
+              onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+            />
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)]"
+            >
+              <Copy size={12} />
+              {t('Copy')}
+            </button>
+            <p className="text-[10px] text-[var(--color-text-tertiary)]">
+              {t('Copy this token now. It will not be shown again.')}
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function CloudSyncSection() {
+  const { t } = useTranslation('settings');
+  const native = isNativeClient();
+  const [provider, setProvider] = useState<'' | 'api-server' | 's3' | 'webdav'>('');
+  const [apiAuthMode, setApiAuthMode] = useState<'token' | 'credentials'>('credentials');
   const [config, setConfig] = useState({
     endpoint: '',
+    token: '',
     bucket: '',
     access_key: '',
     secret_key: '',
@@ -1781,38 +1674,78 @@ function CloudBackupSection() {
     username: '',
     password: '',
   });
+  const [syncInterval, setSyncInterval] = useState('300000');
+  const [conflictStrategy, setConflictStrategy] = useState<ConflictStrategy>('lww');
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
-  const [backupRunning, setBackupRunning] = useState(false);
-  const [backupStatus, setBackupStatus] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('');
+  const [lastSyncAt, setLastSyncAt] = useState(0);
 
   useEffect(() => {
     (async () => {
       try {
-        const token = getAuthToken();
-        const h: HeadersInit = {};
-        if (token) h.Authorization = `Bearer ${token}`;
-        const res = await fetch(`${getSettingsApiBase()}/api/backup/config`, { headers: h });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.provider) {
-            setProvider(data.provider as '' | 's3' | 'webdav');
-            setConfig((prev) => ({
-              ...prev,
-              endpoint: data.endpoint ?? '',
-              bucket: data.bucket ?? '',
-              access_key: data.access_key ?? '',
-              secret_key: data.secret_key ?? '',
-              region: data.region ?? '',
-              username: data.username ?? '',
-              password: data.password ?? '',
-            }));
+        if (native) {
+          const store = getDataStore();
+          const p = await store.getSetting('sync-provider');
+          if (p) {
+            setProvider(p as '' | 'api-server' | 's3' | 'webdav');
+            const raw = await store.getSetting('sync-config');
+            if (raw) {
+              try {
+                const parsed = JSON.parse(raw);
+                setConfig((prev) => ({ ...prev, ...parsed }));
+                if (parsed.auth_mode === 'token' || parsed.auth_mode === 'credentials') {
+                  setApiAuthMode(parsed.auth_mode);
+                }
+              } catch { /* ignore */ }
+            }
+          }
+          const iv = await store.getSetting('sync-interval');
+          if (iv) setSyncInterval(iv);
+          const cs = await store.getSetting('sync-conflict-strategy');
+          if (cs === 'lww' || cs === 'manual') setConflictStrategy(cs);
+        } else {
+          const authToken = getAuthToken();
+          const h: HeadersInit = {};
+          if (authToken) h.Authorization = `Bearer ${authToken}`;
+          const res = await fetch(`${getSettingsApiBase()}/api/backup/config`, { headers: h });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.provider) {
+              setProvider(data.provider as '' | 'api-server' | 's3' | 'webdav');
+              setConfig((prev) => ({
+                ...prev,
+                endpoint: data.endpoint ?? '',
+                token: data.token ?? '',
+                bucket: data.bucket ?? '',
+                access_key: data.access_key ?? '',
+                secret_key: data.secret_key ?? '',
+                region: data.region ?? '',
+                username: data.username ?? '',
+                password: data.password ?? '',
+              }));
+            }
           }
         }
       } catch {
         /* ignore */
       }
     })();
+  }, [native]);
+
+  useEffect(() => {
+    const engine = getSyncEngine();
+    const unsub = engine.onStateChange((states) => {
+      const allStates = Array.from(states.values());
+      const latest = allStates.reduce((a, b) => (b.lastSyncAt > a.lastSyncAt ? b : a), allStates[0]);
+      if (latest) setLastSyncAt(latest.lastSyncAt);
+    });
+    const states = engine.getAllStates();
+    if (states.length > 0) {
+      setLastSyncAt(Math.max(...states.map((s) => s.lastSyncAt)));
+    }
+    return unsub;
   }, []);
 
   const handleSave = async () => {
@@ -1820,30 +1753,70 @@ function CloudBackupSection() {
     setSaving(true);
     setStatus('');
     try {
-      const token = getAuthToken();
-      const h: HeadersInit = { 'Content-Type': 'application/json' };
-      if (token) h.Authorization = `Bearer ${token}`;
-      const body: Record<string, string | undefined> = { provider };
-      if (provider === 's3') {
-        body.endpoint = config.endpoint;
-        body.bucket = config.bucket;
-        body.access_key = config.access_key;
-        body.secret_key = config.secret_key;
-        body.region = config.region || undefined;
+      if (native) {
+        const store = getDataStore();
+        await store.putSetting('sync-provider', provider);
+        const cfgToSave: Record<string, string> = {};
+        if (provider === 'api-server') {
+          cfgToSave.endpoint = config.endpoint;
+          cfgToSave.auth_mode = apiAuthMode;
+          if (apiAuthMode === 'token') {
+            if (config.token) cfgToSave.token = config.token;
+          } else {
+            cfgToSave.username = config.username;
+            cfgToSave.password = config.password;
+          }
+        } else if (provider === 's3') {
+          cfgToSave.endpoint = config.endpoint;
+          cfgToSave.bucket = config.bucket;
+          cfgToSave.access_key = config.access_key;
+          cfgToSave.secret_key = config.secret_key;
+          if (config.region) cfgToSave.region = config.region;
+        } else {
+          cfgToSave.endpoint = config.endpoint;
+          cfgToSave.username = config.username;
+          cfgToSave.password = config.password;
+        }
+        await store.putSetting('sync-config', JSON.stringify(cfgToSave));
+        await store.putSetting('sync-interval', syncInterval);
+        await store.putSetting('sync-conflict-strategy', conflictStrategy);
+        await initSyncFromConfig();
+        setStatus(t('Configuration Saved'));
       } else {
-        body.endpoint = config.endpoint;
-        body.username = config.username;
-        body.password = config.password;
+        const authToken = getAuthToken();
+        const h: HeadersInit = { 'Content-Type': 'application/json' };
+        if (authToken) h.Authorization = `Bearer ${authToken}`;
+        const body: Record<string, string | undefined> = { provider };
+        if (provider === 'api-server') {
+          body.endpoint = config.endpoint;
+          body.auth_mode = apiAuthMode;
+          if (apiAuthMode === 'token') {
+            body.token = config.token || undefined;
+          } else {
+            body.username = config.username;
+            body.password = config.password;
+          }
+        } else if (provider === 's3') {
+          body.endpoint = config.endpoint;
+          body.bucket = config.bucket;
+          body.access_key = config.access_key;
+          body.secret_key = config.secret_key;
+          body.region = config.region || undefined;
+        } else {
+          body.endpoint = config.endpoint;
+          body.username = config.username;
+          body.password = config.password;
+        }
+        const res = await fetch(`${getSettingsApiBase()}/api/backup/config`, {
+          method: 'PUT',
+          headers: h,
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        setStatus(
+          res.ok ? t('Configuration Saved') : t('Error: {{message}}', { message: data.error }),
+        );
       }
-      const res = await fetch(`${getSettingsApiBase()}/api/backup/config`, {
-        method: 'PUT',
-        headers: h,
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      setStatus(
-        res.ok ? t('Configuration Saved') : t('Error: {{message}}', { message: data.error }),
-      );
     } catch (err) {
       setStatus(
         t('Save failed: {{message}}', {
@@ -1855,29 +1828,25 @@ function CloudBackupSection() {
     }
   };
 
-  const handleBackup = async () => {
-    setBackupRunning(true);
-    setBackupStatus('');
+  const handleSyncNow = async () => {
+    setSyncing(true);
+    setSyncStatus('');
     try {
-      const token = getAuthToken();
-      const h: HeadersInit = {};
-      if (token) h.Authorization = `Bearer ${token}`;
-      const res = await fetch(`${getSettingsApiBase()}/api/backup/run`, {
-        method: 'POST',
-        headers: h,
-      });
-      const data = await res.json();
-      setBackupStatus(
-        res.ok ? t('Backup Complete') : t('Error: {{message}}', { message: data.error }),
-      );
+      const engine = getSyncEngine();
+      if (engine.hasTargets()) {
+        await engine.syncAll();
+        setSyncStatus(t('Sync completed'));
+      } else {
+        setSyncStatus(t('No sync target configured'));
+      }
     } catch (err) {
-      setBackupStatus(
-        t('Backup failed: {{message}}', {
+      setSyncStatus(
+        t('Sync failed: {{message}}', {
           message: err instanceof Error ? err.message : String(err),
         }),
       );
     } finally {
-      setBackupRunning(false);
+      setSyncing(false);
     }
   };
 
@@ -1889,27 +1858,106 @@ function CloudBackupSection() {
     <section>
       <div className="flex items-center gap-2 mb-3">
         <Cloud size={16} className="text-[var(--color-accent)]" />
-        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Cloud Backup')}</h3>
+        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Cloud Sync')}</h3>
       </div>
       <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
         {t(
-          'Back up data to S3-compatible object storage or a WebDAV server. This feature is under construction; some providers may not be fully available yet.',
+          'Sync data across devices via an API server, S3-compatible storage, or WebDAV. Configure a sync target and interval below.',
         )}
       </p>
 
       <div className="space-y-4">
         <div>
-          <label className={labelClass}>{t('Backup Provider')}</label>
+          <label className={labelClass}>{t('Sync Provider')}</label>
           <select
             value={provider}
-            onChange={(e) => setProvider(e.target.value as '' | 's3' | 'webdav')}
+            onChange={(e) => setProvider(e.target.value as '' | 'api-server' | 's3' | 'webdav')}
             className={inputClass}
           >
             <option value="">{t('Not Configured')}</option>
+            <option value="api-server">{t('API Server (My Little Todo)')}</option>
             <option value="s3">{t('S3 Compatible Storage (AWS/MinIO/R2)')}</option>
             <option value="webdav">WebDAV</option>
           </select>
         </div>
+
+        {provider === 'api-server' && (
+          <div className="space-y-3">
+            <div>
+              <label className={labelClass}>{t('Server URL')}</label>
+              <input
+                type="url"
+                value={config.endpoint}
+                onChange={(e) => setConfig({ ...config, endpoint: e.target.value })}
+                placeholder="https://your-server.com"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>{t('Authentication Mode')}</label>
+              <div className="flex rounded-xl border border-[var(--color-border)] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setApiAuthMode('credentials')}
+                  className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                    apiAuthMode === 'credentials'
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : 'bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)]'
+                  }`}
+                >
+                  {t('Username & Password')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setApiAuthMode('token')}
+                  className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                    apiAuthMode === 'token'
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : 'bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)]'
+                  }`}
+                >
+                  {t('Token / API Key')}
+                </button>
+              </div>
+            </div>
+            {apiAuthMode === 'credentials' ? (
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className={labelClass}>{t('Username')}</label>
+                  <input
+                    type="text"
+                    value={config.username}
+                    onChange={(e) => setConfig({ ...config, username: e.target.value })}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>{t('Password')}</label>
+                  <input
+                    type="password"
+                    value={config.password}
+                    onChange={(e) => setConfig({ ...config, password: e.target.value })}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className={labelClass}>{t('Token / API Key')}</label>
+                <input
+                  type="password"
+                  value={config.token}
+                  onChange={(e) => setConfig({ ...config, token: e.target.value })}
+                  placeholder={t('Paste JWT or long-lived API token')}
+                  className={inputClass}
+                />
+                <p className="text-[10px] text-[var(--color-text-tertiary)] mt-1">
+                  {t('Generate a long-lived token from the server admin panel or API.')}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {provider === 's3' && (
           <div className="space-y-3">
@@ -1929,7 +1977,7 @@ function CloudBackupSection() {
                 type="text"
                 value={config.bucket}
                 onChange={(e) => setConfig({ ...config, bucket: e.target.value })}
-                placeholder="my-todo-backup"
+                placeholder="my-todo-sync"
                 className={inputClass}
               />
             </div>
@@ -1974,7 +2022,7 @@ function CloudBackupSection() {
                 type="url"
                 value={config.endpoint}
                 onChange={(e) => setConfig({ ...config, endpoint: e.target.value })}
-                placeholder="https://dav.example.com/backup/"
+                placeholder="https://dav.example.com/sync/"
                 className={inputClass}
               />
             </div>
@@ -2002,6 +2050,62 @@ function CloudBackupSection() {
         )}
 
         {provider && (
+          <>
+            <hr style={{ borderColor: 'var(--color-border)' }} />
+            <div>
+              <label className={labelClass}>{t('Sync Interval')}</label>
+              <select
+                value={syncInterval}
+                onChange={(e) => setSyncInterval(e.target.value)}
+                className={inputClass}
+              >
+                <option value="60000">{t('Every 1 minute')}</option>
+                <option value="300000">{t('Every 5 minutes')}</option>
+                <option value="900000">{t('Every 15 minutes')}</option>
+                <option value="1800000">{t('Every 30 minutes')}</option>
+                <option value="3600000">{t('Every 1 hour')}</option>
+                <option value="0">{t('Manual only')}</option>
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-[var(--color-text)]">
+                  {t('Auto-resolve conflicts (Last Write Wins)')}
+                </p>
+                <p className="text-xs text-[var(--color-text-tertiary)]">
+                  {conflictStrategy === 'lww'
+                    ? t('Conflicts are resolved automatically by timestamp.')
+                    : t('You will be prompted to choose when conflicts occur.')}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={conflictStrategy === 'lww'}
+                onClick={() =>
+                  setConflictStrategy((prev) => (prev === 'lww' ? 'manual' : 'lww'))
+                }
+                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                style={{
+                  backgroundColor:
+                    conflictStrategy === 'lww'
+                      ? 'var(--color-accent)'
+                      : 'var(--color-border)',
+                }}
+              >
+                <span
+                  className="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transition-transform duration-200 ease-in-out"
+                  style={{
+                    transform: conflictStrategy === 'lww' ? 'translateX(20px)' : 'translateX(0)',
+                  }}
+                />
+              </button>
+            </div>
+          </>
+        )}
+
+        {provider && (
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
@@ -2013,374 +2117,26 @@ function CloudBackupSection() {
             </button>
             <button
               type="button"
-              onClick={handleBackup}
-              disabled={backupRunning}
-              className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] disabled:opacity-50"
+              onClick={handleSyncNow}
+              disabled={syncing}
+              className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] disabled:opacity-50"
             >
-              {backupRunning ? t('Backing up...') : t('Backup Now')}
+              {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              {syncing ? t('Syncing...') : t('Sync Now')}
             </button>
           </div>
         )}
 
+        {lastSyncAt > 0 && (
+          <p className="text-xs text-[var(--color-text-tertiary)]">
+            {t('Last synced')}: {new Date(lastSyncAt).toLocaleString()}
+          </p>
+        )}
+
         {status && <p className="text-xs text-[var(--color-text-secondary)]">{status}</p>}
-        {backupStatus && (
-          <p className="text-xs text-[var(--color-text-secondary)]">{backupStatus}</p>
+        {syncStatus && (
+          <p className="text-xs text-[var(--color-text-secondary)]">{syncStatus}</p>
         )}
-      </div>
-    </section>
-  );
-}
-
-/* ── Admin Tab (visible to admins only) ── */
-
-interface AdminUserItem {
-  id: string;
-  username: string;
-  is_admin: boolean;
-  created_at: string;
-}
-
-function AdminTab() {
-  const { t } = useTranslation('settings');
-  const [stats, setStats] = useState<{
-    total_users: number;
-    db_type: string;
-    auth_mode: string;
-  } | null>(null);
-  const [users, setUsers] = useState<AdminUserItem[]>([]);
-  const [resetId, setResetId] = useState<string | null>(null);
-  const [newPw, setNewPw] = useState('');
-  const [error, setError] = useState('');
-  const showToast = useToastStore((s) => s.showToast);
-
-  const apiHeaders = useCallback((): HeadersInit => {
-    const h: HeadersInit = { 'Content-Type': 'application/json' };
-    const token = getAuthToken();
-    if (token) h.Authorization = `Bearer ${token}`;
-    return h;
-  }, []);
-
-  const loadStats = useCallback(async () => {
-    try {
-      const res = await fetch(`${getSettingsApiBase()}/api/admin/stats`, { headers: apiHeaders() });
-      if (res.ok) setStats(await res.json());
-    } catch {
-      /* ignore */
-    }
-  }, [apiHeaders]);
-
-  const loadUsers = useCallback(async () => {
-    try {
-      const res = await fetch(`${getSettingsApiBase()}/api/admin/users`, { headers: apiHeaders() });
-      if (res.ok) setUsers(await res.json());
-    } catch {
-      /* ignore */
-    }
-  }, [apiHeaders]);
-
-  useEffect(() => {
-    loadStats();
-    loadUsers();
-  }, [loadStats, loadUsers]);
-
-  const handleDelete = async (id: string, username: string) => {
-    if (!confirm(t('Confirm delete user {{username}}?', { username }))) return;
-    try {
-      const res = await fetch(`${getSettingsApiBase()}/api/admin/users/${id}`, {
-        method: 'DELETE',
-        headers: apiHeaders(),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.error || `HTTP ${res.status}`);
-      }
-      showToast({ type: 'success', message: t('User {{username}} deleted', { username }) });
-      loadUsers();
-      loadStats();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delete failed');
-    }
-  };
-
-  const handleReset = async (id: string) => {
-    if (!newPw) return;
-    try {
-      const res = await fetch(`${getSettingsApiBase()}/api/admin/users/${id}/password`, {
-        method: 'POST',
-        headers: apiHeaders(),
-        body: JSON.stringify({ password: newPw }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.error || `HTTP ${res.status}`);
-      }
-      showToast({ type: 'success', message: t('Password reset successfully') });
-      setResetId(null);
-      setNewPw('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Reset failed');
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-6">
-      {/* Server Overview */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <Activity size={16} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Server Overview')}</h3>
-        </div>
-        {stats && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {[
-              {
-                label: t('Total Users'),
-                value: String(stats.total_users),
-                icon: <Users size={16} />,
-              },
-              { label: t('Database Type'), value: stats.db_type, icon: <Activity size={16} /> },
-              { label: t('Auth Mode'), value: stats.auth_mode, icon: <Key size={16} /> },
-            ].map((card) => (
-              <div
-                key={card.label}
-                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
-              >
-                <div className="mb-1.5 flex items-center gap-2 text-[var(--color-text-secondary)]">
-                  {card.icon}
-                  <span className="text-xs">{card.label}</span>
-                </div>
-                <p className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
-                  {card.value}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <hr style={{ borderColor: 'var(--color-border)' }} />
-
-      {/* User Management */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <Users size={16} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('User Management')}</h3>
-        </div>
-        {error && <p className="text-sm text-red-400 mb-2">{error}</p>}
-        <div className="overflow-x-auto rounded-xl border border-[var(--color-border)]">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">
-                  {t('Username')}
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">
-                  {t('Role')}
-                </th>
-                <th className="px-4 py-3 text-left font-medium text-[var(--color-text-secondary)]">
-                  {t('Created At')}
-                </th>
-                <th className="px-4 py-3 text-right font-medium text-[var(--color-text-secondary)]">
-                  {t('Actions')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className="border-b border-[var(--color-border)] last:border-0">
-                  <td className="px-4 py-3">{u.username}</td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs ${
-                        u.is_admin
-                          ? 'bg-[var(--color-accent)]/20 text-[var(--color-accent)]'
-                          : 'bg-[var(--color-border)] text-[var(--color-text-secondary)]'
-                      }`}
-                    >
-                      {u.is_admin ? t('Admin') : t('User')}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-[var(--color-text-secondary)]">{u.created_at}</td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      {resetId === u.id ? (
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="password"
-                            value={newPw}
-                            onChange={(e) => setNewPw(e.target.value)}
-                            placeholder={t('New Password')}
-                            className="w-24 rounded border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs outline-none"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleReset(u.id)}
-                            className="rounded bg-[var(--color-accent)] px-2 py-1 text-xs text-white"
-                          >
-                            {t('Confirm')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setResetId(null);
-                              setNewPw('');
-                            }}
-                            className="rounded px-2 py-1 text-xs text-[var(--color-text-secondary)]"
-                          >
-                            {t('Cancel')}
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setResetId(u.id)}
-                            className="rounded p-1 text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]"
-                            title={t('Reset Password')}
-                          >
-                            <Key size={14} />
-                          </button>
-                          {!u.is_admin && (
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(u.id, u.username)}
-                              className="rounded p-1 text-[var(--color-text-secondary)] hover:text-red-400"
-                              title={t('Delete User')}
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <hr style={{ borderColor: 'var(--color-border)' }} />
-
-      {/* Attachment Settings */}
-      <AttachmentSettingsSection />
-    </div>
-  );
-}
-
-function AttachmentSettingsSection() {
-  const { t } = useTranslation('settings');
-  const showToast = useToastStore((s) => s.showToast);
-  const [allowAttachments, setAllowAttachments] = useState(true);
-  const [maxSizeMB, setMaxSizeMB] = useState(10);
-  const [storage, setStorage] = useState('local');
-  const [imageHostUrl, setImageHostUrl] = useState('');
-
-  useEffect(() => {
-    getSetting('admin:allow-attachments').then((v) => {
-      if (v === 'false') setAllowAttachments(false);
-    });
-    getSetting('admin:attachment-max-size').then((v) => {
-      if (v) setMaxSizeMB(Math.round(Number(v) / (1024 * 1024)));
-    });
-    getSetting('admin:attachment-storage').then((v) => {
-      if (v) setStorage(v);
-    });
-    getSetting('admin:image-host-url').then((v) => {
-      if (v) setImageHostUrl(v);
-    });
-  }, []);
-
-  const handleSave = async () => {
-    await putSetting('admin:allow-attachments', String(allowAttachments));
-    await putSetting('admin:attachment-max-size', String(maxSizeMB * 1024 * 1024));
-    await putSetting('admin:attachment-storage', storage);
-    await putSetting('admin:image-host-url', imageHostUrl);
-    showToast({ type: 'success', message: t('Attachment settings saved') });
-  };
-
-  return (
-    <section>
-      <div className="flex items-center gap-2 mb-3">
-        <Upload size={16} className="text-[var(--color-accent)]" />
-        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Attachment Settings')}</h3>
-      </div>
-      <div className="space-y-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-        <label className="flex items-center justify-between">
-          <span className="text-sm" style={{ color: 'var(--color-text)' }}>
-            {t('Allow attachments')}
-          </span>
-          <input
-            type="checkbox"
-            checked={allowAttachments}
-            onChange={(e) => setAllowAttachments(e.target.checked)}
-            className="h-4 w-4 rounded accent-[var(--color-accent)]"
-          />
-        </label>
-
-        <div>
-          <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('Max file size (MB)')}
-          </label>
-          <input
-            type="number"
-            min={1}
-            max={100}
-            value={maxSizeMB}
-            onChange={(e) => setMaxSizeMB(Number(e.target.value))}
-            className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
-            style={{ color: 'var(--color-text)' }}
-          />
-        </div>
-
-        <div>
-          <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('Storage backend')}
-          </label>
-          <div className="mt-1 flex gap-2">
-            {['local', 's3', 'image-host'].map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => setStorage(opt)}
-                className="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-                style={{
-                  background: storage === opt ? 'var(--color-accent)' : 'var(--color-bg)',
-                  color: storage === opt ? 'white' : 'var(--color-text-secondary)',
-                  border: '1px solid var(--color-border)',
-                }}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {storage === 'image-host' && (
-          <div>
-            <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('Image host URL')}
-            </label>
-            <input
-              type="url"
-              value={imageHostUrl}
-              onChange={(e) => setImageHostUrl(e.target.value)}
-              placeholder="https://..."
-              className="mt-1 w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
-              style={{ color: 'var(--color-text)' }}
-            />
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={handleSave}
-          className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-all hover:scale-[1.02]"
-          style={{ background: 'var(--color-accent)' }}
-        >
-          {t('Save')}
-        </button>
       </div>
     </section>
   );
@@ -2508,6 +2264,8 @@ function AboutTab() {
   const { t } = useTranslation('settings');
   const showToast = useToastStore((s) => s.showToast);
   const tauri = isTauriEnv();
+  const capacitor = isCapacitorEnv();
+  const supportsUpdate = tauri || capacitor;
 
   type UpdateStatus = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error';
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle');
@@ -2521,22 +2279,39 @@ function AboutTab() {
   const updateRef = useRef<Awaited<
     ReturnType<typeof import('@tauri-apps/plugin-updater').check>
   > | null>(null);
+  const githubApkUrl = useRef('');
+  const githubHtmlUrl = useRef('');
   const autoCheckDone = useRef(false);
 
   const handleCheckUpdate = useCallback(async (silent = false) => {
     setUpdateStatus('checking');
     try {
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const update = await check();
-      if (update) {
-        updateRef.current = update;
-        setUpdateVersion(update.version);
-        setUpdateNotes(update.body ?? '');
-        setUpdateStatus('available');
-        setShowUpdateDialog(true);
+      if (tauri) {
+        const { check } = await import('@tauri-apps/plugin-updater');
+        const update = await check();
+        if (update) {
+          updateRef.current = update;
+          setUpdateVersion(update.version);
+          setUpdateNotes(update.body ?? '');
+          setUpdateStatus('available');
+          setShowUpdateDialog(true);
+        } else {
+          setUpdateStatus('idle');
+          if (!silent) showToast({ type: 'info', message: t('Already up to date') });
+        }
       } else {
-        setUpdateStatus('idle');
-        if (!silent) showToast({ type: 'info', message: t('Already up to date') });
+        const info = await checkGitHubUpdate(APP_VERSION);
+        if (info) {
+          githubApkUrl.current = info.apkUrl;
+          githubHtmlUrl.current = info.htmlUrl;
+          setUpdateVersion(info.version);
+          setUpdateNotes(info.notes);
+          setUpdateStatus('available');
+          setShowUpdateDialog(true);
+        } else {
+          setUpdateStatus('idle');
+          if (!silent) showToast({ type: 'info', message: t('Already up to date') });
+        }
       }
     } catch (e: unknown) {
       setUpdateStatus('idle');
@@ -2552,41 +2327,50 @@ function AboutTab() {
       }
     }
     localStorage.setItem('mlt-last-update-check', String(Date.now()));
-  }, [showToast, t]);
+  }, [showToast, t, tauri]);
 
   const handleDownloadAndInstall = useCallback(async () => {
-    const update = updateRef.current;
-    if (!update) return;
-    setUpdateStatus('downloading');
-    setDownloadProgress(0);
-    try {
-      let totalLen = 0;
-      let downloaded = 0;
-      await update.downloadAndInstall((event) => {
-        if (event.event === 'Started' && event.data.contentLength) {
-          totalLen = event.data.contentLength;
-        } else if (event.event === 'Progress') {
-          downloaded += event.data.chunkLength;
-          if (totalLen > 0) setDownloadProgress(Math.round((downloaded / totalLen) * 100));
-        } else if (event.event === 'Finished') {
-          setDownloadProgress(100);
-        }
-      });
-      setUpdateStatus('ready');
-    } catch (e: unknown) {
-      setUpdateStatus('error');
+    if (tauri) {
+      const update = updateRef.current;
+      if (!update) return;
+      setUpdateStatus('downloading');
+      setDownloadProgress(0);
+      try {
+        let totalLen = 0;
+        let downloaded = 0;
+        await update.downloadAndInstall((event) => {
+          if (event.event === 'Started' && event.data.contentLength) {
+            totalLen = event.data.contentLength;
+          } else if (event.event === 'Progress') {
+            downloaded += event.data.chunkLength;
+            if (totalLen > 0) setDownloadProgress(Math.round((downloaded / totalLen) * 100));
+          } else if (event.event === 'Finished') {
+            setDownloadProgress(100);
+          }
+        });
+        setUpdateStatus('ready');
+      } catch (e: unknown) {
+        setUpdateStatus('error');
+        setShowUpdateDialog(false);
+        showToast({
+          type: 'error',
+          message: t('Update download failed: {{message}}', { message: String(e) }),
+        });
+      }
+    } else {
+      const url = githubApkUrl.current || githubHtmlUrl.current;
+      if (url) window.open(url, '_system');
       setShowUpdateDialog(false);
-      showToast({
-        type: 'error',
-        message: t('Update download failed: {{message}}', { message: String(e) }),
-      });
+      setUpdateStatus('idle');
     }
-  }, [showToast, t]);
+  }, [showToast, t, tauri]);
 
   const handleRelaunch = useCallback(async () => {
-    const { relaunch } = await import('@tauri-apps/plugin-process');
-    await relaunch();
-  }, []);
+    if (tauri) {
+      const { relaunch } = await import('@tauri-apps/plugin-process');
+      await relaunch();
+    }
+  }, [tauri]);
 
   const handleToggleAutoCheck = useCallback((enabled: boolean) => {
     setAutoCheck(enabled);
@@ -2594,14 +2378,14 @@ function AboutTab() {
   }, []);
 
   useEffect(() => {
-    if (!tauri || !autoCheck || autoCheckDone.current) return;
+    if (!supportsUpdate || !autoCheck || autoCheckDone.current) return;
     autoCheckDone.current = true;
     const lastCheck = Number(localStorage.getItem('mlt-last-update-check') ?? '0');
     const fourHours = 4 * 60 * 60 * 1000;
     if (Date.now() - lastCheck > fourHours) {
       handleCheckUpdate(true);
     }
-  }, [tauri, autoCheck, handleCheckUpdate]);
+  }, [supportsUpdate, autoCheck, handleCheckUpdate]);
 
   return (
     <div className="flex flex-col gap-4 text-sm text-[var(--color-text-secondary)]">
@@ -2632,7 +2416,7 @@ function AboutTab() {
         <ExternalLink size={12} className="text-[var(--color-text-tertiary)]" />
       </a>
 
-      {tauri && (
+      {supportsUpdate && (
         <div
           className="flex flex-col gap-3 mt-2 p-4 rounded-xl"
           style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
@@ -2804,19 +2588,21 @@ function AiTab() {
       }
     });
 
-    const token = getAuthToken();
-    if (token) {
-      fetch(`${getSettingsApiBase()}/api/ai/shared-config`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then((r) => r.json())
-        .then((d) => {
-          if (d.available) {
-            setSharedAvailable(true);
-            setSharedAllowUserKey(d.allow_user_key ?? true);
-          }
+    if (!isNativeClient()) {
+      const token = getAuthToken();
+      if (token) {
+        fetch(`${getSettingsApiBase()}/api/ai/shared-config`, {
+          headers: { Authorization: `Bearer ${token}` },
         })
-        .catch(() => {});
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.available) {
+              setSharedAvailable(true);
+              setSharedAllowUserKey(d.allow_user_key ?? true);
+            }
+          })
+          .catch(() => {});
+      }
     }
 
     if (isAdmin) {
@@ -2894,6 +2680,7 @@ function AiTab() {
   };
 
   const ideConfig = IDE_CONFIGS.find((c) => c.id === selectedIde) ?? IDE_CONFIGS[0];
+  const nativeAi = isNativeClient();
   const showUserApiSection = sharedAllowUserKey || !sharedAvailable;
 
   return (
@@ -2993,8 +2780,8 @@ function AiTab() {
         </section>
       )}
 
-      {/* Admin AI Management */}
-      {isAdmin && (
+      {/* Admin AI Management — server mode only */}
+      {!nativeAi && isAdmin && (
         <>
           <hr style={{ borderColor: 'var(--color-border)' }} />
           <section>
@@ -3078,9 +2865,10 @@ function AiTab() {
         </>
       )}
 
+      {/* MCP Integration — server mode only */}
+      {!nativeAi && <>
       <hr style={{ borderColor: 'var(--color-border)' }} />
 
-      {/* MCP Integration */}
       <section>
         <div className="flex items-center gap-2 mb-3">
           <Server size={16} className="text-[var(--color-accent)]" />
@@ -3252,6 +3040,7 @@ function AiTab() {
           )}
         </div>
       </section>
+      </>}
     </div>
   );
 }
@@ -3275,7 +3064,6 @@ const TAB_CONTENT: Record<SettingsTab, () => React.JSX.Element> = {
   sync: SyncTab,
   data: DataTab,
   about: AboutTab,
-  admin: AdminTab,
 };
 
 /* ── Main Settings View ── */
@@ -3284,7 +3072,6 @@ export function SettingsView() {
   const { t } = useTranslation('settings');
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const isMobile = useIsMobile();
-  const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false);
   const authMode = useAuthStore((s) => s.authMode);
   const showShortcuts = hasKeyboardShortcuts();
 
@@ -3294,9 +3081,7 @@ export function SettingsView() {
     return true;
   });
 
-  const visibleTabs: typeof TABS = isAdmin
-    ? [...TABS, { id: 'admin', label: 'Admin', icon: Shield }]
-    : TABS;
+  const visibleTabs = TABS;
 
   const ActiveContent = TAB_CONTENT[activeTab] ?? GeneralTab;
 

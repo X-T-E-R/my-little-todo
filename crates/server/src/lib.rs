@@ -56,6 +56,7 @@ pub fn create_app(
     let auth_protected = Router::new()
         .route("/auth/me", get(routes::auth::me))
         .route("/auth/change-password", post(routes::auth::change_password))
+        .route("/auth/api-token", post(routes::auth::generate_api_token))
         .layer(axum_mw::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
@@ -174,6 +175,17 @@ pub fn create_app(
         ))
         .with_state(state.clone());
 
+    // Sync routes (protected)
+    let sync_routes = Router::new()
+        .route("/sync/changes", get(routes::sync::get_changes))
+        .route("/sync/status", get(routes::sync::get_status))
+        .route("/sync/push", post(routes::sync::push_changes))
+        .layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ))
+        .with_state(state.clone());
+
     let health_state = state.clone();
     let static_dir = config.static_dir.clone();
 
@@ -188,6 +200,7 @@ pub fn create_app(
         .nest("/api", ai_routes)
         .nest("/api", mcp_routes)
         .nest("/api", blob_routes)
+        .nest("/api", sync_routes)
         .route(
             "/health",
             get(move || async move {

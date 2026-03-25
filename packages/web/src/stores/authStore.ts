@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { isNativeClient } from '../utils/platform';
 
 interface UserInfo {
   id: string;
@@ -35,6 +36,8 @@ export function getAuthToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+const _native = isNativeClient();
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   token: localStorage.getItem(TOKEN_KEY),
   user: (() => {
@@ -45,17 +48,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return null;
     }
   })(),
-  authMode: null,
+  authMode: _native ? 'none' : null,
   needsSetup: false,
-  loading: true,
+  loading: !_native,
 
   setApiBase: (url: string) => {
     _apiBase = url;
   },
 
   checkAuthMode: async () => {
+    if (isNativeClient()) {
+      set({ authMode: 'none', needsSetup: false, loading: false });
+      return;
+    }
+
     try {
-      const res = await fetch(`${getApiBase()}/api/auth/mode`);
+      const res = await fetch(`${getApiBase()}/api/auth/mode`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (!res.ok) {
         set({ authMode: 'none', needsSetup: false, loading: false });
         return;

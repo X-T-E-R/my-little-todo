@@ -54,14 +54,12 @@ export function isWebStandalone(): boolean {
   return getPlatform() === 'web-standalone';
 }
 
-export function canChooseMode(): boolean {
-  return getPlatform() === 'tauri';
-}
 export function canEditBackendUrl(): boolean {
   return getPlatform() !== 'web-hosted';
 }
-export function canControlServer(): boolean {
-  return getPlatform() === 'tauri';
+export function isNativeClient(): boolean {
+  const p = getPlatform();
+  return p === 'tauri' || p === 'capacitor';
 }
 export function canExportToFolder(): boolean {
   return getPlatform() === 'tauri';

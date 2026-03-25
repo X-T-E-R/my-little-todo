@@ -2,7 +2,7 @@
   "name": "my-little-todo",
   "private": true,
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --filter=!@my-little-todo/admin",
     "build": "turbo run build",
     "test": "turbo run test",
     "test:rust": "cargo test -p mlt-server -p mlt-server-bin",

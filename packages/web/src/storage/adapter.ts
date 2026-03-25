@@ -1,3 +1,9 @@
+import { getDataStore } from './dataStore';
+
+/**
+ * Legacy StorageAdapter interface — kept for type compatibility.
+ * All methods now proxy through the global DataStore.
+ */
 export interface StorageAdapter {
   readFile(...segments: string[]): Promise<string | null>;
   writeFile(content: string, ...segments: string[]): Promise<void>;
@@ -5,29 +11,26 @@ export interface StorageAdapter {
   listFiles(...segments: string[]): Promise<string[]>;
 }
 
-let _adapter: StorageAdapter | null = null;
-
-export function setStorageAdapter(adapter: StorageAdapter): void {
-  _adapter = adapter;
-}
-
-function getAdapter(): StorageAdapter {
-  if (!_adapter) throw new Error('StorageAdapter not initialized. Call setStorageAdapter() first.');
-  return _adapter;
+/**
+ * @deprecated Use `setDataStore()` from `dataStore.ts` instead.
+ * This is a no-op kept for backward compatibility during migration.
+ */
+export function setStorageAdapter(_adapter: StorageAdapter): void {
+  // no-op: storage is now managed via DataStore
 }
 
 export async function readFile(...segments: string[]): Promise<string | null> {
-  return getAdapter().readFile(...segments);
+  return getDataStore().readFile(...segments);
 }
 
 export async function writeFile(content: string, ...segments: string[]): Promise<void> {
-  return getAdapter().writeFile(content, ...segments);
+  return getDataStore().writeFile(content, ...segments);
 }
 
 export async function deleteFile(...segments: string[]): Promise<void> {
-  return getAdapter().deleteFile(...segments);
+  return getDataStore().deleteFile(...segments);
 }
 
 export async function listFiles(...segments: string[]): Promise<string[]> {
-  return getAdapter().listFiles(...segments);
+  return getDataStore().listFiles(...segments);
 }

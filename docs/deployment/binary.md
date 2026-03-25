@@ -2,6 +2,8 @@
 
 For environments without Docker. You'll build the server and frontend from source and run the binary directly.
 
+> **Note**: This guide is for **server deployment** only. Desktop (Tauri) and Android users don't need a server — the apps store data locally in SQLite. See the [README](../../README.md) for desktop and mobile installation.
+
 ## Prerequisites
 
 1. **Node.js** >= 20
@@ -61,7 +63,7 @@ You can also create a `config.toml` file (see `config.example.toml` in the proje
 
 1. Visit `http://localhost:3001/admin` to create the first admin account
 2. Once done, users can access the web app at `http://localhost:3001`
-3. After initial setup, admin tasks (user management, stats) are also accessible from the Settings page in the main app
+3. Admin tasks (user management, stats) are managed at the `/admin` page
 
 ## Environment Variables
 

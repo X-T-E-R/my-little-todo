@@ -1,10 +1,12 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { CheckSquare, Focus, Loader2, Settings, Wind } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreateTaskDialog } from './components/CreateTaskDialog';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { QuickInputBar } from './components/QuickInputBar';
+import { SyncConflictDialog } from './components/SyncConflictDialog';
+import { SyncIndicator } from './components/SyncIndicator';
 import { RoleLandingCard } from './components/RoleLandingCard';
 import { RoleSidebar } from './components/RoleSidebar';
 import { TaskDetailPanel } from './components/TaskDetailPanel';
@@ -19,14 +21,18 @@ import {
 } from './stores';
 import { useAuthStore } from './stores/authStore';
 import { startReminderService } from './utils/notificationService';
+import { isNativeClient } from './utils/platform';
 import { useIsMobile } from './utils/useIsMobile';
 import { useShortcuts } from './utils/useShortcuts';
 import { BoardView } from './views/BoardView';
-import { LoginView } from './views/LoginView';
 import { NowView } from './views/NowView';
 import { OnboardingView } from './views/OnboardingView';
 import { SettingsView } from './views/SettingsView';
 import { StreamView } from './views/StreamView';
+
+const LoginView = React.lazy(() =>
+  import('./views/LoginView').then((m) => ({ default: m.LoginView })),
+);
 
 type View = 'now' | 'stream' | 'board' | 'settings';
 
@@ -50,7 +56,8 @@ export function App() {
   const loadSchedules = useScheduleStore((s) => s.load);
 
   const { authMode, token, loading: authLoading, checkAuthMode, checkAuth } = useAuthStore();
-  const [authChecked, setAuthChecked] = useState(false);
+  const native = isNativeClient();
+  const [authChecked, setAuthChecked] = useState(native);
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -58,6 +65,7 @@ export function App() {
   }, [checkAuthMode]);
 
   useEffect(() => {
+    if (native) return;
     if (authLoading) return;
     if (authMode === 'none') {
       setAuthChecked(true);
@@ -68,7 +76,7 @@ export function App() {
       return;
     }
     checkAuth().then(() => setAuthChecked(true));
-  }, [authLoading, authMode, token, checkAuth]);
+  }, [native, authLoading, authMode, token, checkAuth]);
 
   useEffect(() => {
     if (!authChecked) return;
@@ -128,7 +136,17 @@ export function App() {
   }
 
   if (authMode !== 'none' && !token) {
-    return <LoginView />;
+    return (
+      <React.Suspense
+        fallback={
+          <div className="flex h-screen items-center justify-center bg-[var(--color-bg)]">
+            <Loader2 size={32} className="animate-spin text-[var(--color-accent)]" />
+          </div>
+        }
+      >
+        <LoginView />
+      </React.Suspense>
+    );
   }
 
   if (showOnboarding === null) {
@@ -204,7 +222,7 @@ export function App() {
                 key={tab.key}
                 type="button"
                 onClick={() => handleViewChange(tab.key)}
-                className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 py-1.5 transition-colors ${
+                className={`relative flex flex-1 flex-col items-center justify-center gap-1 py-2 min-h-[56px] transition-colors ${
                   isActive
                     ? 'text-[var(--color-accent)]'
                     : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
@@ -230,6 +248,8 @@ export function App() {
 
       <ToastContainer />
       <OfflineIndicator />
+      <SyncIndicator />
+      <SyncConflictDialog />
     </div>
   );
 }
