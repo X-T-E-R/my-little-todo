@@ -16,13 +16,27 @@ Output will be in `packages/web/src-tauri/target/release/bundle/`.
 
 ## Android App (Capacitor)
 
+Prerequisites: **JDK 17** on `PATH` or `JAVA_HOME` set (Android Studio bundles one — e.g. on Windows: `C:\Program Files\Android\Android Studio\jbr`).
+
+From repo root:
+
 ```bash
-pnpm build:mobile
-pnpm cap:sync
-pnpm cap:open:android
+pnpm install
+pnpm turbo run build --filter=@my-little-todo/core
+pnpm --filter @my-little-todo/mobile build
+pnpm --filter @my-little-todo/mobile exec npx cap sync android
 ```
 
-Then build and sign the APK from Android Studio. The CI workflow (`.github/workflows/android-release.yml`) automates this for GitHub Releases.
+Then either open **`packages/mobile/android`** in Android Studio and use **Build → Build Bundle(s) / APK(s)**, or from a shell:
+
+```bash
+cd packages/mobile/android
+# Debug APK (signed with debug keystore; good for device testing)
+./gradlew assembleDebug
+# Windows: gradlew.bat assembleDebug
+```
+
+Release APK on CI uses repository secrets `MLT_KEYSTORE_*`; locally, omit those env vars and Gradle builds an **unsigned** release APK, or configure signing in Android Studio.
 
 **Storage**: Local SQLite via `@capacitor-community/sqlite`. Auto-update checks against GitHub Releases.
 

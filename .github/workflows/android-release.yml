@@ -43,20 +43,29 @@ jobs:
       - name: Sync Capacitor
         run: pnpm --filter @my-little-todo/mobile exec npx cap sync android
 
-      - name: Decode keystore
-        if: env.MLT_KEYSTORE_BASE64 != ''
+      # Do not use `if: env.SECRET` — secrets are only injected per-step; job env never sees them, so decode was always skipped.
+      - name: Decode keystore (when MLT_KEYSTORE_BASE64 is set)
         env:
           MLT_KEYSTORE_BASE64: ${{ secrets.MLT_KEYSTORE_BASE64 }}
-        run: echo "$MLT_KEYSTORE_BASE64" | base64 -d > packages/mobile/android/app/release.keystore
+        run: |
+          if [ -z "$MLT_KEYSTORE_BASE64" ]; then
+            echo "No MLT_KEYSTORE_BASE64 secret; building unsigned release APK"
+            exit 0
+          fi
+          echo "$MLT_KEYSTORE_BASE64" | base64 -d > packages/mobile/android/app/release.keystore
 
       - name: Build release APK
         env:
-          MLT_KEYSTORE_FILE: ${{ secrets.MLT_KEYSTORE_BASE64 != '' && 'release.keystore' || '' }}
           MLT_KEYSTORE_PASSWORD: ${{ secrets.MLT_KEYSTORE_PASSWORD }}
           MLT_KEY_ALIAS: ${{ secrets.MLT_KEY_ALIAS }}
           MLT_KEY_PASSWORD: ${{ secrets.MLT_KEY_PASSWORD }}
         working-directory: packages/mobile/android
-        run: chmod +x gradlew && ./gradlew assembleRelease
+        run: |
+          if [ -f app/release.keystore ]; then
+            export MLT_KEYSTORE_FILE=release.keystore
+          fi
+          chmod +x gradlew
+          ./gradlew assembleRelease
 
       - name: Determine version
         id: version
