@@ -39,6 +39,21 @@ export interface StatusChange {
   timestamp: Date;
 }
 
+/** Multi-step progress for ADHD-friendly execution coaching (orthogonal to TaskStatus). */
+export type TaskPhase = 'understood' | 'exploring' | 'working' | 'core_done' | 'wrapping_up';
+
+export type ProgressLogSource = 'manual' | 'focus_notes' | 'stream';
+
+export interface ProgressLog {
+  id: string;
+  timestamp: Date;
+  content: string;
+  source: ProgressLogSource;
+}
+
+/** Optional Kanban column placement (Board planning view). */
+export type KanbanColumn = 'ideas' | 'planned' | 'doing' | 'finishing' | 'done_recent';
+
 export interface Task {
   id: string;
   title: string;
@@ -74,4 +89,11 @@ export interface Task {
   submissions: Submission[];
   postponements: Postponement[];
   statusHistory: StatusChange[];
+
+  /** Optional multi-step phase (endowed default: understood on create). */
+  phase?: TaskPhase;
+  /** Short progress notes; focus session notes may append here. */
+  progressLogs?: ProgressLog[];
+  /** Board Kanban column override; when absent, derived from status/phase. */
+  kanbanColumn?: KanbanColumn;
 }

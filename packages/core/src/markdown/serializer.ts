@@ -43,8 +43,20 @@ function serializeTaskMetaHeader(task: Task): string[] {
   if (task.subtaskIds.length > 0) meta.push(`subtasks: [${task.subtaskIds.join(', ')}]`);
   if (task.parentId) meta.push(`parent: ${task.parentId}`);
   if (task.promoted) meta.push('promoted: true');
+  if (task.phase) meta.push(`phase: ${task.phase}`);
+  if (task.kanbanColumn) meta.push(`kanban_column: ${task.kanbanColumn}`);
   meta.push('---');
   return meta;
+}
+
+function serializeProgressLogsBlock(logs: NonNullable<Task['progressLogs']>): string[] {
+  if (!logs || logs.length === 0) return [];
+  const body: string[] = ['', '## Progress Logs', ''];
+  for (const l of logs) {
+    const safe = l.content.replace(/\n/g, ' ');
+    body.push(`- ${l.id} | ${l.timestamp.toISOString()} | ${l.source} | ${safe}`);
+  }
+  return body;
 }
 
 function serializeSubmissionsBlock(submissions: Task['submissions']): string[] {
@@ -126,6 +138,7 @@ export function serializeTaskFile(task: Task): string {
     ...serializeSubmissionsBlock(task.submissions),
     ...serializePostponementsBlock(task.postponements),
     ...serializeStatusHistoryBlock(task.statusHistory),
+    ...serializeProgressLogsBlock(task.progressLogs ?? []),
   ];
   return `${meta.join('\n')}\n${bodyBlock}${sections.join('\n')}\n`;
 }

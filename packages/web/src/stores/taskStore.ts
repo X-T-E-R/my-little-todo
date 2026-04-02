@@ -1,5 +1,10 @@
 import type { Task, TaskStatus } from '@my-little-todo/core';
-import { daysUntil } from '@my-little-todo/core';
+import {
+  daysUntil,
+  estimateTaskProgress,
+  isNearFinishing,
+  isSmallTask,
+} from '@my-little-todo/core';
 import { create } from 'zustand';
 import i18n from '../locales';
 import { getCachedTasks, setCachedTasks } from '../storage/cacheLayer';
@@ -14,6 +19,7 @@ import {
   submitTask as submitInRepo,
   updateTaskStatus as updateStatusInRepo,
 } from '../storage/taskRepo';
+import type { EnergyLevel } from './execCoachStore';
 
 interface TaskState {
   tasks: Task[];
@@ -101,7 +107,10 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       status,
       completedAt: status === 'completed' ? now : undefined,
       ...(status === 'completed' && task.parentId ? { promoted: undefined } : {}),
-      statusHistory: [...(task.statusHistory ?? []), { from: task.status, to: status, timestamp: now }],
+      statusHistory: [
+        ...(task.statusHistory ?? []),
+        { from: task.status, to: status, timestamp: now },
+      ],
     } as Task;
     set((state) => ({
       tasks: state.tasks.map((t) => (t.id === id ? optimistic : t)),
@@ -316,18 +325,55 @@ function recommendationScore(task: Task, now: Date): number {
   return score;
 }
 
-export function pickRecommendation(tasks: Task[]): Task | null {
+export interface PickRecommendationOptions {
+  energyLevel?: EnergyLevel;
+  /** Full task list for subtask / progress heuristics (defaults to `tasks`). */
+  allTasks?: Task[];
+}
+
+function energyBoost(task: Task, allTasks: Task[], energy: EnergyLevel, base: number): number {
+  let score = base;
+  if (energy === 'low') {
+    if (isSmallTask(task)) score += 25;
+    const prog = estimateTaskProgress(task, allTasks);
+    if (prog >= 0.5) score += 20;
+    if ((task.subtaskIds?.length ?? 0) > 4) score -= 15;
+    return score;
+  }
+  if (energy === 'high') {
+    if (isNearFinishing(task, allTasks)) score += 35;
+    const prog = estimateTaskProgress(task, allTasks);
+    if (prog >= 0.7) score += 25;
+    return score;
+  }
+  return score;
+}
+
+export function pickRecommendation(tasks: Task[], opts?: PickRecommendationOptions): Task | null {
   const active = getActiveTasks(tasks);
   if (active.length === 0) return null;
 
   const now = new Date();
+  const energy = opts?.energyLevel ?? 'normal';
+  const allTasks = opts?.allTasks ?? tasks;
+
   const scored = active.map((task) => ({
     task,
-    score: recommendationScore(task, now),
+    score: energyBoost(task, allTasks, energy, recommendationScore(task, now)),
   }));
 
   scored.sort((a, b) => b.score - a.score);
   return scored[0]?.task ?? null;
+}
+
+/** Tasks counted as WIP: explicit today + kanban doing + active with phase working+. */
+export function countWipTasks(tasks: Task[]): number {
+  return getActiveTasks(tasks).filter((t) => {
+    if (t.status === 'today') return true;
+    if (t.kanbanColumn === 'doing' || t.kanbanColumn === 'finishing') return true;
+    if (t.phase === 'working' || t.phase === 'exploring' || t.phase === 'core_done') return true;
+    return false;
+  }).length;
 }
 
 export function pickRandom(tasks: Task[]): Task | null {

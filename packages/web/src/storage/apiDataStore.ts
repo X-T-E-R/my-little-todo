@@ -76,14 +76,25 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
       }
     },
 
+    async listAllFiles(): Promise<string[]> {
+      if (!baseUrl) return [];
+      try {
+        const res = await fetch(`${baseUrl}/api/export/json`, { headers: authOnly() });
+        if (!res.ok) return [];
+        const data = (await res.json()) as { files?: { path: string }[] };
+        return (data.files ?? []).map((f) => f.path);
+      } catch {
+        return [];
+      }
+    },
+
     // ── Settings ───────────────────────────────────────────────────
 
     async getSetting(key: string): Promise<string | null> {
       try {
-        const res = await fetch(
-          `${baseUrl}/api/settings?key=${encodeURIComponent(key)}`,
-          { headers: jsonHeaders() },
-        );
+        const res = await fetch(`${baseUrl}/api/settings?key=${encodeURIComponent(key)}`, {
+          headers: jsonHeaders(),
+        });
         if (!res.ok) return null;
         const data = await res.json();
         return data.value ?? null;
@@ -151,11 +162,21 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
           headers: jsonHeaders(),
         });
         if (!res.ok) {
-          return { allow_attachments: true, max_size: 10 * 1024 * 1024, storage: 'local', image_host_url: '' };
+          return {
+            allow_attachments: true,
+            max_size: 10 * 1024 * 1024,
+            storage: 'local',
+            image_host_url: '',
+          };
         }
         return res.json();
       } catch {
-        return { allow_attachments: true, max_size: 10 * 1024 * 1024, storage: 'local', image_host_url: '' };
+        return {
+          allow_attachments: true,
+          max_size: 10 * 1024 * 1024,
+          storage: 'local',
+          image_host_url: '',
+        };
       }
     },
   };

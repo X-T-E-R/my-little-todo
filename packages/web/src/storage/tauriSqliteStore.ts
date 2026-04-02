@@ -34,10 +34,10 @@ async function ensureSchema(db: Database): Promise<void> {
     'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
   );
   if (rows.length === 0) {
-    await db.execute(
-      'INSERT INTO schema_version (version, applied_at) VALUES ($1, $2)',
-      [SCHEMA_VERSION, Date.now()],
-    );
+    await db.execute('INSERT INTO schema_version (version, applied_at) VALUES ($1, $2)', [
+      SCHEMA_VERSION,
+      Date.now(),
+    ]);
   }
 }
 
@@ -95,6 +95,13 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       });
     },
 
+    async listAllFiles(): Promise<string[]> {
+      const rows = await db.select<{ path: string }[]>(
+        'SELECT path FROM files WHERE deleted_at IS NULL ORDER BY path',
+      );
+      return rows.map((r) => r.path);
+    },
+
     // ── Settings ───────────────────────────────────────────────────
 
     async getSetting(key: string): Promise<string | null> {
@@ -144,7 +151,14 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       await db.execute(
         `INSERT INTO blobs (id, filename, mime_type, size, data, created_at, deleted_at)
          VALUES ($1, $2, $3, $4, $5, $6, NULL)`,
-        [id, file.name, file.type || 'application/octet-stream', file.size, Array.from(new Uint8Array(buffer)), ts],
+        [
+          id,
+          file.name,
+          file.type || 'application/octet-stream',
+          file.size,
+          Array.from(new Uint8Array(buffer)),
+          ts,
+        ],
       );
       return {
         id,
@@ -160,10 +174,10 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
     },
 
     async deleteBlob(id: string): Promise<void> {
-      await db.execute(
-        'UPDATE blobs SET deleted_at = $1 WHERE id = $2 AND deleted_at IS NULL',
-        [now(), id],
-      );
+      await db.execute('UPDATE blobs SET deleted_at = $1 WHERE id = $2 AND deleted_at IS NULL', [
+        now(),
+        id,
+      ]);
     },
 
     async getAttachmentConfig(): Promise<AttachmentConfig> {
@@ -178,10 +192,9 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
     async getChangesSince(sinceTimestamp: number): Promise<LocalChangeRecord[]> {
       const fileRows = await db.select<
         { path: string; content: string; updated_at: number; deleted_at: number | null }[]
-      >(
-        'SELECT path, content, updated_at, deleted_at FROM files WHERE updated_at > $1',
-        [sinceTimestamp],
-      );
+      >('SELECT path, content, updated_at, deleted_at FROM files WHERE updated_at > $1', [
+        sinceTimestamp,
+      ]);
       const settingRows = await db.select<
         { key: string; value: string; updated_at: number; deleted_at: number | null }[]
       >(

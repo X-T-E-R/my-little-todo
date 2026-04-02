@@ -25,8 +25,7 @@ export class SyncEngine {
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private debounceMs = DEFAULT_DEBOUNCE_MS;
   private listeners: Set<(states: Map<string, SyncState>) => void> = new Set();
-  private conflictListeners: Set<(conflicts: SyncConflict[], targetId: string) => void> =
-    new Set();
+  private conflictListeners: Set<(conflicts: SyncConflict[], targetId: string) => void> = new Set();
   private pendingConflictResolve: ((resolutions: ResolvedConflict[]) => void) | null = null;
   private _conflictStrategy: ConflictStrategy = 'lww';
   private _autoSyncInterval = 5 * 60 * 1000;
@@ -90,9 +89,7 @@ export class SyncEngine {
     return () => this.listeners.delete(listener);
   }
 
-  onConflict(
-    listener: (conflicts: SyncConflict[], targetId: string) => void,
-  ): () => void {
+  onConflict(listener: (conflicts: SyncConflict[], targetId: string) => void): () => void {
     this.conflictListeners.add(listener);
     return () => this.conflictListeners.delete(listener);
   }
@@ -224,9 +221,7 @@ export class SyncEngine {
       await this.saveSyncMeta(targetId, 'lastPullVersion', pullResult.currentVersion);
 
       // ── 6. Push local changes + resolved-as-local ─────────────
-      const conflictRemoteKeys = new Set(
-        conflicts.map((c) => `${c.table}:${c.key}`),
-      );
+      const conflictRemoteKeys = new Set(conflicts.map((c) => `${c.table}:${c.key}`));
       const nonConflictingLocal = localChanges.filter(
         (lc) => !conflictRemoteKeys.has(`${lc.table}:${lc.key}`),
       );

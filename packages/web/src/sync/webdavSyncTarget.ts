@@ -62,7 +62,7 @@ export class WebDavSyncTarget implements SyncTarget {
       if (res.status === 207) return true;
       if (res.status === 404) {
         // Try to create the directory
-        const mkRes = await fetch(this.syncRoot() + '/', {
+        const mkRes = await fetch(`${this.syncRoot()}/`, {
           method: 'MKCOL',
           headers: this.authHeaders(),
         });
@@ -116,10 +116,10 @@ export class WebDavSyncTarget implements SyncTarget {
       if (change.version > maxVersion) maxVersion = change.version;
 
       if (change.table === 'files') {
-        const safeName = encodeURIComponent(change.key) + '.json';
+        const safeName = `${encodeURIComponent(change.key)}.json`;
         await this.writeJson(`files/${safeName}`, change);
       } else if (change.table === 'settings') {
-        const safeName = encodeURIComponent(change.key) + '.json';
+        const safeName = `${encodeURIComponent(change.key)}.json`;
         await this.writeJson(`settings/${safeName}`, change);
       }
     }

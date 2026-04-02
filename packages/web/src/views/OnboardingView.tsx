@@ -292,7 +292,6 @@ function QuickConfigStep({
             })}
           </div>
         </div>
-
       </div>
 
       <div className="flex flex-col items-center gap-2 w-full max-w-sm mt-2">

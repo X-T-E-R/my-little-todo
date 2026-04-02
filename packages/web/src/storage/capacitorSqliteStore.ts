@@ -52,9 +52,7 @@ async function ensureSchema(db: CapDB): Promise<void> {
     await db.execute(sql);
   }
 
-  const rows = await db.query(
-    'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
-  );
+  const rows = await db.query('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1');
   if (!rows.values || rows.values.length === 0) {
     await db.execute(
       `INSERT INTO schema_version (version, applied_at) VALUES (${SCHEMA_VERSION}, ${Date.now()})`,
@@ -113,6 +111,14 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       });
     },
 
+    async listAllFiles(): Promise<string[]> {
+      const rows = await db.query(
+        'SELECT path FROM files WHERE deleted_at IS NULL ORDER BY path',
+      );
+      if (!rows.values) return [];
+      return rows.values.map((r) => r.path as string);
+    },
+
     async getSetting(key: string): Promise<string | null> {
       const rows = await db.query(
         `SELECT value FROM settings WHERE key = '${key}' AND deleted_at IS NULL`,
@@ -141,9 +147,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
     },
 
     async getAllSettings(): Promise<Record<string, string>> {
-      const rows = await db.query(
-        'SELECT key, value FROM settings WHERE deleted_at IS NULL',
-      );
+      const rows = await db.query('SELECT key, value FROM settings WHERE deleted_at IS NULL');
       const result: Record<string, string> = {};
       if (rows.values) {
         for (const row of rows.values) {

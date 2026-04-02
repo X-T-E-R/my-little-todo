@@ -1,5 +1,5 @@
 import { getDataStore } from '../storage/dataStore';
-import { ApiServerSyncTarget, type ApiAuthMode } from './apiSyncTarget';
+import { type ApiAuthMode, ApiServerSyncTarget } from './apiSyncTarget';
 import { S3SyncTarget } from './s3SyncTarget';
 import { getSyncEngine } from './syncEngine';
 import type { ConflictStrategy } from './types';

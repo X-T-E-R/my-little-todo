@@ -34,8 +34,6 @@ import { ScheduleEditor } from '../components/ScheduleEditor';
 import i18n from '../locales';
 import { getDataStore } from '../storage/dataStore';
 import { deleteSetting, getSetting, getSettingsApiBase, putSetting } from '../storage/settingsApi';
-import { getSyncEngine, initSyncFromConfig } from '../sync';
-import type { ConflictStrategy } from '../sync';
 import {
   useRoleStore,
   useScheduleStore,
@@ -45,6 +43,8 @@ import {
 } from '../stores';
 import { getAuthToken, useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
+import { getSyncEngine, initSyncFromConfig } from '../sync';
+import type { ConflictStrategy } from '../sync';
 import { checkGitHubUpdate } from '../utils/githubUpdater';
 import {
   canEditBackendUrl,
@@ -705,11 +705,21 @@ function DataTab() {
   const showToast = useToastStore((s) => s.showToast);
 
   const collectLocalExportData = async () => {
+    const base = getSettingsApiBase();
+    if (base && getPlatform() !== 'tauri') {
+      const token = getAuthToken();
+      const h: HeadersInit = {};
+      if (token) h.Authorization = `Bearer ${token}`;
+      const res = await fetch(`${base}/api/export/json`, { headers: h });
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+      return await res.json();
+    }
+
     const store = getDataStore();
-    const paths = await store.listFiles();
+    const paths = await store.listAllFiles();
     const files: { path: string; content: string }[] = [];
     for (const p of paths) {
-      const content = await store.readFile(p);
+      const content = await store.readFile(...p.split('/'));
       if (content !== null) files.push({ path: p, content });
     }
     const allSettings = await store.getAllSettings();
@@ -1171,85 +1181,87 @@ function DataTab() {
       {!native && <hr style={{ borderColor: 'var(--color-border)' }} />}
 
       {/* Migration — server mode only */}
-      {!native && <section>
-        <h3 className="text-sm font-bold text-[var(--color-text)] mb-1">{t('Data Migration')}</h3>
-        <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {t(
-            'Copy data from the current storage backend to another. Migration does not auto-switch; you need to update the config file (config.toml / .env) and restart.',
-          )}
-        </p>
+      {!native && (
+        <section>
+          <h3 className="text-sm font-bold text-[var(--color-text)] mb-1">{t('Data Migration')}</h3>
+          <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+            {t(
+              'Copy data from the current storage backend to another. Migration does not auto-switch; you need to update the config file (config.toml / .env) and restart.',
+            )}
+          </p>
 
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
-              {t('Target Backend')}
-            </label>
-            <select
-              value={migrateTarget}
-              onChange={(e) => setMigrateTarget(e.target.value)}
-              className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
-            >
-              <option value="">{t('Select target type...')}</option>
-              <option value="sqlite">SQLite</option>
-              <option value="postgres">PostgreSQL</option>
-              <option value="mysql">MySQL</option>
-            </select>
-          </div>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
+                {t('Target Backend')}
+              </label>
+              <select
+                value={migrateTarget}
+                onChange={(e) => setMigrateTarget(e.target.value)}
+                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+              >
+                <option value="">{t('Select target type...')}</option>
+                <option value="sqlite">SQLite</option>
+                <option value="postgres">PostgreSQL</option>
+                <option value="mysql">MySQL</option>
+              </select>
+            </div>
 
-          {migrateTarget && (
-            <>
-              <div>
-                <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
-                  {t('Target data directory (optional, leave empty to use current)')}
-                </label>
-                <input
-                  type="text"
-                  value={migrateDir}
-                  onChange={(e) => setMigrateDir(e.target.value)}
-                  placeholder="./data-new"
-                  className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
-                />
-              </div>
-
-              {(migrateTarget === 'postgres' || migrateTarget === 'mysql') && (
+            {migrateTarget && (
+              <>
                 <div>
                   <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
-                    {t('Database Connection URL')}
+                    {t('Target data directory (optional, leave empty to use current)')}
                   </label>
                   <input
                     type="text"
-                    value={migrateDbUrl}
-                    onChange={(e) => setMigrateDbUrl(e.target.value)}
-                    placeholder="postgres://user:pass@localhost/mlt"
+                    value={migrateDir}
+                    onChange={(e) => setMigrateDir(e.target.value)}
+                    placeholder="./data-new"
                     className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
                   />
                 </div>
-              )}
 
-              <button
-                type="button"
-                onClick={handleMigrate}
-                disabled={migrating}
-                className="rounded-xl px-4 py-2 text-sm font-medium transition-all bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                {(migrateTarget === 'postgres' || migrateTarget === 'mysql') && (
+                  <div>
+                    <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
+                      {t('Database Connection URL')}
+                    </label>
+                    <input
+                      type="text"
+                      value={migrateDbUrl}
+                      onChange={(e) => setMigrateDbUrl(e.target.value)}
+                      placeholder="postgres://user:pass@localhost/mlt"
+                      className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleMigrate}
+                  disabled={migrating}
+                  className="rounded-xl px-4 py-2 text-sm font-medium transition-all bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                >
+                  {migrating ? t('Migrating...') : t('Start Migration')}
+                </button>
+              </>
+            )}
+
+            {migrateResult && (
+              <p
+                className={`text-xs rounded-lg p-3 ${
+                  migrateIsError
+                    ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
+                    : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
+                }`}
               >
-                {migrating ? t('Migrating...') : t('Start Migration')}
-              </button>
-            </>
-          )}
-
-          {migrateResult && (
-            <p
-              className={`text-xs rounded-lg p-3 ${
-                migrateIsError
-                  ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400'
-                  : 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400'
-              }`}
-            >
-              {migrateResult}
-            </p>
-          )}
-        </div>
-      </section>}
+                {migrateResult}
+              </p>
+            )}
+          </div>
+        </section>
+      )}
 
       {!native && isTauriDataTab && <hr style={{ borderColor: 'var(--color-border)' }} />}
 
@@ -1450,14 +1462,18 @@ function SyncTab() {
             <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Local Storage')}</h3>
           </div>
           <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-            {t('Data is stored locally in SQLite. Configure sync targets below to keep data in sync across devices.')}
+            {t(
+              'Data is stored locally in SQLite. Configure sync targets below to keep data in sync across devices.',
+            )}
           </p>
         </section>
       ) : (
         <section>
           <div className="flex items-center gap-2 mb-3">
             <Cloud size={16} className="text-[var(--color-accent)]" />
-            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Backend Connection')}</h3>
+            <h3 className="text-sm font-bold text-[var(--color-text)]">
+              {t('Backend Connection')}
+            </h3>
           </div>
           <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
             {platform === 'web-hosted'
@@ -1615,7 +1631,11 @@ function ApiTokenSection() {
           <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
             {t('Token Validity')}
           </label>
-          <select value={duration} onChange={(e) => setDuration(e.target.value)} className={inputClass}>
+          <select
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+            className={inputClass}
+          >
             <option value="2592000">{t('30 days')}</option>
             <option value="7776000">{t('90 days')}</option>
             <option value="31536000">{t('1 year')}</option>
@@ -1639,7 +1659,13 @@ function ApiTokenSection() {
               value={generatedToken}
               rows={3}
               className={`${inputClass} font-mono text-xs`}
-              onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+              onClick={(e) => e.currentTarget.select()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.currentTarget.select();
+                }
+              }}
             />
             <button
               type="button"
@@ -1698,7 +1724,9 @@ function CloudSyncSection() {
                 if (parsed.auth_mode === 'token' || parsed.auth_mode === 'credentials') {
                   setApiAuthMode(parsed.auth_mode);
                 }
-              } catch { /* ignore */ }
+              } catch {
+                /* ignore */
+              }
             }
           }
           const iv = await store.getSetting('sync-interval');
@@ -1738,7 +1766,10 @@ function CloudSyncSection() {
     const engine = getSyncEngine();
     const unsub = engine.onStateChange((states) => {
       const allStates = Array.from(states.values());
-      const latest = allStates.reduce((a, b) => (b.lastSyncAt > a.lastSyncAt ? b : a), allStates[0]);
+      const latest = allStates.reduce(
+        (a, b) => (b.lastSyncAt > a.lastSyncAt ? b : a),
+        allStates[0],
+      );
       if (latest) setLastSyncAt(latest.lastSyncAt);
     });
     const states = engine.getAllStates();
@@ -2083,15 +2114,11 @@ function CloudSyncSection() {
                 type="button"
                 role="switch"
                 aria-checked={conflictStrategy === 'lww'}
-                onClick={() =>
-                  setConflictStrategy((prev) => (prev === 'lww' ? 'manual' : 'lww'))
-                }
+                onClick={() => setConflictStrategy((prev) => (prev === 'lww' ? 'manual' : 'lww'))}
                 className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
                 style={{
                   backgroundColor:
-                    conflictStrategy === 'lww'
-                      ? 'var(--color-accent)'
-                      : 'var(--color-border)',
+                    conflictStrategy === 'lww' ? 'var(--color-accent)' : 'var(--color-border)',
                 }}
               >
                 <span
@@ -2134,9 +2161,7 @@ function CloudSyncSection() {
         )}
 
         {status && <p className="text-xs text-[var(--color-text-secondary)]">{status}</p>}
-        {syncStatus && (
-          <p className="text-xs text-[var(--color-text-secondary)]">{syncStatus}</p>
-        )}
+        {syncStatus && <p className="text-xs text-[var(--color-text-secondary)]">{syncStatus}</p>}
       </div>
     </section>
   );
@@ -2166,7 +2191,9 @@ function UpdateDialog({
       className="fixed inset-0 z-[200] flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}
       onClick={onClose}
-      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') onClose();
+      }}
       role="presentation"
     >
       <motion.div
@@ -2211,7 +2238,11 @@ function UpdateDialog({
               <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
                 {t('Downloading update... {{progress}}%', { progress })}
               </span>
-              <Loader2 size={12} className="animate-spin" style={{ color: 'var(--color-accent)' }} />
+              <Loader2
+                size={12}
+                className="animate-spin"
+                style={{ color: 'var(--color-accent)' }}
+              />
             </div>
             <div className="w-full h-2 rounded-full" style={{ background: 'var(--color-border)' }}>
               <div
@@ -2223,9 +2254,17 @@ function UpdateDialog({
         )}
 
         {status === 'ready' && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg p-2.5" style={{ background: 'color-mix(in srgb, var(--color-success, #22c55e) 10%, transparent)' }}>
+          <div
+            className="mb-4 flex items-center gap-2 rounded-lg p-2.5"
+            style={{
+              background: 'color-mix(in srgb, var(--color-success, #22c55e) 10%, transparent)',
+            }}
+          >
             <CheckCircle size={16} style={{ color: 'var(--color-success, #22c55e)' }} />
-            <span className="text-sm font-medium" style={{ color: 'var(--color-success, #22c55e)' }}>
+            <span
+              className="text-sm font-medium"
+              style={{ color: 'var(--color-success, #22c55e)' }}
+            >
               {t('Update installed successfully')}
             </span>
           </div>
@@ -2283,51 +2322,58 @@ function AboutTab() {
   const githubHtmlUrl = useRef('');
   const autoCheckDone = useRef(false);
 
-  const handleCheckUpdate = useCallback(async (silent = false) => {
-    setUpdateStatus('checking');
-    try {
-      if (tauri) {
-        const { check } = await import('@tauri-apps/plugin-updater');
-        const update = await check();
-        if (update) {
-          updateRef.current = update;
-          setUpdateVersion(update.version);
-          setUpdateNotes(update.body ?? '');
-          setUpdateStatus('available');
-          setShowUpdateDialog(true);
+  const handleCheckUpdate = useCallback(
+    async (silent = false) => {
+      setUpdateStatus('checking');
+      try {
+        if (tauri) {
+          const { check } = await import('@tauri-apps/plugin-updater');
+          const update = await check();
+          if (update) {
+            updateRef.current = update;
+            setUpdateVersion(update.version);
+            setUpdateNotes(update.body ?? '');
+            setUpdateStatus('available');
+            setShowUpdateDialog(true);
+          } else {
+            setUpdateStatus('idle');
+            if (!silent) showToast({ type: 'info', message: t('Already up to date') });
+          }
         } else {
-          setUpdateStatus('idle');
-          if (!silent) showToast({ type: 'info', message: t('Already up to date') });
+          const info = await checkGitHubUpdate(APP_VERSION);
+          if (info) {
+            githubApkUrl.current = info.apkUrl;
+            githubHtmlUrl.current = info.htmlUrl;
+            setUpdateVersion(info.version);
+            setUpdateNotes(info.notes);
+            setUpdateStatus('available');
+            setShowUpdateDialog(true);
+          } else {
+            setUpdateStatus('idle');
+            if (!silent) showToast({ type: 'info', message: t('Already up to date') });
+          }
         }
-      } else {
-        const info = await checkGitHubUpdate(APP_VERSION);
-        if (info) {
-          githubApkUrl.current = info.apkUrl;
-          githubHtmlUrl.current = info.htmlUrl;
-          setUpdateVersion(info.version);
-          setUpdateNotes(info.notes);
-          setUpdateStatus('available');
-          setShowUpdateDialog(true);
-        } else {
-          setUpdateStatus('idle');
-          if (!silent) showToast({ type: 'info', message: t('Already up to date') });
+      } catch (e: unknown) {
+        setUpdateStatus('idle');
+        if (!silent) {
+          const msg = String(e);
+          const isNetwork =
+            msg.includes('fetch') ||
+            msg.includes('network') ||
+            msg.includes('JSON') ||
+            msg.includes('404');
+          showToast({
+            type: 'error',
+            message: isNetwork
+              ? t('Unable to reach update server. Please check your network or try again later.')
+              : t('Update check failed: {{message}}', { message: msg }),
+          });
         }
       }
-    } catch (e: unknown) {
-      setUpdateStatus('idle');
-      if (!silent) {
-        const msg = String(e);
-        const isNetwork = msg.includes('fetch') || msg.includes('network') || msg.includes('JSON') || msg.includes('404');
-        showToast({
-          type: 'error',
-          message: isNetwork
-            ? t('Unable to reach update server. Please check your network or try again later.')
-            : t('Update check failed: {{message}}', { message: msg }),
-        });
-      }
-    }
-    localStorage.setItem('mlt-last-update-check', String(Date.now()));
-  }, [showToast, t, tauri]);
+      localStorage.setItem('mlt-last-update-check', String(Date.now()));
+    },
+    [showToast, t, tauri],
+  );
 
   const handleDownloadAndInstall = useCallback(async () => {
     if (tauri) {
@@ -2435,7 +2481,9 @@ function AboutTab() {
                 ) : (
                   <RefreshCw size={12} />
                 )}
-                {updateStatus === 'checking' ? t('Checking for updates...') : t('Check for Updates')}
+                {updateStatus === 'checking'
+                  ? t('Checking for updates...')
+                  : t('Check for Updates')}
               </button>
             </div>
 
@@ -2465,19 +2513,22 @@ function AboutTab() {
         </div>
       )}
 
-      {showUpdateDialog && (updateStatus === 'available' || updateStatus === 'downloading' || updateStatus === 'ready') && (
-        <UpdateDialog
-          version={updateVersion}
-          notes={updateNotes}
-          status={updateStatus}
-          progress={downloadProgress}
-          onDownload={handleDownloadAndInstall}
-          onRelaunch={handleRelaunch}
-          onClose={() => {
-            if (updateStatus !== 'downloading') setShowUpdateDialog(false);
-          }}
-        />
-      )}
+      {showUpdateDialog &&
+        (updateStatus === 'available' ||
+          updateStatus === 'downloading' ||
+          updateStatus === 'ready') && (
+          <UpdateDialog
+            version={updateVersion}
+            notes={updateNotes}
+            status={updateStatus}
+            progress={downloadProgress}
+            onDownload={handleDownloadAndInstall}
+            onRelaunch={handleRelaunch}
+            onClose={() => {
+              if (updateStatus !== 'downloading') setShowUpdateDialog(false);
+            }}
+          />
+        )}
     </div>
   );
 }
@@ -2866,181 +2917,189 @@ function AiTab() {
       )}
 
       {/* MCP Integration — server mode only */}
-      {!nativeAi && <>
-      <hr style={{ borderColor: 'var(--color-border)' }} />
+      {!nativeAi && (
+        <>
+          <hr style={{ borderColor: 'var(--color-border)' }} />
 
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <Server size={16} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('MCP Integration')}</h3>
-        </div>
-        <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {t(
-            'Connect AI agents (Cursor, Claude Desktop, etc.) to your task system via MCP protocol.',
-          )}
-        </p>
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Server size={16} className="text-[var(--color-accent)]" />
+              <h3 className="text-sm font-bold text-[var(--color-text)]">{t('MCP Integration')}</h3>
+            </div>
+            <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+              {t(
+                'Connect AI agents (Cursor, Claude Desktop, etc.) to your task system via MCP protocol.',
+              )}
+            </p>
 
-        <div className="space-y-3">
-          {/* IDE selector */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-[var(--color-text-secondary)] shrink-0">{t('IDE')}</span>
-            <select
-              value={selectedIde}
-              onChange={(e) => setSelectedIde(e.target.value)}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] outline-none"
-            >
-              {IDE_CONFIGS.map((ide) => (
-                <option key={ide.id} value={ide.id}>
-                  {ide.label}
-                </option>
-              ))}
-            </select>
-          </div>
+            <div className="space-y-3">
+              {/* IDE selector */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[var(--color-text-secondary)] shrink-0">
+                  {t('IDE')}
+                </span>
+                <select
+                  value={selectedIde}
+                  onChange={(e) => setSelectedIde(e.target.value)}
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] outline-none"
+                >
+                  {IDE_CONFIGS.map((ide) => (
+                    <option key={ide.id} value={ide.id}>
+                      {ide.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Config preview */}
-          <div className="relative">
-            <pre
-              className="rounded-xl p-3 text-xs font-mono overflow-x-auto"
+              {/* Config preview */}
+              <div className="relative">
+                <pre
+                  className="rounded-xl p-3 text-xs font-mono overflow-x-auto"
+                  style={{
+                    background: 'var(--color-bg)',
+                    border: '1px solid var(--color-border)',
+                    color: 'var(--color-text-secondary)',
+                  }}
+                >
+                  {mcpConfig}
+                </pre>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="absolute top-2 right-2 rounded-lg p-1.5 transition-colors hover:bg-[var(--color-surface)]"
+                  title={t('Copy')}
+                >
+                  {copied ? (
+                    <CheckCircle size={14} className="text-emerald-500" />
+                  ) : (
+                    <Copy size={14} className="text-[var(--color-text-tertiary)]" />
+                  )}
+                </button>
+              </div>
+
+              {/* Config file path hint */}
+              {ideConfig.pathHint && (
+                <p className="text-[11px] text-[var(--color-text-tertiary)]">
+                  {t('Config file')}: <code className="font-mono">{ideConfig.pathHint}</code>
+                </p>
+              )}
+
+              {/* Skills link */}
+              <a
+                href="https://github.com/X-T-E-R/my-little-todo/blob/main/skills/SKILL.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs text-[var(--color-accent)] hover:underline w-fit"
+              >
+                <ExternalLink size={12} />
+                {t('View MCP usage guide (Skills)')}
+              </a>
+            </div>
+          </section>
+
+          <hr style={{ borderColor: 'var(--color-border)' }} />
+
+          {/* MCP Tool Toggles */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Activity size={16} className="text-[var(--color-accent)]" />
+              <h3 className="text-sm font-bold text-[var(--color-text)]">{t('MCP Tool Access')}</h3>
+            </div>
+            <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
+              {t(
+                'Control which MCP tools are available to AI agents. Disabled tools will not appear in tool listings.',
+              )}
+            </p>
+
+            <div className="space-y-4">
+              {/* Read tools */}
+              <div>
+                <p className="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                  {t('Read Operations')}
+                </p>
+                <div className="space-y-1">
+                  {MCP_TOOLS.read.map((tool) => (
+                    <div key={tool.name} className="flex items-center justify-between py-1.5">
+                      <div>
+                        <span className="text-sm font-mono text-[var(--color-text)]">
+                          {tool.name}
+                        </span>
+                        <span className="ml-2 text-xs text-[var(--color-text-tertiary)]">
+                          {t(tool.desc)}
+                        </span>
+                      </div>
+                      <ToggleSwitch
+                        checked={!disabledTools.includes(tool.name)}
+                        onChange={() => handleToggleTool(tool.name)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Write tools */}
+              <div>
+                <p className="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
+                  {t('Write Operations')}
+                </p>
+                <div className="space-y-1">
+                  {MCP_TOOLS.write.map((tool) => (
+                    <div key={tool.name} className="flex items-center justify-between py-1.5">
+                      <div>
+                        <span className="text-sm font-mono text-[var(--color-text)]">
+                          {tool.name}
+                        </span>
+                        <span className="ml-2 text-xs text-[var(--color-text-tertiary)]">
+                          {t(tool.desc)}
+                        </span>
+                      </div>
+                      <ToggleSwitch
+                        checked={!disabledTools.includes(tool.name)}
+                        onChange={() => handleToggleTool(tool.name)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {toolsSaved && (
+                <span className="text-xs text-emerald-500 flex items-center gap-1">
+                  <CheckCircle size={12} />
+                  {t('Saved')}
+                </span>
+              )}
+            </div>
+          </section>
+
+          <hr style={{ borderColor: 'var(--color-border)' }} />
+
+          {/* API Usage Statistics (placeholder) */}
+          <section>
+            <div className="flex items-center gap-2 mb-3">
+              <Activity size={16} className="text-[var(--color-accent)]" />
+              <h3 className="text-sm font-bold text-[var(--color-text)]">{t('API Usage')}</h3>
+            </div>
+            <div
+              className="rounded-xl p-4 text-center"
               style={{
-                background: 'var(--color-bg)',
+                background: 'var(--color-surface)',
                 border: '1px solid var(--color-border)',
-                color: 'var(--color-text-secondary)',
               }}
             >
-              {mcpConfig}
-            </pre>
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="absolute top-2 right-2 rounded-lg p-1.5 transition-colors hover:bg-[var(--color-surface)]"
-              title={t('Copy')}
-            >
-              {copied ? (
-                <CheckCircle size={14} className="text-emerald-500" />
-              ) : (
-                <Copy size={14} className="text-[var(--color-text-tertiary)]" />
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                {t(
+                  'AI features are under development. Usage statistics will appear here once available.',
+                )}
+              </p>
+              {isAdmin && (
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                  {t('As admin, you will also see global usage statistics here.')}
+                </p>
               )}
-            </button>
-          </div>
-
-          {/* Config file path hint */}
-          {ideConfig.pathHint && (
-            <p className="text-[11px] text-[var(--color-text-tertiary)]">
-              {t('Config file')}: <code className="font-mono">{ideConfig.pathHint}</code>
-            </p>
-          )}
-
-          {/* Skills link */}
-          <a
-            href="https://github.com/X-T-E-R/my-little-todo/blob/main/skills/SKILL.md"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-xs text-[var(--color-accent)] hover:underline w-fit"
-          >
-            <ExternalLink size={12} />
-            {t('View MCP usage guide (Skills)')}
-          </a>
-        </div>
-      </section>
-
-      <hr style={{ borderColor: 'var(--color-border)' }} />
-
-      {/* MCP Tool Toggles */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <Activity size={16} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('MCP Tool Access')}</h3>
-        </div>
-        <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-          {t(
-            'Control which MCP tools are available to AI agents. Disabled tools will not appear in tool listings.',
-          )}
-        </p>
-
-        <div className="space-y-4">
-          {/* Read tools */}
-          <div>
-            <p className="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-              {t('Read Operations')}
-            </p>
-            <div className="space-y-1">
-              {MCP_TOOLS.read.map((tool) => (
-                <div key={tool.name} className="flex items-center justify-between py-1.5">
-                  <div>
-                    <span className="text-sm font-mono text-[var(--color-text)]">{tool.name}</span>
-                    <span className="ml-2 text-xs text-[var(--color-text-tertiary)]">
-                      {t(tool.desc)}
-                    </span>
-                  </div>
-                  <ToggleSwitch
-                    checked={!disabledTools.includes(tool.name)}
-                    onChange={() => handleToggleTool(tool.name)}
-                  />
-                </div>
-              ))}
             </div>
-          </div>
-
-          {/* Write tools */}
-          <div>
-            <p className="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-              {t('Write Operations')}
-            </p>
-            <div className="space-y-1">
-              {MCP_TOOLS.write.map((tool) => (
-                <div key={tool.name} className="flex items-center justify-between py-1.5">
-                  <div>
-                    <span className="text-sm font-mono text-[var(--color-text)]">{tool.name}</span>
-                    <span className="ml-2 text-xs text-[var(--color-text-tertiary)]">
-                      {t(tool.desc)}
-                    </span>
-                  </div>
-                  <ToggleSwitch
-                    checked={!disabledTools.includes(tool.name)}
-                    onChange={() => handleToggleTool(tool.name)}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {toolsSaved && (
-            <span className="text-xs text-emerald-500 flex items-center gap-1">
-              <CheckCircle size={12} />
-              {t('Saved')}
-            </span>
-          )}
-        </div>
-      </section>
-
-      <hr style={{ borderColor: 'var(--color-border)' }} />
-
-      {/* API Usage Statistics (placeholder) */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <Activity size={16} className="text-[var(--color-accent)]" />
-          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('API Usage')}</h3>
-        </div>
-        <div
-          className="rounded-xl p-4 text-center"
-          style={{
-            background: 'var(--color-surface)',
-            border: '1px solid var(--color-border)',
-          }}
-        >
-          <p className="text-xs text-[var(--color-text-tertiary)]">
-            {t(
-              'AI features are under development. Usage statistics will appear here once available.',
-            )}
-          </p>
-          {isAdmin && (
-            <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
-              {t('As admin, you will also see global usage statistics here.')}
-            </p>
-          )}
-        </div>
-      </section>
-      </>}
+          </section>
+        </>
+      )}
     </div>
   );
 }

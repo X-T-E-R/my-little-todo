@@ -1,1 +1,9 @@
-{}
+{
+  "Kanban view": "Kanban",
+  "Ideas pool": "Ideas",
+  "Planned": "Planned",
+  "Doing": "Doing",
+  "Finishing": "Finishing",
+  "Recently done": "Done",
+  "wip_soft_limit_hint": "You already have many tasks in progress (soft limit {{limit}}). You can still drop here — maybe finish one first?"
+}

@@ -40,5 +40,12 @@
   "{{month}}/{{day}}": "{{month}}月{{day}}日",
   "Enter subtask title, press Enter to add...": "输入子任务标题，回车添加...",
   "Select deadline": "选择截止日期",
-  "Mark complete": "标记完成"
+  "Mark complete": "标记完成",
+  "Kanban view": "看板",
+  "Ideas pool": "想法池",
+  "Planned": "已计划",
+  "Doing": "进行中",
+  "Finishing": "收尾",
+  "Recently done": "最近完成",
+  "wip_soft_limit_hint": "进行中任务已达 {{limit}} 个上限提示 — 仍可拖入，但要不要先收个尾？"
 }

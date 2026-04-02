@@ -20,10 +20,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@web': resolve(__dirname, '../web/src'),
-      '@capacitor-community/sqlite': resolve(
-        __dirname,
-        'node_modules/@capacitor-community/sqlite',
-      ),
+      '@capacitor-community/sqlite': resolve(__dirname, 'node_modules/@capacitor-community/sqlite'),
     },
   },
   define: {

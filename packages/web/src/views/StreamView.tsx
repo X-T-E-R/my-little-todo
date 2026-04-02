@@ -23,8 +23,8 @@ import { Trans, useTranslation } from 'react-i18next';
 import { ContextMenu } from '../components/ContextMenu';
 import { DndReparentProvider, DndTaskWrapper } from '../components/DndReparentContext';
 import { MarkdownToolbar } from '../components/MarkdownToolbar';
-import { ParentTaskPicker } from '../components/ParentTaskPicker';
 import { OnboardingTip } from '../components/OnboardingTip';
+import { ParentTaskPicker } from '../components/ParentTaskPicker';
 import { RolePill } from '../components/RolePickerPopover';
 import { getAttachmentConfig, uploadBlob } from '../storage/blobApi';
 import type { AttachmentConfig } from '../storage/blobApi';
@@ -230,7 +230,8 @@ function EntryCard({
               width: 14,
               height: 14,
               border: `2px solid ${linkedTask.status === 'completed' ? 'var(--color-success, #22c55e)' : 'var(--color-accent)'}`,
-              background: linkedTask.status === 'completed' ? 'var(--color-success, #22c55e)' : 'transparent',
+              background:
+                linkedTask.status === 'completed' ? 'var(--color-success, #22c55e)' : 'transparent',
             }}
             title={linkedTask.status === 'completed' ? t('Completed') : t('Mark complete')}
             onClick={(e) => {
@@ -472,7 +473,10 @@ function EntryCard({
                 onClick={(e) => {
                   e.stopPropagation();
                   const rect = e.currentTarget.getBoundingClientRect();
-                  onContextMenu({ preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any, entry);
+                  onContextMenu(
+                    { preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any,
+                    entry,
+                  );
                 }}
                 className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)]"
                 style={{ color: 'var(--color-text-tertiary)' }}
@@ -1032,115 +1036,121 @@ export function StreamView() {
 
       {/* Stream entries */}
       <DndReparentProvider>
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 py-2 pb-52 scroll-smooth">
-        <div className="mx-auto max-w-2xl space-y-3">
-          {loading && filtered.length === 0 && (
-            <div className="flex items-center justify-center py-32">
-              <span className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
-                {t('Loading...')}
-              </span>
-            </div>
-          )}
-
-          {!loading && filtered.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-32 text-center">
-              <Sparkles size={36} style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
-              <p
-                className="mt-3 text-lg font-medium"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                {t('No entries yet')}
-              </p>
-              <p className="mt-1 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
-                {t('Record an inspiration below')}
-              </p>
-            </div>
-          )}
-
-          {groups.map((group) => (
-            <div key={group.dateKey}>
-              <div className="flex items-center justify-center pt-3 pb-1">
-                <span
-                  className="rounded-full px-3 py-1 text-[11px] font-medium shadow-sm"
-                  style={{
-                    background: 'var(--color-surface)',
-                    color: 'var(--color-text-tertiary)',
-                    border: '1px solid var(--color-border)',
-                  }}
-                >
-                  {group.label}
+        <div
+          ref={scrollRef}
+          className="flex-1 min-h-0 overflow-y-auto px-4 py-2 pb-52 scroll-smooth"
+        >
+          <div className="mx-auto max-w-2xl space-y-3">
+            {loading && filtered.length === 0 && (
+              <div className="flex items-center justify-center py-32">
+                <span className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('Loading...')}
                 </span>
               </div>
+            )}
 
-              <div className="space-y-2 mt-1">
-                {group.entries.map((entry) => {
-                  const entryCard = (
-                    <EntryCard
-                      entry={entry}
-                      linkedTask={
-                        entry.extractedTaskId ? taskMap.get(entry.extractedTaskId) : undefined
-                      }
-                      batchMode={batchMode}
-                      selected={selectedIds.has(entry.id)}
-                      isEditing={editingEntryId === entry.id}
-                      onStartEdit={() => setEditingEntryId(entry.id)}
-                      onSaveEdit={(content) => handleSaveEdit(entry.id, content)}
-                      onCancelEdit={() => setEditingEntryId(null)}
-                      onOpenDetail={handleOpenDetail}
-                      onAddSubtask={(e) => setSubtaskEntryId(e.id)}
-                      onSetDdl={(e) => setDdlEntryId(e.id)}
-                      onChangeRole={handleChangeRole}
-                      onContextMenu={handleContextMenu}
-                      onToggleSelect={handleToggleSelect}
-                      onChangeType={(e, type) => handleChangeType(e.id, type)}
-                      onMarkComplete={
-                        entry.entryType === 'task' && entry.extractedTaskId
-                          ? (e) => {
-                              if (e.extractedTaskId) {
-                                const t = taskMap.get(e.extractedTaskId);
-                                updateStatus(e.extractedTaskId, t?.status === 'completed' ? 'active' : 'completed');
-                              }
-                            }
-                          : undefined
-                      }
-                    />
-                  );
-
-                  return (
-                  <div key={entry.id}>
-                    {entry.extractedTaskId ? (
-                      <DndTaskWrapper taskId={entry.extractedTaskId}>
-                        {entryCard}
-                      </DndTaskWrapper>
-                    ) : (
-                      entryCard
-                    )}
-                    {subtaskEntryId === entry.id && (
-                      <div className="ml-14 mt-1">
-                        <InlineSubtaskInput
-                          onAdd={(title) => handleAddSubtask(entry.id, title)}
-                          onCancel={() => setSubtaskEntryId(null)}
-                        />
-                      </div>
-                    )}
-                    {ddlEntryId === entry.id && (
-                      <div className="ml-14 mt-1">
-                        <InlineDdlInput
-                          onSet={(ddl) => handleSetDdl(entry.id, ddl)}
-                          onCancel={() => setDdlEntryId(null)}
-                        />
-                      </div>
-                    )}
-                  </div>
-                  );
-                })}
+            {!loading && filtered.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-32 text-center">
+                <Sparkles size={36} style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
+                <p
+                  className="mt-3 text-lg font-medium"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {t('No entries yet')}
+                </p>
+                <p className="mt-1 text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('Record an inspiration below')}
+                </p>
               </div>
-            </div>
-          ))}
+            )}
 
-          <div ref={bottomAnchorRef} />
+            {groups.map((group) => (
+              <div key={group.dateKey}>
+                <div className="flex items-center justify-center pt-3 pb-1">
+                  <span
+                    className="rounded-full px-3 py-1 text-[11px] font-medium shadow-sm"
+                    style={{
+                      background: 'var(--color-surface)',
+                      color: 'var(--color-text-tertiary)',
+                      border: '1px solid var(--color-border)',
+                    }}
+                  >
+                    {group.label}
+                  </span>
+                </div>
+
+                <div className="space-y-2 mt-1">
+                  {group.entries.map((entry) => {
+                    const entryCard = (
+                      <EntryCard
+                        entry={entry}
+                        linkedTask={
+                          entry.extractedTaskId ? taskMap.get(entry.extractedTaskId) : undefined
+                        }
+                        batchMode={batchMode}
+                        selected={selectedIds.has(entry.id)}
+                        isEditing={editingEntryId === entry.id}
+                        onStartEdit={() => setEditingEntryId(entry.id)}
+                        onSaveEdit={(content) => handleSaveEdit(entry.id, content)}
+                        onCancelEdit={() => setEditingEntryId(null)}
+                        onOpenDetail={handleOpenDetail}
+                        onAddSubtask={(e) => setSubtaskEntryId(e.id)}
+                        onSetDdl={(e) => setDdlEntryId(e.id)}
+                        onChangeRole={handleChangeRole}
+                        onContextMenu={handleContextMenu}
+                        onToggleSelect={handleToggleSelect}
+                        onChangeType={(e, type) => handleChangeType(e.id, type)}
+                        onMarkComplete={
+                          entry.entryType === 'task' && entry.extractedTaskId
+                            ? (e) => {
+                                if (e.extractedTaskId) {
+                                  const t = taskMap.get(e.extractedTaskId);
+                                  updateStatus(
+                                    e.extractedTaskId,
+                                    t?.status === 'completed' ? 'active' : 'completed',
+                                  );
+                                }
+                              }
+                            : undefined
+                        }
+                      />
+                    );
+
+                    return (
+                      <div key={entry.id}>
+                        {entry.extractedTaskId ? (
+                          <DndTaskWrapper taskId={entry.extractedTaskId}>
+                            {entryCard}
+                          </DndTaskWrapper>
+                        ) : (
+                          entryCard
+                        )}
+                        {subtaskEntryId === entry.id && (
+                          <div className="ml-14 mt-1">
+                            <InlineSubtaskInput
+                              onAdd={(title) => handleAddSubtask(entry.id, title)}
+                              onCancel={() => setSubtaskEntryId(null)}
+                            />
+                          </div>
+                        )}
+                        {ddlEntryId === entry.id && (
+                          <div className="ml-14 mt-1">
+                            <InlineDdlInput
+                              onSet={(ddl) => handleSetDdl(entry.id, ddl)}
+                              onCancel={() => setDdlEntryId(null)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            <div ref={bottomAnchorRef} />
+          </div>
         </div>
-      </div>
       </DndReparentProvider>
 
       {/* Gradient fade overlay */}
@@ -1275,7 +1285,10 @@ export function StreamView() {
                 >
                   {t('{{count}} characters', { count: input.length })}
                 </span>
-                <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ background: 'var(--color-bg)' }}>
+                <div
+                  className="flex items-center gap-0.5 rounded-md p-0.5"
+                  style={{ background: 'var(--color-bg)' }}
+                >
                   {ENTRY_TYPE_KEYS.map((k) => {
                     const meta = ENTRY_TYPE_META[k];
                     const TypeIcon = meta.icon;

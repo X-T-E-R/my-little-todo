@@ -73,7 +73,11 @@ export function SyncIndicator() {
     <button
       type="button"
       onClick={handleSync}
-      title={lastSync > 0 ? `${t('Last synced')}: ${new Date(lastSync).toLocaleString()}` : t('Click to sync')}
+      title={
+        lastSync > 0
+          ? `${t('Last synced')}: ${new Date(lastSync).toLocaleString()}`
+          : t('Click to sync')
+      }
       className="fixed top-2 right-2 z-50 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium shadow-lg backdrop-blur-md cursor-pointer transition-opacity hover:opacity-90"
       style={{ background: bgColor, color: 'white' }}
     >

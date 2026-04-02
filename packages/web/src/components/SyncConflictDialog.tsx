@@ -71,14 +71,20 @@ export function SyncConflictDialog() {
         className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
         style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
       >
-        <div className="flex items-center gap-2 px-6 py-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div
+          className="flex items-center gap-2 px-6 py-4 border-b"
+          style={{ borderColor: 'var(--color-border)' }}
+        >
           <AlertTriangle size={18} className="text-amber-500" />
           <h2 className="text-base font-bold text-[var(--color-text)]">
             {t('Sync Conflicts')} ({conflicts.length})
           </h2>
         </div>
 
-        <div className="flex items-center gap-2 px-6 py-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div
+          className="flex items-center gap-2 px-6 py-2 border-b"
+          style={{ borderColor: 'var(--color-border)' }}
+        >
           <button
             type="button"
             onClick={() => setAllResolutions('local')}
@@ -116,8 +122,12 @@ export function SyncConflictDialog() {
                     onClick={() => setResolution(cKey, 'local')}
                     className="rounded-lg p-2 text-left text-xs transition-all border"
                     style={{
-                      borderColor: chosen === 'local' ? 'var(--color-accent)' : 'var(--color-border)',
-                      background: chosen === 'local' ? 'var(--color-accent-light, rgba(59,130,246,0.08))' : 'transparent',
+                      borderColor:
+                        chosen === 'local' ? 'var(--color-accent)' : 'var(--color-border)',
+                      background:
+                        chosen === 'local'
+                          ? 'var(--color-accent-light, rgba(59,130,246,0.08))'
+                          : 'transparent',
                     }}
                   >
                     <span className="font-medium text-[var(--color-text)]">{t('Local')}</span>
@@ -135,8 +145,12 @@ export function SyncConflictDialog() {
                     onClick={() => setResolution(cKey, 'remote')}
                     className="rounded-lg p-2 text-left text-xs transition-all border"
                     style={{
-                      borderColor: chosen === 'remote' ? 'var(--color-accent)' : 'var(--color-border)',
-                      background: chosen === 'remote' ? 'var(--color-accent-light, rgba(59,130,246,0.08))' : 'transparent',
+                      borderColor:
+                        chosen === 'remote' ? 'var(--color-accent)' : 'var(--color-border)',
+                      background:
+                        chosen === 'remote'
+                          ? 'var(--color-accent-light, rgba(59,130,246,0.08))'
+                          : 'transparent',
                     }}
                   >
                     <span className="font-medium text-[var(--color-text)]">{t('Remote')}</span>
@@ -155,7 +169,10 @@ export function SyncConflictDialog() {
           })}
         </div>
 
-        <div className="flex justify-end gap-2 px-6 py-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
+        <div
+          className="flex justify-end gap-2 px-6 py-4 border-t"
+          style={{ borderColor: 'var(--color-border)' }}
+        >
           <span className="flex-1 text-xs text-[var(--color-text-tertiary)] self-center">
             {t('Target')}: {targetId}
           </span>

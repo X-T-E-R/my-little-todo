@@ -1,7 +1,7 @@
 import {
   DndContext,
-  DragOverlay,
   type DragEndEvent,
+  DragOverlay,
   type DragStartEvent,
   PointerSensor,
   useDraggable,
@@ -111,7 +111,12 @@ export function DndTaskWrapper({
   taskId: string;
   children: ReactNode;
 }) {
-  const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({ id: taskId });
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragRef,
+    isDragging,
+  } = useDraggable({ id: taskId });
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: taskId });
 
   const ref = (node: HTMLDivElement | null) => {

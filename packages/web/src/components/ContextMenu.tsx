@@ -258,11 +258,21 @@ export function ContextMenu({
         )}
 
         {onChangeType && (
-          <SubMenuItem icon={RefreshCw} label={tStream('Change type')} subKey="type" rowRef={typeRowRef} />
+          <SubMenuItem
+            icon={RefreshCw}
+            label={tStream('Change type')}
+            subKey="type"
+            rowRef={typeRowRef}
+          />
         )}
 
         {roles.length > 0 && (
-          <SubMenuItem icon={UserCircle} label={t('Switch role')} subKey="role" rowRef={roleRowRef} />
+          <SubMenuItem
+            icon={UserCircle}
+            label={t('Switch role')}
+            subKey="role"
+            rowRef={roleRowRef}
+          />
         )}
 
         {onSetParent && (

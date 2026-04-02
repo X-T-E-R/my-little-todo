@@ -68,6 +68,9 @@ export async function createTask(
     submissions: [],
     postponements: [],
     statusHistory: [{ from: 'inbox' as const, to: 'inbox' as const, timestamp: now }],
+    /** Endowed progress: task already "started" at understood phase. */
+    phase: 'understood',
+    progressLogs: [],
   };
   await saveTask(task);
   return task;

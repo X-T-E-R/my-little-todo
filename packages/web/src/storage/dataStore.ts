@@ -20,6 +20,8 @@ export interface DataStore {
   writeFile(content: string, ...segments: string[]): Promise<void>;
   deleteFile(...segments: string[]): Promise<void>;
   listFiles(...segments: string[]): Promise<string[]>;
+  /** All file paths (full logical paths), for backup/export. */
+  listAllFiles(): Promise<string[]>;
 
   // ── Key-value settings ─────────────────────────────────────────────
 

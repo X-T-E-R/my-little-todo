@@ -1,8 +1,11 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
+import enBoard from './en/board.json';
+import enCoach from './en/coach.json';
 import zhBoard from './zh-CN/board.json';
 import zhCalendar from './zh-CN/calendar.json';
+import zhCoach from './zh-CN/coach.json';
 import zhCommon from './zh-CN/common.json';
 import zhEditor from './zh-CN/editor.json';
 import zhErrors from './zh-CN/errors.json';
@@ -32,13 +35,15 @@ export const resources = {
     calendar: zhCalendar,
     role: zhRole,
     errors: zhErrors,
+    coach: zhCoach,
   },
   en: {
+    coach: enCoach,
     common: {},
     nav: {},
     now: {},
     stream: {},
-    board: {},
+    board: enBoard,
     settings: {},
     task: {},
     onboarding: {},

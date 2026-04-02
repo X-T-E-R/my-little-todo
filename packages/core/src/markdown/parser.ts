@@ -1,10 +1,14 @@
 import type { Attachment, StreamEntry, StreamEntryType } from '../models/stream.js';
 import type {
   DdlType,
+  KanbanColumn,
   Postponement,
+  ProgressLog,
+  ProgressLogSource,
   StatusChange,
   Submission,
   Task,
+  TaskPhase,
   TaskReminder,
   TaskResource,
   TaskStatus,
@@ -131,7 +135,8 @@ export function parseStreamFile(content: string, dateKey: string): StreamEntry[]
   return entries;
 }
 
-const STRUCTURED_SECTION_REGEX = /^## (Submissions|Postponements|Resources|Reminders|Status History)$/;
+const STRUCTURED_SECTION_REGEX =
+  /^## (Submissions|Postponements|Resources|Reminders|Status History)$/;
 
 function parseResourceLine(line: string): TaskResource | null {
   const trimmed = line.replace(/^- /, '').trim();
@@ -183,6 +188,20 @@ function parseReminderLine(line: string): TaskReminder | null {
   return { id, time: new Date(time), notified, label };
 }
 
+const KANBAN_COLUMNS: KanbanColumn[] = ['ideas', 'planned', 'doing', 'finishing', 'done_recent'];
+
+function parseProgressLogLine(trimmed: string): ProgressLog | null {
+  const m = /^- ([^|]+) \| ([^|]+) \| ([^|]+) \| (.+)$/.exec(trimmed);
+  if (!m) return null;
+  const id = m[1]?.trim();
+  const ts = m[2]?.trim();
+  const source = m[3]?.trim() as ProgressLogSource;
+  const content = m[4]?.trim() ?? '';
+  if (!id || !ts) return null;
+  if (source !== 'manual' && source !== 'focus_notes' && source !== 'stream') return null;
+  return { id, timestamp: new Date(ts), content, source };
+}
+
 function buildTaskFromMeta(
   meta: FrontMatter,
   bodyText: string,
@@ -191,9 +210,23 @@ function buildTaskFromMeta(
   resources: TaskResource[],
   reminders: TaskReminder[],
   statusHistory: StatusChange[],
+  progressLogs: ProgressLog[],
 ): Task {
   const tags = Array.isArray(meta.tags) ? (meta.tags as string[]) : [];
   const subtaskIds = Array.isArray(meta.subtasks) ? (meta.subtasks as string[]) : [];
+
+  const rawPhase = meta.phase as string | undefined;
+  const phase =
+    rawPhase &&
+    ['understood', 'exploring', 'working', 'core_done', 'wrapping_up'].includes(rawPhase)
+      ? (rawPhase as TaskPhase)
+      : undefined;
+
+  const rawCol = meta.kanban_column as string | undefined;
+  const kanbanColumn =
+    rawCol && KANBAN_COLUMNS.includes(rawCol as KanbanColumn)
+      ? (rawCol as KanbanColumn)
+      : undefined;
 
   return {
     id: (meta.id as string) ?? '',
@@ -219,6 +252,9 @@ function buildTaskFromMeta(
     submissions,
     postponements,
     statusHistory,
+    phase,
+    progressLogs: progressLogs.length > 0 ? progressLogs : undefined,
+    kanbanColumn,
   };
 }
 
@@ -231,9 +267,17 @@ export function parseTaskFile(content: string): Task {
   const resources: TaskResource[] = [];
   const reminders: TaskReminder[] = [];
   const statusHistory: StatusChange[] = [];
+  const progressLogs: ProgressLog[] = [];
 
   const bodyLines: string[] = [];
-  let section: 'body' | 'submissions' | 'postponements' | 'resources' | 'reminders' | 'statusHistory' = 'body';
+  let section:
+    | 'body'
+    | 'submissions'
+    | 'postponements'
+    | 'resources'
+    | 'reminders'
+    | 'statusHistory'
+    | 'progressLogs' = 'body';
 
   for (const line of body.split('\n')) {
     const trimmed = line.trim();
@@ -245,10 +289,14 @@ export function parseTaskFile(content: string): Task {
       else if (s === 'Resources') section = 'resources';
       else if (s === 'Reminders') section = 'reminders';
       else if (s === 'Status History') section = 'statusHistory';
+      else if (s === 'Progress Logs') section = 'progressLogs';
       continue;
     }
     if (section === 'body') {
       bodyLines.push(line);
+    } else if (section === 'progressLogs' && trimmed.startsWith('- ')) {
+      const pl = parseProgressLogLine(trimmed);
+      if (pl) progressLogs.push(pl);
     } else if (section === 'resources' && trimmed.startsWith('- ')) {
       const r = parseResourceLine(trimmed);
       if (r) resources.push(r);
@@ -263,5 +311,14 @@ export function parseTaskFile(content: string): Task {
 
   const bodyText = bodyLines.join('\n').trim();
 
-  return buildTaskFromMeta(meta, bodyText, submissions, postponements, resources, reminders, statusHistory);
+  return buildTaskFromMeta(
+    meta,
+    bodyText,
+    submissions,
+    postponements,
+    resources,
+    reminders,
+    statusHistory,
+    progressLogs,
+  );
 }

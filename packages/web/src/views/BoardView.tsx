@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  LayoutGrid,
   List,
   ListPlus,
   MoreHorizontal,
@@ -16,9 +17,10 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CalendarView } from '../components/CalendarView';
-import { RolePill } from '../components/RolePickerPopover';
 import { DndReparentProvider, DndTaskWrapper } from '../components/DndReparentContext';
+import { KanbanBoard } from '../components/KanbanBoard';
 import { ParentTaskPicker } from '../components/ParentTaskPicker';
+import { RolePill } from '../components/RolePickerPopover';
 import { TaskContextMenu } from '../components/TaskContextMenu';
 import {
   filterByRole,
@@ -574,7 +576,10 @@ function TaskCard({
           onClick={(e) => {
             e.stopPropagation();
             const rect = e.currentTarget.getBoundingClientRect();
-            onContextMenu({ preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any, task);
+            onContextMenu(
+              { preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any,
+              task,
+            );
           }}
           className="rounded-md p-1.5 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
           style={{ color: 'var(--color-text-tertiary)' }}
@@ -708,7 +713,7 @@ export function BoardView() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [showNoDdl, setShowNoDdl] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -778,517 +783,567 @@ export function BoardView() {
 
   return (
     <DndReparentProvider>
-    <div
-      className="h-full overflow-y-auto px-4 py-6 scroll-smooth"
-      style={{ background: 'var(--color-bg)' }}
-    >
-      <div className="mx-auto max-w-2xl flex flex-col gap-8">
-        {/* Stats card */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between rounded-2xl p-4 shadow-sm"
-          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className="flex h-10 w-10 items-center justify-center rounded-full"
-              style={{ background: 'var(--color-success-soft)', color: 'var(--color-success)' }}
-            >
-              <Check size={20} strokeWidth={3} />
-            </div>
-            <div>
-              <p className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
-                {t('On time completion')}
-              </p>
-              <p className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>
-                {completed.length > 0 ? `${onTimeRate}%` : '—'}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="text-right">
-              <p className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
-                {t('Active tasks')}
-              </p>
-              <p className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>
-                {totalActive}
-              </p>
-            </div>
-            <div
-              className="flex rounded-lg overflow-hidden ml-2"
-              style={{ border: '1px solid var(--color-border)' }}
-            >
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                className="px-2 py-1.5 transition-colors"
-                title={t('List view')}
-                style={{
-                  background: viewMode === 'list' ? 'var(--color-accent-soft)' : 'transparent',
-                  color: viewMode === 'list' ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
-                }}
-              >
-                <List size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('calendar')}
-                className="px-2 py-1.5 transition-colors"
-                title={t('Calendar view')}
-                style={{
-                  background: viewMode === 'calendar' ? 'var(--color-accent-soft)' : 'transparent',
-                  color:
-                    viewMode === 'calendar' ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
-                }}
-              >
-                <CalendarDays size={14} />
-              </button>
-            </div>
-          </div>
-        </motion.div>
-
-        {/* Calendar view */}
-        {viewMode === 'calendar' && (
-          <CalendarView
-            tasks={filtered}
-            schedules={scheduleBlocks}
-            onSelectTask={(id) => selectTask(id)}
-          />
-        )}
-
-        {/* DDL tasks grouped by urgency */}
-        {viewMode === 'list' && (
-          <>
-            {totalActive === 0 && (
+      <div
+        className="h-full overflow-y-auto px-4 py-6 scroll-smooth"
+        style={{ background: 'var(--color-bg)' }}
+      >
+        <div className="mx-auto max-w-2xl flex flex-col gap-8">
+          {/* Stats card */}
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center justify-between rounded-2xl p-4 shadow-sm"
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+          >
+            <div className="flex items-center gap-3">
               <div
-                className="rounded-2xl border-dashed py-12 text-center"
-                style={{ border: '1px dashed var(--color-border)' }}
+                className="flex h-10 w-10 items-center justify-center rounded-full"
+                style={{ background: 'var(--color-success-soft)', color: 'var(--color-success)' }}
               >
-                <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {t('No tasks yet')}
+                <Check size={20} strokeWidth={3} />
+              </div>
+              <div>
+                <p className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('On time completion')}
                 </p>
-                <p className="mt-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {t('Write something in the stream, or click + to create directly')}
+                <p className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>
+                  {completed.length > 0 ? `${onTimeRate}%` : '—'}
                 </p>
               </div>
-            )}
-
-            {groups.map((group) => (
-              <section key={group.key}>
-                <div className="mb-4 flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full" style={{ background: group.color }} />
-                  <h2
-                    className="text-sm font-bold tracking-wide"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    {t(group.label)}
-                  </h2>
-                  <span
-                    className="text-xs font-medium"
-                    style={{ color: 'var(--color-text-tertiary)' }}
-                  >
-                    {group.tasks.length}
-                  </span>
-                  <div
-                    className="h-px flex-1"
-                    style={{
-                      background: 'linear-gradient(to right, var(--color-border), transparent)',
-                    }}
-                  />
-                </div>
-                <div className="flex flex-col gap-4">
-                  <AnimatePresence>
-                    {group.tasks.map((item, index) => (
-                      <div key={item.id}>
-                        <DndTaskWrapper taskId={item.id}>
-                        <TaskCard
-                          task={item}
-                          index={index}
-                          now={now}
-                          onComplete={setSubmittingTask}
-                          onPostpone={setPostponingTask}
-                          onClick={handleClickTask}
-                          onContextMenu={handleContextMenu}
-                        />
-                        </DndTaskWrapper>
-                        {subtaskInputId === item.id && (
-                          <BoardInlineSubtaskInput
-                            onAdd={(title) => handleAddSubtaskInline(item.id, title)}
-                            onCancel={() => setSubtaskInputId(null)}
-                          />
-                        )}
-                        {ddlInputId === item.id && (
-                          <BoardInlineDdlInput
-                            onSet={(ddl) => handleSetDdlInline(item.id, ddl)}
-                            onCancel={() => setDdlInputId(null)}
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </AnimatePresence>
-                </div>
-              </section>
-            ))}
-
-            {/* No-DDL tasks (collapsible) */}
-            {noDdlTasks.length > 0 && (
-              <section>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <p className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('Active tasks')}
+                </p>
+                <p className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>
+                  {totalActive}
+                </p>
+              </div>
+              <div
+                className="flex rounded-lg overflow-hidden ml-2"
+                style={{ border: '1px solid var(--color-border)' }}
+              >
                 <button
                   type="button"
-                  onClick={() => setShowNoDdl(!showNoDdl)}
-                  className="mb-4 flex w-full items-center gap-2"
+                  onClick={() => setViewMode('list')}
+                  className="px-2 py-1.5 transition-colors"
+                  title={t('List view')}
+                  style={{
+                    background: viewMode === 'list' ? 'var(--color-accent-soft)' : 'transparent',
+                    color:
+                      viewMode === 'list' ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+                  }}
                 >
-                  {showNoDdl ? (
-                    <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-                  ) : (
-                    <ChevronRight size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-                  )}
-                  <h2
-                    className="text-sm font-bold tracking-wide"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    {t('To-do')}
-                  </h2>
-                  <span
-                    className="text-xs font-medium"
-                    style={{ color: 'var(--color-text-tertiary)' }}
-                  >
-                    {noDdlTasks.length}
-                  </span>
-                  <div
-                    className="h-px flex-1"
-                    style={{
-                      background: 'linear-gradient(to right, var(--color-border), transparent)',
-                    }}
-                  />
+                  <List size={14} />
                 </button>
-                <AnimatePresence>
-                  {showNoDdl && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="flex flex-col gap-3 overflow-hidden"
-                    >
-                      {noDdlTasks.map((task, i) => (
-                        <div key={task.id}>
-                          <DndTaskWrapper taskId={task.id}>
-                          <motion.div
-                            initial={{ opacity: 0, x: -10 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            transition={{ delay: i * 0.04 }}
-                            className="group rounded-xl px-4 py-3 cursor-pointer transition-colors hover:shadow-sm"
-                            style={{
-                              background: 'var(--color-surface)',
-                              border: '1px solid var(--color-border)',
-                            }}
-                            onClick={() => handleClickTask(task)}
-                            onContextMenu={(e) => handleContextMenu(e, task)}
-                          >
-                            <div className="flex items-center gap-3">
-                              <button
-                                type="button"
-                                className="flex shrink-0 items-center justify-center rounded-full transition-colors"
-                                style={{
-                                  width: 18,
-                                  height: 18,
-                                  border: '2px solid var(--color-accent)',
-                                  background: 'transparent',
-                                }}
-                                title={t('Mark complete')}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  updateStatus(task.id, 'completed');
-                                  setShowConfetti(true);
-                                }}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <p
-                                  className="text-sm font-medium truncate"
-                                  style={{ color: 'var(--color-text)' }}
-                                >
-                                  {task.title}
-                                </p>
-                                {task.parentId && task.promoted && (() => {
-                                  const parent = tasks.find((t) => t.id === task.parentId);
-                                  return parent ? (
-                                    <p className="text-[10px] truncate mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
-                                      ↳ {parent.title}
-                                    </p>
-                                  ) : null;
-                                })()}
-                                <div className="mt-1 flex items-center gap-2">
-                                  <RolePill
-                                    roleId={task.roleId}
-                                    onChangeRole={(newRoleId) => {
-                                      useTaskStore
-                                        .getState()
-                                        .updateTask({ ...task, roleId: newRoleId });
-                                    }}
-                                  />
-                                  {(task.subtaskIds ?? []).length > 0 && (
-                                    <span
-                                      className="text-[10px]"
-                                      style={{ color: 'var(--color-text-tertiary)' }}
-                                    >
-                                      {t('{{completed}}/{{total}} subtasks', {
-                                        completed: (task.subtaskIds ?? []).filter(
-                                          (id) =>
-                                            tasks.find((t) => t.id === id)?.status === 'completed',
-                                        ).length,
-                                        total: (task.subtaskIds ?? []).length,
-                                      })}
-                                    </span>
-                                  )}
-                                  {(() => {
-                                    const subs = (task.subtaskIds ?? [])
-                                      .map((id) => tasks.find((t) => t.id === id))
-                                      .filter(
-                                        (t): t is Task =>
-                                          !!t &&
-                                          !!t.ddl &&
-                                          t.status !== 'completed' &&
-                                          daysUntil(t.ddl, now) <= 3,
-                                      );
-                                    if (subs.length === 0) return null;
-                                    return (
-                                      <span
-                                        className="flex items-center gap-0.5 text-[10px]"
-                                        style={{ color: 'var(--color-warning)' }}
-                                      >
-                                        <AlertCircle size={9} />
-                                        {t('{{count}} subtasks due soon', { count: subs.length })}
-                                      </span>
-                                    );
-                                  })()}
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const rect = e.currentTarget.getBoundingClientRect();
-                                  handleContextMenu({ preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any, task);
-                                }}
-                                className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
-                                style={{ color: 'var(--color-text-tertiary)' }}
-                              >
-                                <MoreHorizontal size={14} />
-                              </button>
-                              <ChevronRight
-                                size={16}
-                                className="hidden sm:block"
-                                style={{ color: 'var(--color-text-tertiary)' }}
-                              />
-                            </div>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('calendar')}
+                  className="px-2 py-1.5 transition-colors"
+                  title={t('Calendar view')}
+                  style={{
+                    background:
+                      viewMode === 'calendar' ? 'var(--color-accent-soft)' : 'transparent',
+                    color:
+                      viewMode === 'calendar'
+                        ? 'var(--color-accent)'
+                        : 'var(--color-text-tertiary)',
+                  }}
+                >
+                  <CalendarDays size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('kanban')}
+                  className="px-2 py-1.5 transition-colors"
+                  title={t('Kanban view')}
+                  style={{
+                    background: viewMode === 'kanban' ? 'var(--color-accent-soft)' : 'transparent',
+                    color:
+                      viewMode === 'kanban' ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+                  }}
+                >
+                  <LayoutGrid size={14} />
+                </button>
+              </div>
+            </div>
+          </motion.div>
 
-                            <BoardSubtaskPreview task={task} />
-                          </motion.div>
+          {/* Kanban view */}
+          {viewMode === 'kanban' && (
+            <section>
+              <KanbanBoard tasks={filtered} />
+            </section>
+          )}
+
+          {/* Calendar view */}
+          {viewMode === 'calendar' && (
+            <CalendarView
+              tasks={filtered}
+              schedules={scheduleBlocks}
+              onSelectTask={(id) => selectTask(id)}
+            />
+          )}
+
+          {/* DDL tasks grouped by urgency */}
+          {viewMode === 'list' && (
+            <>
+              {totalActive === 0 && (
+                <div
+                  className="rounded-2xl border-dashed py-12 text-center"
+                  style={{ border: '1px dashed var(--color-border)' }}
+                >
+                  <p className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {t('No tasks yet')}
+                  </p>
+                  <p className="mt-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {t('Write something in the stream, or click + to create directly')}
+                  </p>
+                </div>
+              )}
+
+              {groups.map((group) => (
+                <section key={group.key}>
+                  <div className="mb-4 flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full" style={{ background: group.color }} />
+                    <h2
+                      className="text-sm font-bold tracking-wide"
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      {t(group.label)}
+                    </h2>
+                    <span
+                      className="text-xs font-medium"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      {group.tasks.length}
+                    </span>
+                    <div
+                      className="h-px flex-1"
+                      style={{
+                        background: 'linear-gradient(to right, var(--color-border), transparent)',
+                      }}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-4">
+                    <AnimatePresence>
+                      {group.tasks.map((item, index) => (
+                        <div key={item.id}>
+                          <DndTaskWrapper taskId={item.id}>
+                            <TaskCard
+                              task={item}
+                              index={index}
+                              now={now}
+                              onComplete={setSubmittingTask}
+                              onPostpone={setPostponingTask}
+                              onClick={handleClickTask}
+                              onContextMenu={handleContextMenu}
+                            />
                           </DndTaskWrapper>
-                          {subtaskInputId === task.id && (
+                          {subtaskInputId === item.id && (
                             <BoardInlineSubtaskInput
-                              onAdd={(title) => handleAddSubtaskInline(task.id, title)}
+                              onAdd={(title) => handleAddSubtaskInline(item.id, title)}
                               onCancel={() => setSubtaskInputId(null)}
                             />
                           )}
-                          {ddlInputId === task.id && (
+                          {ddlInputId === item.id && (
                             <BoardInlineDdlInput
-                              onSet={(ddl) => handleSetDdlInline(task.id, ddl)}
+                              onSet={(ddl) => handleSetDdlInline(item.id, ddl)}
                               onCancel={() => setDdlInputId(null)}
                             />
                           )}
                         </div>
                       ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </section>
-            )}
+                    </AnimatePresence>
+                  </div>
+                </section>
+              ))}
 
-            {/* Completed (collapsible) */}
-            {completed.length > 0 && (
-              <section>
-                <button
-                  type="button"
-                  onClick={() => setShowCompleted(!showCompleted)}
-                  className="mb-4 flex w-full items-center gap-2"
-                >
-                  {showCompleted ? (
-                    <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-                  ) : (
-                    <ChevronRight size={14} style={{ color: 'var(--color-text-tertiary)' }} />
-                  )}
-                  <h2
-                    className="text-sm font-bold tracking-wide"
-                    style={{ color: 'var(--color-text-tertiary)' }}
+              {/* No-DDL tasks (collapsible) */}
+              {noDdlTasks.length > 0 && (
+                <section>
+                  <button
+                    type="button"
+                    onClick={() => setShowNoDdl(!showNoDdl)}
+                    className="mb-4 flex w-full items-center gap-2"
                   >
-                    {t('Recently completed')}
-                  </h2>
-                  <span
-                    className="text-xs font-medium"
-                    style={{ color: 'var(--color-text-tertiary)' }}
-                  >
-                    {completed.length}
-                  </span>
-                  <div
-                    className="h-px flex-1"
-                    style={{
-                      background: 'linear-gradient(to right, var(--color-border), transparent)',
-                    }}
-                  />
-                </button>
-                <AnimatePresence>
-                  {showCompleted && (
-                    <motion.div
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="flex flex-col gap-2 overflow-hidden"
+                    {showNoDdl ? (
+                      <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                    ) : (
+                      <ChevronRight size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                    )}
+                    <h2
+                      className="text-sm font-bold tracking-wide"
+                      style={{ color: 'var(--color-text)' }}
                     >
-                      {completed.map((item, index) => (
-                        <motion.div
-                          initial={{ opacity: 0, x: -10 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          transition={{ delay: index * 0.05 }}
-                          key={item.id}
-                          className="group flex items-center gap-4 rounded-xl px-4 py-3 cursor-pointer transition-colors"
-                          style={{
-                            background:
-                              'color-mix(in srgb, var(--color-success-soft) 50%, transparent)',
-                          }}
-                          onClick={() => handleClickTask(item)}
-                        >
-                          <div
-                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                      {t('To-do')}
+                    </h2>
+                    <span
+                      className="text-xs font-medium"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      {noDdlTasks.length}
+                    </span>
+                    <div
+                      className="h-px flex-1"
+                      style={{
+                        background: 'linear-gradient(to right, var(--color-border), transparent)',
+                      }}
+                    />
+                  </button>
+                  <AnimatePresence>
+                    {showNoDdl && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="flex flex-col gap-3 overflow-hidden"
+                      >
+                        {noDdlTasks.map((task, i) => (
+                          <div key={task.id}>
+                            <DndTaskWrapper taskId={task.id}>
+                              <motion.div
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: i * 0.04 }}
+                                className="group rounded-xl px-4 py-3 cursor-pointer transition-colors hover:shadow-sm"
+                                style={{
+                                  background: 'var(--color-surface)',
+                                  border: '1px solid var(--color-border)',
+                                }}
+                                onClick={() => handleClickTask(task)}
+                                onContextMenu={(e) => handleContextMenu(e, task)}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <button
+                                    type="button"
+                                    className="flex shrink-0 items-center justify-center rounded-full transition-colors"
+                                    style={{
+                                      width: 18,
+                                      height: 18,
+                                      border: '2px solid var(--color-accent)',
+                                      background: 'transparent',
+                                    }}
+                                    title={t('Mark complete')}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      updateStatus(task.id, 'completed');
+                                      setShowConfetti(true);
+                                    }}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <p
+                                      className="text-sm font-medium truncate"
+                                      style={{ color: 'var(--color-text)' }}
+                                    >
+                                      {task.title}
+                                    </p>
+                                    {task.parentId &&
+                                      task.promoted &&
+                                      (() => {
+                                        const parent = tasks.find((t) => t.id === task.parentId);
+                                        return parent ? (
+                                          <p
+                                            className="text-[10px] truncate mt-0.5"
+                                            style={{ color: 'var(--color-text-tertiary)' }}
+                                          >
+                                            ↳ {parent.title}
+                                          </p>
+                                        ) : null;
+                                      })()}
+                                    <div className="mt-1 flex items-center gap-2">
+                                      <RolePill
+                                        roleId={task.roleId}
+                                        onChangeRole={(newRoleId) => {
+                                          useTaskStore
+                                            .getState()
+                                            .updateTask({ ...task, roleId: newRoleId });
+                                        }}
+                                      />
+                                      {(task.subtaskIds ?? []).length > 0 && (
+                                        <span
+                                          className="text-[10px]"
+                                          style={{ color: 'var(--color-text-tertiary)' }}
+                                        >
+                                          {t('{{completed}}/{{total}} subtasks', {
+                                            completed: (task.subtaskIds ?? []).filter(
+                                              (id) =>
+                                                tasks.find((t) => t.id === id)?.status ===
+                                                'completed',
+                                            ).length,
+                                            total: (task.subtaskIds ?? []).length,
+                                          })}
+                                        </span>
+                                      )}
+                                      {(() => {
+                                        const subs = (task.subtaskIds ?? [])
+                                          .map((id) => tasks.find((t) => t.id === id))
+                                          .filter(
+                                            (t): t is Task =>
+                                              !!t &&
+                                              !!t.ddl &&
+                                              t.status !== 'completed' &&
+                                              daysUntil(t.ddl, now) <= 3,
+                                          );
+                                        if (subs.length === 0) return null;
+                                        return (
+                                          <span
+                                            className="flex items-center gap-0.5 text-[10px]"
+                                            style={{ color: 'var(--color-warning)' }}
+                                          >
+                                            <AlertCircle size={9} />
+                                            {t('{{count}} subtasks due soon', {
+                                              count: subs.length,
+                                            })}
+                                          </span>
+                                        );
+                                      })()}
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const rect = e.currentTarget.getBoundingClientRect();
+                                      handleContextMenu(
+                                        {
+                                          preventDefault: () => {},
+                                          clientX: rect.right,
+                                          clientY: rect.bottom,
+                                        } as any,
+                                        task,
+                                      );
+                                    }}
+                                    className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
+                                    style={{ color: 'var(--color-text-tertiary)' }}
+                                  >
+                                    <MoreHorizontal size={14} />
+                                  </button>
+                                  <ChevronRight
+                                    size={16}
+                                    className="hidden sm:block"
+                                    style={{ color: 'var(--color-text-tertiary)' }}
+                                  />
+                                </div>
+
+                                <BoardSubtaskPreview task={task} />
+                              </motion.div>
+                            </DndTaskWrapper>
+                            {subtaskInputId === task.id && (
+                              <BoardInlineSubtaskInput
+                                onAdd={(title) => handleAddSubtaskInline(task.id, title)}
+                                onCancel={() => setSubtaskInputId(null)}
+                              />
+                            )}
+                            {ddlInputId === task.id && (
+                              <BoardInlineDdlInput
+                                onSet={(ddl) => handleSetDdlInline(task.id, ddl)}
+                                onCancel={() => setDdlInputId(null)}
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </section>
+              )}
+
+              {/* Completed (collapsible) */}
+              {completed.length > 0 && (
+                <section>
+                  <button
+                    type="button"
+                    onClick={() => setShowCompleted(!showCompleted)}
+                    className="mb-4 flex w-full items-center gap-2"
+                  >
+                    {showCompleted ? (
+                      <ChevronDown size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                    ) : (
+                      <ChevronRight size={14} style={{ color: 'var(--color-text-tertiary)' }} />
+                    )}
+                    <h2
+                      className="text-sm font-bold tracking-wide"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      {t('Recently completed')}
+                    </h2>
+                    <span
+                      className="text-xs font-medium"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      {completed.length}
+                    </span>
+                    <div
+                      className="h-px flex-1"
+                      style={{
+                        background: 'linear-gradient(to right, var(--color-border), transparent)',
+                      }}
+                    />
+                  </button>
+                  <AnimatePresence>
+                    {showCompleted && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="flex flex-col gap-2 overflow-hidden"
+                      >
+                        {completed.map((item, index) => (
+                          <motion.div
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: index * 0.05 }}
+                            key={item.id}
+                            className="group flex items-center gap-4 rounded-xl px-4 py-3 cursor-pointer transition-colors"
                             style={{
                               background:
-                                'color-mix(in srgb, var(--color-success) 20%, transparent)',
-                              color: 'var(--color-success)',
+                                'color-mix(in srgb, var(--color-success-soft) 50%, transparent)',
                             }}
+                            onClick={() => handleClickTask(item)}
                           >
-                            <Check size={16} strokeWidth={3} />
-                          </div>
-                          <div className="flex-1">
-                            <p
-                              className="text-sm font-medium line-through"
+                            <div
+                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
                               style={{
-                                color: 'var(--color-text)',
-                                textDecorationColor:
-                                  'color-mix(in srgb, var(--color-text-tertiary) 50%, transparent)',
+                                background:
+                                  'color-mix(in srgb, var(--color-success) 20%, transparent)',
+                                color: 'var(--color-success)',
                               }}
                             >
-                              {item.title}
-                            </p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              {item.completedAt && (
-                                <p
-                                  className="text-xs"
-                                  style={{ color: 'var(--color-text-tertiary)' }}
-                                >
-                                  {t('{{month}}/{{day}}', {
-                                    month: item.completedAt.getMonth() + 1,
-                                    day: item.completedAt.getDate(),
-                                  })}
-                                </p>
-                              )}
-                              {item.submissions.length > 0 && item.submissions[0]?.note && (
-                                <p
-                                  className="text-xs italic"
-                                  style={{ color: 'var(--color-text-tertiary)' }}
-                                >
-                                  「{item.submissions[0].note}」
-                                </p>
-                              )}
+                              <Check size={16} strokeWidth={3} />
                             </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              handleContextMenu({ preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any, item);
-                            }}
-                            className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
-                            style={{ color: 'var(--color-text-tertiary)' }}
-                          >
-                            <MoreHorizontal size={14} />
-                          </button>
-                          <ChevronRight
-                            size={16}
-                            className="hidden sm:block opacity-0 transition-opacity group-hover:opacity-100"
-                            style={{ color: 'var(--color-text-tertiary)' }}
-                          />
-                        </motion.div>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </section>
-            )}
-          </>
+                            <div className="flex-1">
+                              <p
+                                className="text-sm font-medium line-through"
+                                style={{
+                                  color: 'var(--color-text)',
+                                  textDecorationColor:
+                                    'color-mix(in srgb, var(--color-text-tertiary) 50%, transparent)',
+                                }}
+                              >
+                                {item.title}
+                              </p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {item.completedAt && (
+                                  <p
+                                    className="text-xs"
+                                    style={{ color: 'var(--color-text-tertiary)' }}
+                                  >
+                                    {t('{{month}}/{{day}}', {
+                                      month: item.completedAt.getMonth() + 1,
+                                      day: item.completedAt.getDate(),
+                                    })}
+                                  </p>
+                                )}
+                                {item.submissions.length > 0 && item.submissions[0]?.note && (
+                                  <p
+                                    className="text-xs italic"
+                                    style={{ color: 'var(--color-text-tertiary)' }}
+                                  >
+                                    「{item.submissions[0].note}」
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                handleContextMenu(
+                                  {
+                                    preventDefault: () => {},
+                                    clientX: rect.right,
+                                    clientY: rect.bottom,
+                                  } as any,
+                                  item,
+                                );
+                              }}
+                              className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
+                              style={{ color: 'var(--color-text-tertiary)' }}
+                            >
+                              <MoreHorizontal size={14} />
+                            </button>
+                            <ChevronRight
+                              size={16}
+                              className="hidden sm:block opacity-0 transition-opacity group-hover:opacity-100"
+                              style={{ color: 'var(--color-text-tertiary)' }}
+                            />
+                          </motion.div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </section>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Dialogs */}
+        <AnimatePresence>
+          {postponingTask && (
+            <PostponeDialog
+              task={postponingTask}
+              onSubmit={handlePostpone}
+              onCancel={() => setPostponingTask(null)}
+            />
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {submittingTask && (
+            <SubmitDialog
+              task={submittingTask}
+              onSubmit={handleSubmit}
+              onCancel={() => setSubmittingTask(null)}
+            />
+          )}
+        </AnimatePresence>
+
+        {showConfetti && <ConfettiOverlay onDone={() => setShowConfetti(false)} />}
+
+        {contextMenu && (
+          <TaskContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            task={contextMenu.task}
+            onClose={() => setContextMenu(null)}
+            onOpenDetail={() => selectTask(contextMenu.task.id)}
+            onAddSubtask={() => setSubtaskInputId(contextMenu.task.id)}
+            onSetDdl={() => setDdlInputId(contextMenu.task.id)}
+            onChangeRole={(roleId) => updateTask({ ...contextMenu.task, roleId })}
+            onComplete={() => {
+              const newStatus = contextMenu.task.status === 'completed' ? 'active' : 'completed';
+              updateStatus(contextMenu.task.id, newStatus);
+              if (newStatus === 'completed') setShowConfetti(true);
+            }}
+            onArchive={() => updateStatus(contextMenu.task.id, 'archived')}
+            onDelete={() => deleteTask(contextMenu.task.id)}
+            onPromote={
+              contextMenu.task.parentId
+                ? () => {
+                    const { promoteSubtask } = useTaskStore.getState();
+                    promoteSubtask(contextMenu.task.id, !contextMenu.task.promoted);
+                  }
+                : undefined
+            }
+            onSetParent={() => setParentPickerTargetId(contextMenu.task.id)}
+          />
+        )}
+
+        {parentPickerTargetId && (
+          <ParentTaskPicker
+            childId={parentPickerTargetId}
+            onSelect={async (parentId) => {
+              await reparentTask(parentPickerTargetId, parentId);
+              setParentPickerTargetId(null);
+            }}
+            onClose={() => setParentPickerTargetId(null)}
+          />
         )}
       </div>
-
-      {/* Dialogs */}
-      <AnimatePresence>
-        {postponingTask && (
-          <PostponeDialog
-            task={postponingTask}
-            onSubmit={handlePostpone}
-            onCancel={() => setPostponingTask(null)}
-          />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {submittingTask && (
-          <SubmitDialog
-            task={submittingTask}
-            onSubmit={handleSubmit}
-            onCancel={() => setSubmittingTask(null)}
-          />
-        )}
-      </AnimatePresence>
-
-      {showConfetti && <ConfettiOverlay onDone={() => setShowConfetti(false)} />}
-
-      {contextMenu && (
-        <TaskContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          task={contextMenu.task}
-          onClose={() => setContextMenu(null)}
-          onOpenDetail={() => selectTask(contextMenu.task.id)}
-          onAddSubtask={() => setSubtaskInputId(contextMenu.task.id)}
-          onSetDdl={() => setDdlInputId(contextMenu.task.id)}
-          onChangeRole={(roleId) => updateTask({ ...contextMenu.task, roleId })}
-          onComplete={() => {
-            const newStatus = contextMenu.task.status === 'completed' ? 'active' : 'completed';
-            updateStatus(contextMenu.task.id, newStatus);
-            if (newStatus === 'completed') setShowConfetti(true);
-          }}
-          onArchive={() => updateStatus(contextMenu.task.id, 'archived')}
-          onDelete={() => deleteTask(contextMenu.task.id)}
-          onPromote={contextMenu.task.parentId ? () => {
-            const { promoteSubtask } = useTaskStore.getState();
-            promoteSubtask(contextMenu.task.id, !contextMenu.task.promoted);
-          } : undefined}
-          onSetParent={() => setParentPickerTargetId(contextMenu.task.id)}
-        />
-      )}
-
-      {parentPickerTargetId && (
-        <ParentTaskPicker
-          childId={parentPickerTargetId}
-          onSelect={async (parentId) => {
-            await reparentTask(parentPickerTargetId, parentId);
-            setParentPickerTargetId(null);
-          }}
-          onClose={() => setParentPickerTargetId(null)}
-        />
-      )}
-    </div>
     </DndReparentProvider>
   );
 }

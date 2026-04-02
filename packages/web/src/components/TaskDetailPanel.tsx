@@ -1,5 +1,11 @@
-import type { Task, TaskReminder, TaskResource, TaskStatus } from '@my-little-todo/core';
-import { daysUntil, generateId, isOverdue } from '@my-little-todo/core';
+import type { Task, TaskPhase, TaskReminder, TaskResource, TaskStatus } from '@my-little-todo/core';
+import {
+  TASK_PHASE_ORDER,
+  daysUntil,
+  estimateTaskProgress,
+  generateId,
+  isOverdue,
+} from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertCircle,
@@ -24,6 +30,7 @@ import { useStreamStore, useTaskStore } from '../stores';
 import { useIsMobile } from '../utils/useIsMobile';
 import { MarkdownPreview } from './MarkdownPreview';
 import { MarkdownToolbar } from './MarkdownToolbar';
+import { ProgressRing } from './ProgressRing';
 import { RolePill } from './RolePickerPopover';
 import { SmartDatePicker } from './SmartDatePicker';
 
@@ -155,8 +162,16 @@ function SubtaskRow({
       style={{
         paddingLeft: `${8 + d * 16}px`,
         paddingRight: 8,
-        background: ddlInfo?.overdue ? 'var(--color-danger-soft)' : isPromoted ? 'var(--color-accent-soft)' : undefined,
-        borderLeft: ddlInfo?.overdue ? '2px solid var(--color-danger)' : isPromoted ? '2px solid var(--color-accent)' : '2px solid transparent',
+        background: ddlInfo?.overdue
+          ? 'var(--color-danger-soft)'
+          : isPromoted
+            ? 'var(--color-accent-soft)'
+            : undefined,
+        borderLeft: ddlInfo?.overdue
+          ? '2px solid var(--color-danger)'
+          : isPromoted
+            ? '2px solid var(--color-accent)'
+            : '2px solid transparent',
       }}
     >
       <button
@@ -177,7 +192,11 @@ function SubtaskRow({
         onClick={onOpen}
         className={`flex-1 text-left ${d > 0 ? 'text-[12px]' : 'text-[13px]'} ${isMultiLine ? 'whitespace-pre-wrap line-clamp-3' : 'truncate'}`}
         style={{
-          color: done ? 'var(--color-text-tertiary)' : d > 0 ? 'var(--color-text-secondary)' : 'var(--color-text)',
+          color: done
+            ? 'var(--color-text-tertiary)'
+            : d > 0
+              ? 'var(--color-text-secondary)'
+              : 'var(--color-text)',
           textDecoration: done ? 'line-through' : 'none',
         }}
       >
@@ -740,7 +759,10 @@ export function TaskDetailPanel() {
                 </div>
               )}
               <div className="flex items-center justify-between">
-                <span className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
+                <span
+                  className="text-xs font-medium"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
                   {t('Task Detail')}
                 </span>
                 <button
@@ -788,6 +810,38 @@ export function TaskDetailPanel() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {/* Phase & progress (ADHD coaching) */}
+              <div
+                className="flex flex-wrap items-center gap-3 rounded-xl p-3"
+                style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
+              >
+                <ProgressRing progress={estimateTaskProgress(task, tasks)} size={40} stroke={3} />
+                <div className="flex-1 min-w-[140px]">
+                  <label
+                    className="text-[10px] font-semibold uppercase tracking-wide"
+                    style={{ color: 'var(--color-text-tertiary)' }}
+                  >
+                    {t('Phase')}
+                  </label>
+                  <select
+                    value={task.phase ?? 'understood'}
+                    onChange={(e) => updateTask({ ...task, phase: e.target.value as TaskPhase })}
+                    className="mt-1 w-full rounded-lg px-2 py-1.5 text-xs font-medium outline-none"
+                    style={{
+                      background: 'var(--color-surface)',
+                      border: '1px solid var(--color-border)',
+                      color: 'var(--color-text)',
+                    }}
+                  >
+                    {TASK_PHASE_ORDER.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {/* Planned At */}
@@ -906,7 +960,9 @@ export function TaskDetailPanel() {
               <RemindersSection task={task} onUpdate={updateTask} />
 
               {/* History */}
-              {(task.postponements.length > 0 || task.submissions.length > 0 || (task.statusHistory ?? []).length > 0) && (
+              {(task.postponements.length > 0 ||
+                task.submissions.length > 0 ||
+                (task.statusHistory ?? []).length > 0) && (
                 <div>
                   <p
                     className="text-xs font-medium mb-2"
@@ -929,7 +985,11 @@ export function TaskDetailPanel() {
                         <span>
                           {h.from} → {h.to}
                           <span className="ml-1" style={{ color: 'var(--color-text-tertiary)' }}>
-                            {h.timestamp.toLocaleDateString()} {h.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {h.timestamp.toLocaleDateString()}{' '}
+                            {h.timestamp.toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
                           </span>
                         </span>
                       </div>

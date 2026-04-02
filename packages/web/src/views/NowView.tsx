@@ -8,6 +8,7 @@ import {
   Dices,
   ExternalLink,
   Info,
+  Lock,
   PartyPopper,
   Pause,
   PenLine,
@@ -21,16 +22,21 @@ import { RecommendationHistory } from '../components/RecommendationHistory';
 import { RolePill } from '../components/RolePickerPopover';
 import { TaskContextMenu } from '../components/TaskContextMenu';
 import {
+  countViewSwitchesInWindow,
   filterByRole,
   formatDdlLabel,
   isInScheduleBlock,
   pickRandom,
-  pickRecommendation,
   useBehaviorStore,
+  useCoachActivityStore,
+  useExecCoachStore,
+  useFocusSessionStore,
   useRoleStore,
   useScheduleStore,
   useTaskStore,
 } from '../stores';
+import type { EnergyLevel } from '../stores/execCoachStore';
+import { pickRecommendation } from '../stores/taskStore';
 
 const REJECTION_REASONS = [
   { id: 'no_conditions', label: 'No conditions to do this now' },
@@ -49,6 +55,12 @@ interface FocusState {
   taskId: string;
   startedAt: Date;
   notes: string;
+  /** Commitment lock — stricter exit (friction, not punishment). */
+  locked?: boolean;
+}
+
+function pickForNow(list: Task[], allTasks: Task[], energy: EnergyLevel) {
+  return pickRecommendation(list, { energyLevel: energy, allTasks });
 }
 
 function formatElapsed(
@@ -107,21 +119,29 @@ function FocusSubtaskRow({
 function FocusModeView({
   task,
   focusState,
+  locked,
+  lowEnergy,
   onShelve,
   onComplete,
   onOpenDetail,
 }: {
   task: Task;
   focusState: FocusState;
+  locked: boolean;
+  lowEnergy: boolean;
   onShelve: () => void;
   onComplete: () => void;
   onOpenDetail: () => void;
 }) {
   const { tasks, updateTask, updateStatus } = useTaskStore();
   const { t } = useTranslation('now');
+  const { t: tc } = useTranslation('coach');
   const [elapsed, setElapsed] = useState(0);
   const [localNotes, setLocalNotes] = useState(focusState.notes);
   const [showNotes, setShowNotes] = useState(false);
+  const [exitStep, setExitStep] = useState<'idle' | 'reason' | 'cooldown'>('idle');
+  const [exitReason, setExitReason] = useState('');
+  const [cooldownLeft, setCooldownLeft] = useState(0);
   const notesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -146,6 +166,7 @@ function FocusModeView({
     textareaRef.current.style.height = `${Math.max(textareaRef.current.scrollHeight, 60)}px`;
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: textarea height follows content
   useEffect(resizeTextarea, [localNotes]);
 
   const subtasks = (task.subtaskIds ?? [])
@@ -165,6 +186,35 @@ function FocusModeView({
       updateTask({ ...task, body: task.body + noteEntry });
     }
     onComplete();
+  };
+
+  useEffect(() => {
+    if (exitStep !== 'cooldown' || cooldownLeft <= 0) return;
+    const t = window.setTimeout(() => {
+      setCooldownLeft((c) => {
+        if (c <= 1) {
+          setExitStep('idle');
+          onShelve();
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+    return () => window.clearTimeout(t);
+  }, [exitStep, cooldownLeft, onShelve]);
+
+  const handleShelveClick = () => {
+    if (!locked) {
+      onShelve();
+      return;
+    }
+    setExitStep('reason');
+  };
+
+  const handleConfirmLockedExit = () => {
+    if (exitReason.trim().length < 10) return;
+    setCooldownLeft(30);
+    setExitStep('cooldown');
   };
 
   const ddlLabel = task.ddl ? formatDdlLabel(task.ddl) : null;
@@ -226,7 +276,7 @@ function FocusModeView({
               {t('{{elapsed}} elapsed', { elapsed: formatElapsed(elapsed, t) })}
             </span>
           </div>
-          {ddlLabel && (
+          {ddlLabel && !lowEnergy && (
             <div className="mt-2 flex items-center justify-center gap-1.5">
               <Clock size={12} style={{ color: 'var(--color-warning)' }} />
               <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
@@ -307,6 +357,67 @@ function FocusModeView({
           </motion.div>
         )}
 
+        {locked && (
+          <p
+            className="mt-4 text-center text-[11px] font-medium"
+            style={{ color: 'var(--color-accent)' }}
+          >
+            <Lock size={12} className="inline mr-1" />
+            {tc('Locked focus')}
+          </p>
+        )}
+
+        {exitStep === 'reason' && (
+          <div
+            className="mt-6 rounded-2xl p-4 space-y-3"
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+          >
+            <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+              {tc('lock_exit_title')}
+            </p>
+            <textarea
+              value={exitReason}
+              onChange={(e) => setExitReason(e.target.value)}
+              placeholder={tc('lock_exit_reason')}
+              rows={3}
+              className="w-full rounded-xl px-3 py-2 text-[13px] outline-none"
+              style={{
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text)',
+              }}
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setExitStep('idle')}
+                className="flex-1 rounded-xl py-2 text-xs font-medium"
+                style={{
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
+                {t('Cancel')}
+              </button>
+              <button
+                type="button"
+                disabled={exitReason.trim().length < 10}
+                onClick={handleConfirmLockedExit}
+                className="flex-1 rounded-xl py-2 text-xs font-semibold text-white disabled:opacity-40"
+                style={{ background: 'var(--color-warning)' }}
+              >
+                {tc('lock_exit_confirm')}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {exitStep === 'cooldown' && cooldownLeft > 0 && (
+          <p className="mt-6 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+            {tc('lock_exit_wait', { seconds: cooldownLeft })}
+          </p>
+        )}
+
         {/* Action buttons */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -316,8 +427,9 @@ function FocusModeView({
         >
           <button
             type="button"
-            onClick={onShelve}
-            className="flex-1 flex items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-sm font-medium transition-all hover:scale-[1.01] active:scale-[0.98]"
+            onClick={handleShelveClick}
+            disabled={exitStep !== 'idle'}
+            className="flex-1 flex items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-sm font-medium transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50"
             style={{
               border: '1px solid var(--color-border)',
               color: 'var(--color-text-secondary)',
@@ -341,30 +453,39 @@ function FocusModeView({
         </motion.div>
 
         {/* Detail link */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.6 }}
-          className="mt-6 text-center"
-        >
-          <button
-            type="button"
-            onClick={onOpenDetail}
-            className="flex items-center gap-1.5 text-xs font-medium mx-auto transition-colors"
-            style={{ color: 'var(--color-text-tertiary)' }}
+        {!locked && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+            className="mt-6 text-center"
           >
-            <ExternalLink size={12} />
-            {t('View / Edit task details')}
-          </button>
-        </motion.div>
+            <button
+              type="button"
+              onClick={onOpenDetail}
+              className="flex items-center gap-1.5 text-xs font-medium mx-auto transition-colors"
+              style={{ color: 'var(--color-text-tertiary)' }}
+            >
+              <ExternalLink size={12} />
+              {t('View / Edit task details')}
+            </button>
+          </motion.div>
+        )}
       </div>
     </div>
   );
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: NowView has many states
-export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => void }) {
+export function NowView({
+  onNavigateToStream,
+  onBrainDump,
+}: {
+  onNavigateToStream?: () => void;
+  onBrainDump?: () => void;
+}) {
   const { t } = useTranslation('now');
+  const { t: tCoach } = useTranslation('coach');
   const [showRejectPanel, setShowRejectPanel] = useState(false);
   const [showReason, setShowReason] = useState(false);
   const [currentTask, setCurrentTask] = useState<Task | null>(null);
@@ -374,7 +495,9 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
   const [focusState, setFocusState] = useState<FocusState | null>(null);
   const [showCompletionCelebration, setShowCompletionCelebration] = useState(false);
   const [taskCtxMenu, setTaskCtxMenu] = useState<{ x: number; y: number } | null>(null);
-
+  const [lockTick, setLockTick] = useState<number | null>(null);
+  const [showRhythmMirror, setShowRhythmMirror] = useState(false);
+  const [celebrateLine, setCelebrateLine] = useState<string | null>(null);
   const { tasks, loading, load, selectTask, updateTask, updateStatus, deleteTask } = useTaskStore();
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const filtered = useMemo(() => filterByRole(tasks, currentRoleId), [tasks, currentRoleId]);
@@ -382,28 +505,79 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
   const scheduleBlocks = useScheduleStore((s) => s.blocks);
   const loadSchedules = useScheduleStore((s) => s.load);
   const activeSchedule = useMemo(() => isInScheduleBlock(scheduleBlocks), [scheduleBlocks]);
+  const energyLevel = useExecCoachStore((s) => s.energyLevel);
+  const bumpCompletionCount = useExecCoachStore((s) => s.bumpCompletionCount);
+  const activityEvents = useCoachActivityStore((s) => s.events);
+  const loadCoachActivity = useCoachActivityStore((s) => s.load);
 
   useEffect(() => {
     load();
     loadBehavior();
     loadSchedules();
-  }, [load, loadBehavior, loadSchedules]);
+    loadCoachActivity();
+  }, [load, loadBehavior, loadSchedules, loadCoachActivity]);
+
+  useEffect(() => {
+    if (focusState) {
+      useFocusSessionStore.getState().setSession({
+        taskId: focusState.taskId,
+        startedAt: focusState.startedAt,
+        notes: focusState.notes,
+        locked: !!focusState.locked,
+      });
+    } else {
+      useFocusSessionStore.getState().setSession(null);
+    }
+  }, [focusState]);
 
   useEffect(() => {
     if (filtered.length > 0 && !currentTask && !focusState) {
-      setCurrentTask(pickRecommendation(filtered));
+      setCurrentTask(pickForNow(filtered, tasks, energyLevel));
     }
-  }, [filtered, currentTask, focusState]);
+  }, [filtered, currentTask, focusState, tasks, energyLevel]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset state when role filter changes
   useEffect(() => {
     if (!focusState) {
-      setCurrentTask(pickRecommendation(filtered));
+      setCurrentTask(pickForNow(filtered, tasks, energyLevel));
       setRejectionCount(0);
       setShowRejectPanel(false);
       setShowIntervention(false);
     }
   }, [currentRoleId]);
+
+  useEffect(() => {
+    const n = countViewSwitchesInWindow(activityEvents, 30 * 60 * 1000);
+    if (n >= 5 && energyLevel === 'high') {
+      setShowRhythmMirror(true);
+    }
+  }, [activityEvents, energyLevel]);
+
+  useEffect(() => {
+    if (lockTick === null) return;
+    if (lockTick === 0) {
+      setLockTick(null);
+      if (!currentTask) return;
+      recordEvent({
+        taskId: currentTask.id,
+        taskTitle: currentTask.title,
+        action: 'accepted',
+      });
+      useCoachActivityStore.getState().record({
+        type: 'task_focus_start',
+        payload: { taskId: currentTask.id, locked: true },
+      });
+      setFocusState({
+        taskId: currentTask.id,
+        startedAt: new Date(),
+        notes: '',
+        locked: true,
+      });
+      return;
+    }
+    const timer = window.setTimeout(() => setLockTick((x) => (x === null ? null : x - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [lockTick, currentTask, recordEvent]);
 
   const handleReject = (reasonId: string) => {
     setShowRejectPanel(false);
@@ -425,14 +599,14 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
     }
 
     const remaining = filtered.filter((t) => t.id !== currentTask?.id);
-    const next = pickRecommendation(remaining);
+    const next = pickForNow(remaining, tasks, energyLevel);
     setCurrentTask(next);
   };
 
   const handleDismissIntervention = () => {
     setShowIntervention(false);
     const remaining = filtered.filter((t) => t.id !== currentTask?.id);
-    const next = pickRecommendation(remaining);
+    const next = pickForNow(remaining, tasks, energyLevel);
     setCurrentTask(next);
   };
 
@@ -445,7 +619,7 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
   const handleBackToWork = () => {
     setIsOffTime(false);
     setRejectionCount(0);
-    setCurrentTask(pickRecommendation(filtered));
+    setCurrentTask(pickForNow(filtered, tasks, energyLevel));
   };
 
   const handleRandom = () => {
@@ -467,32 +641,47 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
       taskTitle: currentTask.title,
       action: 'accepted',
     });
+    useCoachActivityStore.getState().record({
+      type: 'task_focus_start',
+      payload: { taskId: currentTask.id, locked: false },
+    });
     setFocusState({
       taskId: currentTask.id,
       startedAt: new Date(),
       notes: '',
+      locked: false,
     });
+  };
+
+  const handleStartLocked = () => {
+    if (!currentTask || energyLevel === 'low') return;
+    setLockTick(3);
   };
 
   const handleShelve = () => {
     setFocusState(null);
     const remaining = filtered.filter((t) => t.id !== focusState?.taskId);
-    const next = pickRecommendation(remaining);
+    const next = pickForNow(remaining, tasks, energyLevel);
     setCurrentTask(next);
   };
 
   const handleFocusComplete = useCallback(async () => {
     if (!focusState) return;
     await updateStatus(focusState.taskId, 'completed');
+    bumpCompletionCount();
+    const keys = ['celebrate_a', 'celebrate_b', 'celebrate_c', 'celebrate_d'] as const;
+    setCelebrateLine(tCoach(keys[Math.floor(Math.random() * keys.length)] ?? 'celebrate_a'));
     setFocusState(null);
     setShowCompletionCelebration(true);
     setTimeout(() => {
       setShowCompletionCelebration(false);
       const freshTasks = useTaskStore.getState().tasks;
       const freshFiltered = filterByRole(freshTasks, useRoleStore.getState().currentRoleId);
-      setCurrentTask(pickRecommendation(freshFiltered));
+      setCurrentTask(
+        pickForNow(freshFiltered, freshTasks, useExecCoachStore.getState().energyLevel),
+      );
     }, 2500);
-  }, [focusState, updateStatus]);
+  }, [focusState, updateStatus, bumpCompletionCount, tCoach]);
 
   const handleOpenDetail = () => {
     if (focusState) {
@@ -532,7 +721,7 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
             {t('Done!')}
           </h1>
           <p className="mt-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('Well done')}
+            {celebrateLine ?? t('Well done')}
           </p>
         </motion.div>
       </div>
@@ -547,6 +736,8 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
         <FocusModeView
           task={focusTask}
           focusState={focusState}
+          locked={!!focusState.locked}
+          lowEnergy={energyLevel === 'low'}
           onShelve={handleShelve}
           onComplete={handleFocusComplete}
           onOpenDetail={handleOpenDetail}
@@ -655,6 +846,65 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
 
   return (
     <div className="relative flex h-full flex-col items-center justify-center px-6 overflow-hidden">
+      {lockTick !== null && lockTick > 0 && (
+        <div
+          className="fixed inset-0 z-[150] flex flex-col items-center justify-center gap-2"
+          style={{ background: 'color-mix(in srgb, var(--color-bg) 85%, black)' }}
+        >
+          <span className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {tCoach('lock_countdown')}
+          </span>
+          <span
+            className="text-7xl font-black tabular-nums"
+            style={{ color: 'var(--color-accent)' }}
+          >
+            {lockTick}
+          </span>
+        </div>
+      )}
+
+      {showRhythmMirror && (
+        <div
+          className="fixed inset-0 z-[140] flex items-center justify-center px-4"
+          style={{ background: 'color-mix(in srgb, var(--color-bg) 88%, black)' }}
+        >
+          <div
+            className="max-w-sm rounded-3xl p-6 shadow-xl"
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+          >
+            <p className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
+              {tCoach('wip_mirror_title')}
+            </p>
+            <p
+              className="mt-2 text-sm leading-relaxed"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              {tCoach('wip_mirror_body', {
+                count: countViewSwitchesInWindow(activityEvents, 30 * 60 * 1000),
+              })}
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                className="w-full rounded-xl py-2.5 text-sm font-semibold text-white"
+                style={{ background: 'var(--color-accent)' }}
+                onClick={() => setShowRhythmMirror(false)}
+              >
+                {tCoach('wip_mirror_ok')}
+              </button>
+              <button
+                type="button"
+                className="w-full rounded-xl py-2 text-xs font-medium"
+                style={{ color: 'var(--color-text-tertiary)' }}
+                onClick={() => setShowRhythmMirror(false)}
+              >
+                {tCoach('wip_mirror_now')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <RecommendationHistory />
 
       {/* Onboarding tip */}
@@ -730,7 +980,7 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
           )}
         </motion.div>
 
-        {ddlLabel && currentTask.ddl && (
+        {ddlLabel && currentTask.ddl && energyLevel !== 'low' && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -813,15 +1063,41 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
                 transition={{ duration: 0.3 }}
                 className="flex flex-col items-center gap-4"
               >
-                <button
-                  type="button"
-                  onClick={handleStartWorking}
-                  className="group relative w-full max-w-[240px] overflow-hidden rounded-2xl px-8 py-4 text-white font-semibold text-lg shadow-lg transition-all hover:scale-[1.02] active:scale-95"
-                  style={{ background: 'var(--color-accent)' }}
-                >
-                  <div className="absolute inset-0 bg-white/20 translate-y-full transition-transform group-hover:translate-y-0 ease-out duration-300" />
-                  <span className="relative">{t('Start working')}</span>
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3 w-full max-w-[280px] items-stretch">
+                  <button
+                    type="button"
+                    onClick={handleStartWorking}
+                    className="group relative flex-1 overflow-hidden rounded-2xl px-6 py-4 text-white font-semibold text-lg shadow-lg transition-all hover:scale-[1.02] active:scale-95"
+                    style={{ background: 'var(--color-accent)' }}
+                  >
+                    <div className="absolute inset-0 bg-white/20 translate-y-full transition-transform group-hover:translate-y-0 ease-out duration-300" />
+                    <span className="relative">{t('Start working')}</span>
+                  </button>
+                  {energyLevel !== 'low' && (
+                    <button
+                      type="button"
+                      onClick={handleStartLocked}
+                      className="flex-1 rounded-2xl px-4 py-3 text-sm font-semibold transition-all border"
+                      style={{
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)',
+                      }}
+                    >
+                      <Lock size={14} className="inline mr-1" />
+                      {tCoach('Lock in')}
+                    </button>
+                  )}
+                </div>
+                {energyLevel === 'low' && onBrainDump && (
+                  <button
+                    type="button"
+                    onClick={onBrainDump}
+                    className="mt-2 text-xs font-medium"
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    {tCoach('Brain dump')}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setShowRejectPanel(true)}
@@ -970,7 +1246,9 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
                   freshTasks,
                   useRoleStore.getState().currentRoleId,
                 );
-                setCurrentTask(pickRecommendation(freshFiltered));
+                setCurrentTask(
+                  pickForNow(freshFiltered, freshTasks, useExecCoachStore.getState().energyLevel),
+                );
               })
             }
             onArchive={() =>
@@ -980,7 +1258,9 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
                   freshTasks,
                   useRoleStore.getState().currentRoleId,
                 );
-                setCurrentTask(pickRecommendation(freshFiltered));
+                setCurrentTask(
+                  pickForNow(freshFiltered, freshTasks, useExecCoachStore.getState().energyLevel),
+                );
               })
             }
             onDelete={() =>
@@ -990,7 +1270,9 @@ export function NowView({ onNavigateToStream }: { onNavigateToStream?: () => voi
                   freshTasks,
                   useRoleStore.getState().currentRoleId,
                 );
-                setCurrentTask(pickRecommendation(freshFiltered));
+                setCurrentTask(
+                  pickForNow(freshFiltered, freshTasks, useExecCoachStore.getState().energyLevel),
+                );
               })
             }
           />

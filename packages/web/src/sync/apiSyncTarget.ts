@@ -110,9 +110,7 @@ export class ApiServerSyncTarget implements SyncTarget {
   }
 
   async pull(sinceVersion: number): Promise<{ changes: ChangeRecord[]; currentVersion: number }> {
-    const res = await this.authedFetch(
-      `${this.baseUrl}/api/sync/changes?since=${sinceVersion}`,
-    );
+    const res = await this.authedFetch(`${this.baseUrl}/api/sync/changes?since=${sinceVersion}`);
     if (!res.ok) throw new Error(`Pull failed: HTTP ${res.status}`);
     const data = await res.json();
 

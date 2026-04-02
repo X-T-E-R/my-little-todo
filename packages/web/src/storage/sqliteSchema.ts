@@ -47,8 +47,8 @@ export const CREATE_TABLES_SQL = [
 ];
 
 export const CREATE_INDEXES_SQL = [
-  `CREATE INDEX IF NOT EXISTS idx_files_updated ON files(updated_at)`,
-  `CREATE INDEX IF NOT EXISTS idx_files_deleted ON files(deleted_at)`,
-  `CREATE INDEX IF NOT EXISTS idx_settings_updated ON settings(updated_at)`,
-  `CREATE INDEX IF NOT EXISTS idx_blobs_deleted ON blobs(deleted_at)`,
+  'CREATE INDEX IF NOT EXISTS idx_files_updated ON files(updated_at)',
+  'CREATE INDEX IF NOT EXISTS idx_files_deleted ON files(deleted_at)',
+  'CREATE INDEX IF NOT EXISTS idx_settings_updated ON settings(updated_at)',
+  'CREATE INDEX IF NOT EXISTS idx_blobs_deleted ON blobs(deleted_at)',
 ];

@@ -41,6 +41,8 @@ pnpm bump 1.0.0-beta.1
 
 # 升级 + 自动提交/打 tag/推送（一条龙）
 pnpm bump minor --tag
+pnpm bump patch --tag
+
 ```
 
 `--tag` 会自动执行：`git add -A → commit → tag → push`，推送 tag 后会触发 GitHub Actions 的 Tauri 桌面端构建和 Docker 镜像发布。

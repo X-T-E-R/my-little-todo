@@ -64,6 +64,8 @@ export async function migrateLegacyData(store: DataStore): Promise<void> {
   } finally {
     try {
       await oldDb.close();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 }

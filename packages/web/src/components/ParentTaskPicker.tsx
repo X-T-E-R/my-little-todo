@@ -64,11 +64,18 @@ export function ParentTaskPicker({ childId, onSelect, onClose }: ParentTaskPicke
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid var(--color-border)' }}>
+          <div
+            className="flex items-center justify-between px-4 py-3"
+            style={{ borderBottom: '1px solid var(--color-border)' }}
+          >
             <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
               {t('Select parent task')}
             </h3>
-            <button type="button" onClick={onClose} className="p-1 rounded-lg hover:bg-[var(--color-bg)]">
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1 rounded-lg hover:bg-[var(--color-bg)]"
+            >
               <X size={16} style={{ color: 'var(--color-text-tertiary)' }} />
             </button>
           </div>
@@ -86,14 +93,16 @@ export function ParentTaskPicker({ childId, onSelect, onClose }: ParentTaskPicke
                 placeholder={t('Search tasks...')}
                 className="flex-1 bg-transparent text-sm outline-none"
                 style={{ color: 'var(--color-text)' }}
-                autoFocus
               />
             </div>
           </div>
 
           <div className="max-h-[300px] overflow-y-auto px-2 pb-3">
             {candidates.length === 0 ? (
-              <p className="text-center text-xs py-6" style={{ color: 'var(--color-text-tertiary)' }}>
+              <p
+                className="text-center text-xs py-6"
+                style={{ color: 'var(--color-text-tertiary)' }}
+              >
                 {t('No tasks found')}
               </p>
             ) : (
@@ -108,7 +117,10 @@ export function ParentTaskPicker({ childId, onSelect, onClose }: ParentTaskPicke
                   <Check size={14} className="shrink-0 opacity-0" />
                   <span className="truncate">{task.title}</span>
                   {task.ddl && (
-                    <span className="ml-auto text-[10px] shrink-0" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <span
+                      className="ml-auto text-[10px] shrink-0"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
                       {task.ddl.toLocaleDateString()}
                     </span>
                   )}
