@@ -1,3 +1,9 @@
+import {
+  streamEntryFromDbRow,
+  taskFromDbRow,
+  type StreamEntryDbRow,
+  type TaskDbRow,
+} from '@my-little-todo/core';
 import { getDataStore } from '../storage/dataStore';
 import type {
   ChangeRecord,
@@ -129,18 +135,18 @@ export class SyncEngine {
     try {
       const store = getDataStore();
 
-      // ── 1. Read local changes since last push ─────────────────
-      const lastPushAt = await this.loadSyncMeta(targetId, 'lastPushAt');
+      // ── 1. Read local changes since last pushed version ───────
+      const lastPushVersion = await this.loadSyncMeta(targetId, 'lastPushVersion');
       let localChanges: ChangeRecord[] = [];
       if (store.getChangesSince) {
-        const raw = await store.getChangesSince(lastPushAt);
+        const raw = await store.getChangesSince(lastPushVersion);
         localChanges = raw.map((r) => ({
           table: r.table,
           key: r.key,
-          content: r.content,
-          version: r.updatedAt,
+          data: r.data,
+          version: r.version,
           updatedAt: new Date(r.updatedAt).toISOString(),
-          deletedAt: r.deletedAt ? new Date(r.deletedAt).toISOString() : null,
+          deletedAt: r.deletedAt != null ? new Date(r.deletedAt).toISOString() : null,
         }));
       }
 
@@ -163,7 +169,7 @@ export class SyncEngine {
         if (localMatch) {
           if (rc.table !== 'blobs') {
             conflicts.push({
-              table: rc.table as 'files' | 'settings',
+              table: rc.table as 'tasks' | 'stream_entries' | 'settings',
               key: rc.key,
               local: localMatch,
               remote: rc,
@@ -181,8 +187,8 @@ export class SyncEngine {
       if (conflicts.length > 0) {
         if (this._conflictStrategy === 'lww') {
           for (const c of conflicts) {
-            const localTs = new Date(c.local.updatedAt).getTime();
-            const remoteTs = new Date(c.remote.updatedAt).getTime();
+            const localTs = new Date(c.local.updatedAt).getTime() || 0;
+            const remoteTs = new Date(c.remote.updatedAt).getTime() || 0;
             if (localTs >= remoteTs) {
               resolvedLocal.push(c.local);
             } else {
@@ -227,17 +233,18 @@ export class SyncEngine {
       );
       const changesToPush = [...nonConflictingLocal, ...resolvedLocal];
 
+      let lastPushVersionOut = await this.loadSyncMeta(targetId, 'lastPushVersion');
       if (changesToPush.length > 0) {
-        await target.push(changesToPush);
+        const pushResult = await target.push(changesToPush);
+        await this.saveSyncMeta(targetId, 'lastPushVersion', pushResult.currentVersion);
+        lastPushVersionOut = pushResult.currentVersion;
       }
-
-      const newPushAt = Date.now();
-      await this.saveSyncMeta(targetId, 'lastPushAt', newPushAt);
 
       this.updateState(targetId, {
         status: 'idle',
         lastSyncAt: Date.now(),
         lastPullVersion: pullResult.currentVersion,
+        lastPushVersion: lastPushVersionOut,
       });
     } catch (err) {
       this.updateState(targetId, {
@@ -315,21 +322,26 @@ export class SyncEngine {
     store: Awaited<ReturnType<typeof getDataStore>>,
     change: ChangeRecord,
   ): Promise<void> {
-    if (change.table === 'files') {
+    if (change.table === 'tasks') {
       if (change.deletedAt) {
-        const segments = change.key.split('/');
-        await store.deleteFile(...segments);
-      } else if (change.content != null) {
-        const segments = change.key.split('/');
-        await store.writeFile(change.content, ...segments);
+        await store.deleteTask(change.key);
+      } else if (change.data != null) {
+        const row = JSON.parse(change.data) as TaskDbRow;
+        await store.putTask(taskFromDbRow(row));
+      }
+    } else if (change.table === 'stream_entries') {
+      if (change.deletedAt) {
+        await store.deleteStreamEntry(change.key);
+      } else if (change.data != null) {
+        const row = JSON.parse(change.data) as StreamEntryDbRow;
+        await store.putStreamEntry(streamEntryFromDbRow(row));
       }
     } else if (change.table === 'settings') {
-      const colonIdx = change.key.indexOf(':');
-      const settingKey = colonIdx >= 0 ? change.key.slice(colonIdx + 1) : change.key;
       if (change.deletedAt) {
-        await store.deleteSetting(settingKey);
-      } else if (change.content != null) {
-        await store.putSetting(settingKey, change.content);
+        await store.deleteSetting(change.key);
+      } else if (change.data != null) {
+        const payload = JSON.parse(change.data) as { key: string; value: string };
+        await store.putSetting(payload.key, payload.value);
       }
     }
   }

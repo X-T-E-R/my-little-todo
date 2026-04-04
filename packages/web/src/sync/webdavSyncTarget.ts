@@ -1,18 +1,7 @@
 import type { ChangeRecord, PushResult, SyncTarget } from './types';
 
 /**
- * SyncTarget that stores data as JSON files on a WebDAV server.
- *
- * Directory structure on the WebDAV server:
- *   /mlt-sync/
- *     manifest.json        — { version: number, updatedAt: string }
- *     files/               — one JSON per file record
- *       <encoded-path>.json
- *     settings/            — one JSON per setting
- *       <key>.json
- *
- * This is a basic implementation suitable for NAS/NextCloud/iCloud.
- * It uses Last-Write-Wins with the manifest version number.
+ * WebDAV sync: `manifest.json` + `data/tasks/{id}.json`, `data/stream/{id}.json`, `settings/{key}.json`.
  */
 export class WebDavSyncTarget implements SyncTarget {
   readonly id: string;
@@ -58,10 +47,8 @@ export class WebDavSyncTarget implements SyncTarget {
         },
         signal: AbortSignal.timeout(10000),
       });
-      // 207 Multi-Status = exists, 404 = needs creation
       if (res.status === 207) return true;
       if (res.status === 404) {
-        // Try to create the directory
         const mkRes = await fetch(`${this.syncRoot()}/`, {
           method: 'MKCOL',
           headers: this.authHeaders(),
@@ -84,18 +71,19 @@ export class WebDavSyncTarget implements SyncTarget {
 
     const changes: ChangeRecord[] = [];
 
-    // Read all file records
-    const fileEntries = await this.listDir('files');
-    for (const name of fileEntries) {
-      const record = await this.readJson<ChangeRecord>(`files/${name}`);
+    for (const name of await this.listDir('data/tasks')) {
+      const record = await this.readJson<ChangeRecord>(`data/tasks/${name}`);
       if (record && record.version > sinceVersion) {
         changes.push(record);
       }
     }
-
-    // Read all setting records
-    const settingEntries = await this.listDir('settings');
-    for (const name of settingEntries) {
+    for (const name of await this.listDir('data/stream')) {
+      const record = await this.readJson<ChangeRecord>(`data/stream/${name}`);
+      if (record && record.version > sinceVersion) {
+        changes.push(record);
+      }
+    }
+    for (const name of await this.listDir('settings')) {
       const record = await this.readJson<ChangeRecord>(`settings/${name}`);
       if (record && record.version > sinceVersion) {
         changes.push(record);
@@ -107,24 +95,25 @@ export class WebDavSyncTarget implements SyncTarget {
   }
 
   async push(changes: ChangeRecord[]): Promise<PushResult> {
-    // Ensure directories exist
-    await this.ensureDir('files');
+    await this.ensureDir('data');
+    await this.ensureDir('data/tasks');
+    await this.ensureDir('data/stream');
     await this.ensureDir('settings');
 
     let maxVersion = 0;
     for (const change of changes) {
       if (change.version > maxVersion) maxVersion = change.version;
 
-      if (change.table === 'files') {
-        const safeName = `${encodeURIComponent(change.key)}.json`;
-        await this.writeJson(`files/${safeName}`, change);
+      const safeKey = `${encodeURIComponent(change.key)}.json`;
+      if (change.table === 'tasks') {
+        await this.writeJson(`data/tasks/${safeKey}`, change);
+      } else if (change.table === 'stream_entries') {
+        await this.writeJson(`data/stream/${safeKey}`, change);
       } else if (change.table === 'settings') {
-        const safeName = `${encodeURIComponent(change.key)}.json`;
-        await this.writeJson(`settings/${safeName}`, change);
+        await this.writeJson(`settings/${safeKey}`, change);
       }
     }
 
-    // Update manifest
     const manifest = (await this.readJson<{ version: number }>('manifest.json')) || { version: 0 };
     manifest.version = Math.max(manifest.version, maxVersion);
     await this.writeJson('manifest.json', manifest);
@@ -141,8 +130,6 @@ export class WebDavSyncTarget implements SyncTarget {
     return manifest?.version ?? 0;
   }
 
-  // ── WebDAV helpers ─────────────────────────────────────────────
-
   private async readJson<T>(path: string): Promise<T | null> {
     try {
       const res = await fetch(`${this.syncRoot()}/${path}`, {
@@ -156,7 +143,7 @@ export class WebDavSyncTarget implements SyncTarget {
   }
 
   private async writeJson(path: string, data: unknown): Promise<void> {
-    await fetch(`${this.syncRoot()}/${path}`, {
+    const res = await fetch(`${this.syncRoot()}/${path}`, {
       method: 'PUT',
       headers: {
         ...this.authHeaders(),
@@ -164,16 +151,28 @@ export class WebDavSyncTarget implements SyncTarget {
       },
       body: JSON.stringify(data),
     });
+    if (!res.ok) {
+      throw new Error(`WebDAV PUT failed: ${res.status} ${path}`);
+    }
   }
 
-  private async ensureDir(name: string): Promise<void> {
-    try {
-      await fetch(`${this.syncRoot()}/${name}/`, {
-        method: 'MKCOL',
-        headers: this.authHeaders(),
-      });
-    } catch {
-      // May already exist
+  /** Create each path segment (e.g. `data` then `data/tasks`) for strict WebDAV servers. */
+  private async ensureDir(path: string): Promise<void> {
+    const segments = path.split('/').filter(Boolean);
+    let acc = '';
+    for (const seg of segments) {
+      acc = acc ? `${acc}/${seg}` : seg;
+      try {
+        const res = await fetch(`${this.syncRoot()}/${acc}/`, {
+          method: 'MKCOL',
+          headers: this.authHeaders(),
+        });
+        if (!res.ok && res.status !== 405 && res.status !== 409) {
+          // 405/409 often mean collection already exists
+        }
+      } catch {
+        // May already exist
+      }
     }
   }
 

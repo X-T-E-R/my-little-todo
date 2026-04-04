@@ -1,6 +1,5 @@
 import { getDataStore } from '../storage/dataStore';
 import { type ApiAuthMode, ApiServerSyncTarget } from './apiSyncTarget';
-import { S3SyncTarget } from './s3SyncTarget';
 import { getSyncEngine } from './syncEngine';
 import type { ConflictStrategy } from './types';
 import { WebDavSyncTarget } from './webdavSyncTarget';
@@ -53,16 +52,6 @@ export async function initSyncFromConfig(): Promise<void> {
         baseUrl: cfg.endpoint || '',
         username: cfg.username || '',
         password: cfg.password || '',
-      }),
-    );
-  } else if (provider === 's3') {
-    engine.addTarget(
-      new S3SyncTarget({
-        id: 's3',
-        endpoint: cfg.endpoint || '',
-        bucket: cfg.bucket || '',
-        accessKey: cfg.access_key || '',
-        secretKey: cfg.secret_key || '',
       }),
     );
   }

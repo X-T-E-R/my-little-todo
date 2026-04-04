@@ -2,10 +2,13 @@
  * Core sync types shared by the sync engine and all SyncTarget implementations.
  */
 
+export type SyncTable = 'tasks' | 'stream_entries' | 'settings' | 'blobs';
+
 export interface ChangeRecord {
-  table: 'files' | 'settings' | 'blobs';
+  table: SyncTable;
   key: string;
-  content: string | null;
+  /** JSON row payload; null when soft-deleted. */
+  data: string | null;
   version: number;
   updatedAt: string;
   deletedAt: string | null;
@@ -52,7 +55,7 @@ export interface SyncState {
 export type ConflictStrategy = 'lww' | 'manual';
 
 export interface SyncConflict {
-  table: 'files' | 'settings';
+  table: 'tasks' | 'stream_entries' | 'settings';
   key: string;
   local: ChangeRecord;
   remote: ChangeRecord;

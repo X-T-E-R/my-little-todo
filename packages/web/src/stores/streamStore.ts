@@ -3,7 +3,6 @@ import type { DdlType } from '@my-little-todo/core';
 import { formatDateKey } from '@my-little-todo/core';
 import { create } from 'zustand';
 import i18n from '../locales';
-import { getCachedStreamDays, setCachedStreamEntries } from '../storage/cacheLayer';
 import {
   addStreamEntry,
   linkEntryToTask,
@@ -52,14 +51,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     _streamLoadPromise = (async () => {
       set({ loading: true, error: null });
       try {
-        const cached = await getCachedStreamDays();
-        if (cached && get().entries.length === 0) {
-          const flatEntries = cached.flatMap((d) => d.entries as StreamEntry[]);
-          if (flatEntries.length > 0) set({ entries: flatEntries, loading: false });
-        }
         const entries = await loadRecentDays(14);
         set({ entries, loading: false });
-        setCachedStreamEntries(entries, (e) => formatDateKey((e as StreamEntry).timestamp));
       } catch (e) {
         if (get().entries.length === 0) {
           set({ error: String(e), loading: false });
@@ -153,15 +146,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     set((state) => ({ entries: state.entries.filter((e) => e.id !== entryId) }));
 
     try {
-      const dateKey = formatDateKey(entry.timestamp);
-      const dayEntries = prevEntries.filter(
-        (e) => formatDateKey(e.timestamp) === dateKey && e.id !== entryId,
-      );
-      const { serializeStreamFile } = await import('@my-little-todo/core');
-      const { writeFile } = await import('../storage/adapter');
-      const { STREAM_DIR } = await import('@my-little-todo/core');
-      const serialized = serializeStreamFile(dayEntries, dateKey);
-      await writeFile(serialized, STREAM_DIR, `${dateKey}.md`);
+      const { deleteStreamEntry } = await import('../storage/streamRepo');
+      await deleteStreamEntry(entryId);
     } catch {
       set({ entries: prevEntries });
     }

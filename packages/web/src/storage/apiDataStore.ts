@@ -1,7 +1,15 @@
+import {
+  streamEntryFromDbRow,
+  streamEntryToDbRow,
+  taskFromDbRow,
+  taskToDbRow,
+  type StreamEntryDbRow,
+  type TaskDbRow,
+} from '@my-little-todo/core';
+import type { StreamEntry, Task } from '@my-little-todo/core';
 import { getAuthToken } from '../stores/authStore';
 import type { AttachmentConfig, UploadResult } from './blobApi';
 import type { DataStore } from './dataStore';
-import { enqueueOperation } from './offlineQueue';
 
 export function createApiDataStore(baseUrl: string, token?: string): DataStore {
   const jsonHeaders = (): HeadersInit => {
@@ -19,76 +27,84 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
   };
 
   return {
-    // ── Files ──────────────────────────────────────────────────────
-
-    async readFile(...segments: string[]): Promise<string | null> {
-      const path = segments.join('/');
-      try {
-        const res = await fetch(`${baseUrl}/api/files?path=${encodeURIComponent(path)}`, {
-          headers: jsonHeaders(),
-        });
-        if (!res.ok) return null;
-        const data = await res.json();
-        return data.content ?? null;
-      } catch {
-        return null;
-      }
+    async getAllTasks(): Promise<Task[]> {
+      const res = await fetch(`${baseUrl}/api/tasks`, { headers: authOnly() });
+      if (!res.ok) return [];
+      const rows = (await res.json()) as string[];
+      return rows.map((s) => taskFromDbRow(JSON.parse(s) as TaskDbRow));
     },
 
-    async writeFile(content: string, ...segments: string[]): Promise<void> {
-      const path = segments.join('/');
-      try {
-        const res = await fetch(`${baseUrl}/api/files?path=${encodeURIComponent(path)}`, {
-          method: 'PUT',
-          headers: jsonHeaders(),
-          body: JSON.stringify({ content }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      } catch {
-        await enqueueOperation({ type: 'writeFile', args: segments, content });
-      }
+    async getTask(id: string): Promise<Task | null> {
+      const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(id)}`, {
+        headers: authOnly(),
+      });
+      if (res.status === 404) return null;
+      if (!res.ok) return null;
+      const row = (await res.json()) as TaskDbRow;
+      return taskFromDbRow(row);
     },
 
-    async deleteFile(...segments: string[]): Promise<void> {
-      const path = segments.join('/');
-      try {
-        const res = await fetch(`${baseUrl}/api/files?path=${encodeURIComponent(path)}`, {
-          method: 'DELETE',
-          headers: jsonHeaders(),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      } catch {
-        await enqueueOperation({ type: 'deleteFile', args: segments });
-      }
+    async putTask(task: Task): Promise<void> {
+      const row = taskToDbRow(task, 0, null);
+      const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(task.id)}`, {
+        method: 'PUT',
+        headers: jsonHeaders(),
+        body: JSON.stringify(row),
+      });
+      if (!res.ok) throw new Error(`putTask failed: HTTP ${res.status}`);
     },
 
-    async listFiles(...segments: string[]): Promise<string[]> {
-      const dir = segments.join('/');
-      try {
-        const res = await fetch(`${baseUrl}/api/files/list?dir=${encodeURIComponent(dir)}`, {
-          headers: jsonHeaders(),
-        });
-        if (!res.ok) return [];
-        const data = await res.json();
-        return data.files ?? [];
-      } catch {
-        return [];
-      }
+    async deleteTask(id: string): Promise<void> {
+      const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: authOnly(),
+      });
+      if (!res.ok) throw new Error(`deleteTask failed: HTTP ${res.status}`);
     },
 
-    async listAllFiles(): Promise<string[]> {
-      if (!baseUrl) return [];
-      try {
-        const res = await fetch(`${baseUrl}/api/export/json`, { headers: authOnly() });
-        if (!res.ok) return [];
-        const data = (await res.json()) as { files?: { path: string }[] };
-        return (data.files ?? []).map((f) => f.path);
-      } catch {
-        return [];
-      }
+    async getStreamDay(dateKey: string): Promise<StreamEntry[]> {
+      const res = await fetch(
+        `${baseUrl}/api/stream?date=${encodeURIComponent(dateKey)}`,
+        { headers: authOnly() },
+      );
+      if (!res.ok) return [];
+      const rows = (await res.json()) as string[];
+      return rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow));
     },
 
-    // ── Settings ───────────────────────────────────────────────────
+    async getRecentStream(days = 14): Promise<StreamEntry[]> {
+      const res = await fetch(
+        `${baseUrl}/api/stream/recent?days=${encodeURIComponent(String(days))}`,
+        { headers: authOnly() },
+      );
+      if (!res.ok) return [];
+      const rows = (await res.json()) as string[];
+      return rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow));
+    },
+
+    async listStreamDateKeys(): Promise<string[]> {
+      const res = await fetch(`${baseUrl}/api/stream/dates`, { headers: authOnly() });
+      if (!res.ok) return [];
+      return (await res.json()) as string[];
+    },
+
+    async putStreamEntry(entry: StreamEntry): Promise<void> {
+      const row = streamEntryToDbRow(entry, 0, null);
+      const res = await fetch(`${baseUrl}/api/stream/${encodeURIComponent(entry.id)}`, {
+        method: 'PUT',
+        headers: jsonHeaders(),
+        body: JSON.stringify(row),
+      });
+      if (!res.ok) throw new Error(`putStreamEntry failed: HTTP ${res.status}`);
+    },
+
+    async deleteStreamEntry(id: string): Promise<void> {
+      const res = await fetch(`${baseUrl}/api/stream/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: authOnly(),
+      });
+      if (!res.ok) throw new Error(`deleteStreamEntry failed: HTTP ${res.status}`);
+    },
 
     async getSetting(key: string): Promise<string | null> {
       try {
@@ -127,8 +143,6 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
         return {};
       }
     },
-
-    // ── Blobs ──────────────────────────────────────────────────────
 
     async uploadBlob(file: File): Promise<UploadResult> {
       const form = new FormData();

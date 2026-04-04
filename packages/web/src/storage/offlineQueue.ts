@@ -1,5 +1,8 @@
-import { getAuthToken } from '../stores/authStore';
-
+/**
+ * Legacy IndexedDB queue for the old virtual-file `/api/files` API.
+ * Relational DataStore uses direct SQLite/API calls; a future offline write queue would
+ * enqueue `putTask` / `putStreamEntry` operations instead of `writeFile`/`deleteFile`.
+ */
 const DB_NAME = 'mlt-offline';
 const DB_VERSION = 1;
 const STORE_QUEUE = 'queue';
@@ -172,31 +175,14 @@ export function startAutoSync(
   };
 }
 
-export function createDirectExecutor(baseUrl: string) {
-  const headers = (): HeadersInit => {
-    const h: HeadersInit = { 'Content-Type': 'application/json' };
-    const token = getAuthToken();
-    if (token) h.Authorization = `Bearer ${token}`;
-    return h;
-  };
-
+/** Legacy IndexedDB queue from the old virtual-file API; drain without re-uploading. */
+export function createDirectExecutor(_baseUrl: string) {
   return {
-    async writeFile(content: string, ...segments: string[]): Promise<void> {
-      const path = segments.join('/');
-      const res = await fetch(`${baseUrl}/api/files?path=${encodeURIComponent(path)}`, {
-        method: 'PUT',
-        headers: headers(),
-        body: JSON.stringify({ content }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    async writeFile(_content: string, ..._segments: string[]): Promise<void> {
+      console.warn('[offlineQueue] Discarding legacy queued writeFile (data layer is relational now).');
     },
-    async deleteFile(...segments: string[]): Promise<void> {
-      const path = segments.join('/');
-      const res = await fetch(`${baseUrl}/api/files?path=${encodeURIComponent(path)}`, {
-        method: 'DELETE',
-        headers: headers(),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    async deleteFile(..._segments: string[]): Promise<void> {
+      console.warn('[offlineQueue] Discarding legacy queued deleteFile.');
     },
   };
 }

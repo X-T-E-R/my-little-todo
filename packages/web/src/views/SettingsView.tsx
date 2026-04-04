@@ -1,3 +1,11 @@
+import {
+  streamEntryFromDbRow,
+  streamEntryToDbRow,
+  taskFromDbRow,
+  taskToDbRow,
+  type StreamEntryDbRow,
+  type TaskDbRow,
+} from '@my-little-todo/core';
 import { motion } from 'framer-motion';
 import {
   Activity,
@@ -716,14 +724,16 @@ function DataTab() {
     }
 
     const store = getDataStore();
-    const paths = await store.listAllFiles();
-    const files: { path: string; content: string }[] = [];
-    for (const p of paths) {
-      const content = await store.readFile(...p.split('/'));
-      if (content !== null) files.push({ path: p, content });
-    }
     const allSettings = await store.getAllSettings();
-    return { files, settings: Object.entries(allSettings) };
+    const tasks = await store.getAllTasks();
+    const streamEntries = await store.getRecentStream(365 * 10);
+    const tasksJson = tasks.map((t) => JSON.stringify(taskToDbRow(t, 0, null)));
+    const streamJson = streamEntries.map((e) => JSON.stringify(streamEntryToDbRow(e, 0, null)));
+    return {
+      tasks: tasksJson,
+      stream_entries: streamJson,
+      settings: Object.entries(allSettings),
+    };
   };
 
   const handleExport = async (format: 'json' | 'markdown', asZip = false) => {
@@ -813,7 +823,12 @@ function DataTab() {
     setImporting(true);
     setImportResult('');
     try {
-      let payload: { files: { path: string; content: string }[]; settings?: [string, string][] };
+      let payload: {
+        tasks?: string[];
+        stream_entries?: string[];
+        files?: { path: string; content: string }[];
+        settings?: [string, string][];
+      };
 
       if (file.name.endsWith('.zip')) {
         const JSZip = (await import('jszip')).default;
@@ -850,55 +865,88 @@ function DataTab() {
 
       if (isNativeClient()) {
         const store = getDataStore();
-        let filesImported = 0;
-        let settingsImported = 0;
-        for (const f of payload.files) {
-          await store.writeFile(f.content, f.path);
-          filesImported++;
-        }
-        if (payload.settings) {
-          for (const [key, value] of payload.settings) {
-            await store.putSetting(key, value);
-            settingsImported++;
-          }
-        }
-        setImportIsError(false);
-        setImportResult(
-          t('Import succeeded: {{fileCount}} files, {{settingsCount}} settings', {
-            fileCount: filesImported,
-            settingsCount: settingsImported,
-          }),
-        );
-      } else {
-        const token = getAuthToken();
-        const h: HeadersInit = { 'Content-Type': 'application/json' };
-        if (token) h.Authorization = `Bearer ${token}`;
-        const apiBase = getSettingsApiBase();
-        const res = await fetch(`${apiBase}/api/import/json`, {
-          method: 'POST',
-          headers: h,
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          let msg: string;
-          try {
-            msg = JSON.parse(text).error ?? text;
-          } catch {
-            msg = text || `HTTP ${res.status}`;
-          }
+        if (payload.files && payload.files.length > 0 && !payload.tasks?.length) {
           setImportIsError(true);
-          setImportResult(t('Error: {{message}}', { message: msg }));
-          return;
+          setImportResult(
+            t(
+              'This backup uses the old file-based format. Please migrate with the migration tool or re-export from a current app version.',
+            ),
+          );
+        } else {
+          let tasksImported = 0;
+          let streamImported = 0;
+          let settingsImported = 0;
+          for (const raw of payload.tasks ?? []) {
+            const row = JSON.parse(raw) as TaskDbRow;
+            await store.putTask(taskFromDbRow(row));
+            tasksImported++;
+          }
+          for (const raw of payload.stream_entries ?? []) {
+            const row = JSON.parse(raw) as StreamEntryDbRow;
+            await store.putStreamEntry(streamEntryFromDbRow(row));
+            streamImported++;
+          }
+          if (payload.settings) {
+            for (const [key, value] of payload.settings) {
+              await store.putSetting(key, value);
+              settingsImported++;
+            }
+          }
+          setImportIsError(false);
+          setImportResult(
+            t(
+              'Import succeeded: {{tasks}} tasks, {{stream}} stream entries, {{settingsCount}} settings',
+              {
+                tasks: tasksImported,
+                stream: streamImported,
+                settingsCount: settingsImported,
+              },
+            ),
+          );
         }
-        const result = await res.json();
-        setImportIsError(false);
-        setImportResult(
-          t('Import succeeded: {{fileCount}} files, {{settingsCount}} settings', {
-            fileCount: result.files_imported,
-            settingsCount: result.settings_imported ?? 0,
-          }),
-        );
+      } else {
+        if (payload.files && payload.files.length > 0 && !payload.tasks?.length) {
+          setImportIsError(true);
+          setImportResult(
+            t(
+              'This backup uses the old file-based format. Please migrate with the migration tool or re-export from a current app version.',
+            ),
+          );
+        } else {
+          const token = getAuthToken();
+          const h: HeadersInit = { 'Content-Type': 'application/json' };
+          if (token) h.Authorization = `Bearer ${token}`;
+          const apiBase = getSettingsApiBase();
+          const res = await fetch(`${apiBase}/api/import/json`, {
+            method: 'POST',
+            headers: h,
+            body: JSON.stringify(payload),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            let msg: string;
+            try {
+              msg = JSON.parse(text).error ?? text;
+            } catch {
+              msg = text || `HTTP ${res.status}`;
+            }
+            setImportIsError(true);
+            setImportResult(t('Error: {{message}}', { message: msg }));
+            return;
+          }
+          const result = await res.json();
+          setImportIsError(false);
+          setImportResult(
+            t(
+              'Import succeeded: {{tasks}} tasks, {{stream}} stream entries, {{settingsCount}} settings',
+              {
+                tasks: result.tasks_imported ?? 0,
+                stream: result.stream_imported ?? 0,
+                settingsCount: result.settings_imported ?? 0,
+              },
+            ),
+          );
+        }
       }
 
       await Promise.all([
@@ -943,11 +991,15 @@ function DataTab() {
       if (res.ok) {
         setMigrateIsError(false);
         setMigrateResult(
-          t('Migration succeeded: {{fileCount}} files, {{settingsCount}} settings. {{message}}', {
-            fileCount: data.files_migrated,
-            settingsCount: data.settings_migrated,
-            message: data.message,
-          }),
+          t(
+            'Migration succeeded: {{tasks}} tasks, {{stream}} stream entries, {{settingsCount}} settings. {{message}}',
+            {
+              tasks: data.tasks_migrated ?? 0,
+              stream: data.stream_migrated ?? 0,
+              settingsCount: data.settings_migrated,
+              message: data.message,
+            },
+          ),
         );
       } else {
         setMigrateIsError(true);
@@ -968,7 +1020,6 @@ function DataTab() {
   const dbLabel: Record<string, string> = {
     sqlite: 'SQLite',
     postgres: 'PostgreSQL',
-    mysql: 'MySQL',
     mongodb: 'MongoDB',
   };
 
@@ -1203,7 +1254,6 @@ function DataTab() {
                 <option value="">{t('Select target type...')}</option>
                 <option value="sqlite">SQLite</option>
                 <option value="postgres">PostgreSQL</option>
-                <option value="mysql">MySQL</option>
               </select>
             </div>
 
@@ -1222,7 +1272,7 @@ function DataTab() {
                   />
                 </div>
 
-                {(migrateTarget === 'postgres' || migrateTarget === 'mysql') && (
+                {migrateTarget === 'postgres' && (
                   <div>
                     <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
                       {t('Database Connection URL')}

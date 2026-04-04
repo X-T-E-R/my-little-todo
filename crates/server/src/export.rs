@@ -1,5 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
+
+use serde_json::Value;
 
 use crate::providers::DatabaseProvider;
 
@@ -30,11 +32,11 @@ pub async fn mirror_delete_from_disk(
         let safe = relative_path.replace('\\', "/");
         let target = PathBuf::from(&export_dir).join(&safe);
         std::fs::remove_file(&target).ok();
-        cleanup_empty_parents(&target, Path::new(&export_dir));
+        cleanup_empty_parents(&target, std::path::Path::new(&export_dir));
     }
 }
 
-fn cleanup_empty_parents(path: &Path, root: &Path) {
+fn cleanup_empty_parents(path: &std::path::Path, root: &std::path::Path) {
     let mut current = path.parent();
     while let Some(dir) = current {
         if dir == root || dir.as_os_str().is_empty() {
@@ -47,28 +49,45 @@ fn cleanup_empty_parents(path: &Path, root: &Path) {
     }
 }
 
+/// Writes `data/tasks/{id}.json` and `data/stream/{id}.json` under `export_dir`.
 pub async fn full_export_to_disk(
     db: &Arc<dyn DatabaseProvider>,
-    _user_id: &str,
+    user_id: &str,
     export_dir: &str,
-    prefix: &str,
 ) -> anyhow::Result<usize> {
-    let all_paths = db.list_all_files(prefix).await?;
     let mut count = 0usize;
-    for rel in &all_paths {
-        let full = if prefix.is_empty() {
-            rel.clone()
-        } else {
-            format!("{}/{}", prefix, rel)
-        };
-        if let Ok(Some(content)) = db.get_file(&full).await {
-            let target = PathBuf::from(export_dir).join(rel);
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent).ok();
-            }
-            std::fs::write(&target, &content)?;
-            count += 1;
+
+    let tasks = db.list_tasks_json(user_id).await?;
+    for raw in tasks {
+        let v: Value = serde_json::from_str(&raw)?;
+        let id = v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("unknown");
+        let rel = format!("data/tasks/{}.json", id);
+        let target = PathBuf::from(export_dir).join(&rel);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).ok();
         }
+        std::fs::write(&target, serde_json::to_string_pretty(&v)?)?;
+        count += 1;
     }
+
+    let entries = db.list_all_stream_json(user_id).await?;
+    for raw in entries {
+        let v: Value = serde_json::from_str(&raw)?;
+        let id = v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("unknown");
+        let rel = format!("data/stream/{}.json", id);
+        let target = PathBuf::from(export_dir).join(&rel);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        std::fs::write(&target, serde_json::to_string_pretty(&v)?)?;
+        count += 1;
+    }
+
     Ok(count)
 }

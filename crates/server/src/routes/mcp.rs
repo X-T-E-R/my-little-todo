@@ -3,8 +3,65 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
+use chrono::{TimeZone, Utc};
+use uuid::Uuid;
+
 use crate::config::AuthMode;
 use crate::AppState;
+
+fn data_partition(state: &AppState, auth_user_id: &str) -> String {
+    match state.config.auth_mode {
+        AuthMode::Multi => auth_user_id.to_string(),
+        AuthMode::Single | AuthMode::None => String::new(),
+    }
+}
+
+fn normalize_task_for_mcp(mut v: Value) -> Value {
+    if let Some(obj) = v.as_object_mut() {
+        if let Some(rid) = obj.remove("role_id") {
+            obj.insert("role".into(), rid);
+        }
+        if let Some(ddl) = obj.get("ddl").cloned() {
+            if !ddl.is_null() {
+                if let Some(ms) = ddl.as_i64() {
+                    obj.insert("ddl".into(), json!(ms_to_iso_z(ms)));
+                } else if let Some(ms) = ddl.as_f64() {
+                    obj.insert("ddl".into(), json!(ms_to_iso_z(ms as i64)));
+                }
+            }
+        }
+    }
+    v
+}
+
+fn ms_to_iso_z(ms: i64) -> String {
+    Utc.timestamp_millis_opt(ms)
+        .single()
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_default()
+}
+
+fn parse_iso_to_ms(s: &str) -> Option<i64> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+        return Some(dt.timestamp_millis());
+    }
+    let prefix = if s.len() >= 10 { &s[..10] } else { s };
+    chrono::NaiveDate::parse_from_str(prefix, "%Y-%m-%d")
+        .ok()
+        .map(|d| {
+            d.and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_utc()
+                .timestamp_millis()
+        })
+}
+
+fn time_hms_from_ms(ms: i64) -> String {
+    Utc.timestamp_millis_opt(ms)
+        .single()
+        .map(|dt| dt.format("%H:%M:%S").to_string())
+        .unwrap_or_else(|| "00:00:00".into())
+}
 
 // ── JSON-RPC 2.0 Types ─────────────────────────────────────────
 
@@ -58,74 +115,6 @@ fn err_response(id: Option<Value>, code: i32, message: &str) -> JsonRpcResponse 
     }
 }
 
-// ── Path Resolution ─────────────────────────────────────────────
-
-fn resolve_path(state: &AppState, user_id: &str, path: &str) -> String {
-    if state.config.auth_mode == AuthMode::Multi {
-        format!("{}/{}", user_id, path)
-    } else {
-        path.to_string()
-    }
-}
-
-// ── Simple Frontmatter Parser ───────────────────────────────────
-
-fn parse_frontmatter(content: &str) -> (HashMap<String, String>, String) {
-    let mut meta = HashMap::new();
-    if !content.starts_with("---") {
-        return (meta, content.to_string());
-    }
-    let rest = &content[3..];
-    if let Some(end_idx) = rest.find("\n---\n") {
-        let fm_block = &rest[..end_idx];
-        let body = &rest[end_idx + 5..];
-        for line in fm_block.lines() {
-            if let Some(colon) = line.find(':') {
-                let key = line[..colon].trim().to_string();
-                let val = line[colon + 1..].trim().to_string();
-                if !val.is_empty() {
-                    meta.insert(key, val);
-                }
-            }
-        }
-        (meta, body.to_string())
-    } else {
-        (meta, content.to_string())
-    }
-}
-
-fn task_file_to_json(content: &str) -> Value {
-    let (meta, body) = parse_frontmatter(content);
-    let body_text = body
-        .split("\n## ")
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string();
-
-    json!({
-        "id": meta.get("id").cloned().unwrap_or_default(),
-        "title": meta.get("title").cloned().unwrap_or_default(),
-        "status": meta.get("status").cloned().unwrap_or_default(),
-        "created": meta.get("created").cloned(),
-        "updated": meta.get("updated").cloned(),
-        "completed": meta.get("completed").cloned(),
-        "ddl": meta.get("ddl").cloned(),
-        "ddl_type": meta.get("ddl_type").cloned(),
-        "role": meta.get("role").cloned(),
-        "tags": meta.get("tags").map(|t| {
-            t.trim_start_matches('[').trim_end_matches(']')
-                .split(',').map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        }).unwrap_or_default(),
-        "priority": meta.get("priority").cloned(),
-        "parent": meta.get("parent").cloned(),
-        "source": meta.get("source").cloned(),
-        "body": body_text,
-    })
-}
-
 fn now_iso() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -171,59 +160,6 @@ fn generate_task_id() -> String {
     let ts = now.replace(['-', ':', '.', 'T', 'Z'], "");
     let short = &ts[..std::cmp::min(14, ts.len())];
     format!("task-{}", short)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn build_task_markdown(
-    id: &str,
-    title: &str,
-    status: &str,
-    now: &str,
-    ddl: Option<&str>,
-    ddl_type: Option<&str>,
-    role: Option<&str>,
-    tags: &[String],
-) -> String {
-    let mut lines = vec![
-        "---".to_string(),
-        format!("id: {}", id),
-        format!("title: {}", title),
-        format!("status: {}", status),
-        format!("created: {}", now),
-        format!("updated: {}", now),
-    ];
-    if let Some(d) = ddl {
-        lines.push(format!("ddl: {}", d));
-    }
-    if let Some(dt) = ddl_type {
-        lines.push(format!("ddl_type: {}", dt));
-    }
-    if let Some(r) = role {
-        lines.push(format!("role: {}", r));
-    }
-    if !tags.is_empty() {
-        lines.push(format!("tags: [{}]", tags.join(", ")));
-    }
-    lines.push("---".to_string());
-    lines.push(String::new());
-    lines.push(String::new());
-    lines.push("## Resources".to_string());
-    lines.push(String::new());
-    lines.push("（暂无）".to_string());
-    lines.push(String::new());
-    lines.push("## Reminders".to_string());
-    lines.push(String::new());
-    lines.push("（暂无）".to_string());
-    lines.push(String::new());
-    lines.push("## Submissions".to_string());
-    lines.push(String::new());
-    lines.push("（暂无）".to_string());
-    lines.push(String::new());
-    lines.push("## Postponements".to_string());
-    lines.push(String::new());
-    lines.push("（暂无）".to_string());
-    lines.push(String::new());
-    lines.join("\n")
 }
 
 // ── MCP Handler ─────────────────────────────────────────────────
@@ -607,12 +543,13 @@ async fn tool_overview(state: &AppState, user_id: &str) -> Result<Value, String>
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or(json!([]));
 
-    let stream_path = resolve_path(state, user_id, &format!("data/stream/{}.md", today));
-    let stream_count = if let Ok(Some(content)) = state.db.get_file(&stream_path).await {
-        content.lines().filter(|l| l.trim().starts_with("- ")).count()
-    } else {
-        0
-    };
+    let p = data_partition(state, user_id);
+    let stream_count = state
+        .db
+        .list_stream_day_json(&p, &today)
+        .await
+        .map(|rows| rows.len())
+        .unwrap_or(0);
 
     Ok(json!({
         "date": today,
@@ -634,19 +571,16 @@ fn today_plus_days(n: u32) -> String {
 }
 
 async fn load_all_tasks(state: &AppState, user_id: &str) -> Result<Vec<Value>, String> {
-    let tasks_dir = resolve_path(state, user_id, "data/tasks");
-    let files = state
+    let p = data_partition(state, user_id);
+    let rows = state
         .db
-        .list_files(&tasks_dir)
+        .list_tasks_json(&p)
         .await
         .map_err(|e| e.to_string())?;
-
     let mut tasks = Vec::new();
-    for file in &files {
-        let path = format!("{}/{}", tasks_dir, file);
-        if let Ok(Some(content)) = state.db.get_file(&path).await {
-            tasks.push(task_file_to_json(&content));
-        }
+    for raw in rows {
+        let v: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        tasks.push(normalize_task_for_mcp(v));
     }
     Ok(tasks)
 }
@@ -684,15 +618,16 @@ async fn tool_get_task(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required parameter: id".to_string())?;
 
-    let path = resolve_path(state, user_id, &format!("data/tasks/{}.md", task_id));
-    let content = state
+    let p = data_partition(state, user_id);
+    let raw = state
         .db
-        .get_file(&path)
+        .get_task_json(&p, task_id)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Task not found: {}", task_id))?;
 
-    Ok(task_file_to_json(&content))
+    let v: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    Ok(normalize_task_for_mcp(v))
 }
 
 async fn tool_create_task(
@@ -706,8 +641,11 @@ async fn tool_create_task(
         .ok_or_else(|| "Missing required parameter: title".to_string())?;
 
     let id = generate_task_id();
-    let now = now_iso();
-    let ddl = args.get("ddl").and_then(|v| v.as_str());
+    let now_ms = Utc::now().timestamp_millis();
+    let ddl_ms = args
+        .get("ddl")
+        .and_then(|v| v.as_str())
+        .and_then(parse_iso_to_ms);
     let ddl_type = args.get("ddl_type").and_then(|v| v.as_str());
     let role = args.get("role").and_then(|v| v.as_str());
     let tags: Vec<String> = args
@@ -721,21 +659,54 @@ async fn tool_create_task(
         .unwrap_or_default();
 
     let parent = args.get("parent").and_then(|v| v.as_str());
-    let mut md = build_task_markdown(&id, title, "inbox", &now, ddl, ddl_type, role, &tags);
-    if let Some(parent_id) = parent {
-        md = md.replacen("---\n\n", &format!("parent: {}\n---\n\n", parent_id), 1);
-    }
+    let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".into());
 
-    let path = resolve_path(state, user_id, &format!("data/tasks/{}.md", id));
+    let task = json!({
+        "id": id,
+        "title": title,
+        "description": null,
+        "status": "inbox",
+        "body": "",
+        "created_at": now_ms,
+        "updated_at": now_ms,
+        "completed_at": null,
+        "ddl": ddl_ms,
+        "ddl_type": ddl_type,
+        "planned_at": null,
+        "role_id": role,
+        "parent_id": parent,
+        "source_stream_id": null,
+        "priority": null,
+        "promoted": null,
+        "phase": null,
+        "kanban_column": null,
+        "tags": tags_json,
+        "subtask_ids": "[]",
+        "resources": "[]",
+        "reminders": "[]",
+        "submissions": "[]",
+        "postponements": "[]",
+        "status_history": "[]",
+        "progress_logs": "[]",
+    });
+
+    let p = data_partition(state, user_id);
     state
         .db
-        .put_file(&path, &md)
+        .upsert_task_json(&p, &task.to_string())
         .await
         .map_err(|e| e.to_string())?;
 
-    let mut result = json!({ "id": id, "title": title, "status": "inbox", "created": now });
+    let mut result = json!({
+        "id": id,
+        "title": title,
+        "status": "inbox",
+        "created": ms_to_iso_z(now_ms),
+    });
     if let Some(p) = parent {
-        result.as_object_mut().map(|o| o.insert("parent".into(), json!(p)));
+        result
+            .as_object_mut()
+            .map(|o| o.insert("parent".into(), json!(p)));
     }
     Ok(result)
 }
@@ -750,81 +721,88 @@ async fn tool_update_task(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required parameter: id".to_string())?;
 
-    let path = resolve_path(state, user_id, &format!("data/tasks/{}.md", task_id));
-    let content = state
+    let p = data_partition(state, user_id);
+    let raw = state
         .db
-        .get_file(&path)
+        .get_task_json(&p, task_id)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Task not found: {}", task_id))?;
 
-    let (mut meta, body) = parse_frontmatter(&content);
-    let now = now_iso();
+    let mut task: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let obj = task.as_object_mut().ok_or("Invalid task")?;
+
+    let now_ms = Utc::now().timestamp_millis();
 
     if let Some(title) = args.get("title").and_then(|v| v.as_str()) {
-        meta.insert("title".into(), title.into());
+        obj.insert("title".into(), json!(title));
     }
     if let Some(status) = args.get("status").and_then(|v| v.as_str()) {
-        meta.insert("status".into(), status.into());
+        obj.insert("status".into(), json!(status));
         if status == "completed" {
-            meta.insert("completed".into(), now.clone());
+            obj.insert("completed_at".into(), json!(now_ms));
         }
     }
     if let Some(ddl) = args.get("ddl").and_then(|v| v.as_str()) {
-        meta.insert("ddl".into(), ddl.into());
+        if let Some(ms) = parse_iso_to_ms(ddl) {
+            obj.insert("ddl".into(), json!(ms));
+        }
     }
     if let Some(ddl_type) = args.get("ddl_type").and_then(|v| v.as_str()) {
-        meta.insert("ddl_type".into(), ddl_type.into());
+        obj.insert("ddl_type".into(), json!(ddl_type));
     }
     if let Some(role) = args.get("role").and_then(|v| v.as_str()) {
-        meta.insert("role".into(), role.into());
+        obj.insert("role_id".into(), json!(role));
     }
     if let Some(tags) = args.get("tags").and_then(|v| v.as_array()) {
         let tag_strs: Vec<String> = tags
             .iter()
             .filter_map(|v| v.as_str().map(String::from))
             .collect();
-        meta.insert("tags".into(), format!("[{}]", tag_strs.join(", ")));
+        obj.insert(
+            "tags".into(),
+            json!(serde_json::to_string(&tag_strs).unwrap_or_else(|_| "[]".into())),
+        );
     }
-    meta.insert("updated".into(), now.clone());
 
-    let note = args.get("note").and_then(|v| v.as_str());
-
-    let mut fm_lines = vec!["---".to_string()];
-    let key_order = [
-        "id", "title", "status", "created", "updated", "completed", "ddl", "ddl_type",
-        "planned", "role", "tags", "priority", "source", "subtasks", "parent",
-    ];
-    for key in key_order {
-        if let Some(val) = meta.get(key) {
-            fm_lines.push(format!("{}: {}", key, val));
-        }
-    }
-    fm_lines.push("---".to_string());
-
-    let mut updated_body = body;
-    if let Some(note_text) = note {
+    if let Some(note_text) = args.get("note").and_then(|v| v.as_str()) {
         let status = args.get("status").and_then(|v| v.as_str()).unwrap_or("");
-        let section = if status == "completed" { "## Submissions" } else { "## Postponements" };
-        let record = format!("- {} | {}", &now[..10], note_text);
-        if let Some(idx) = updated_body.find(section) {
-            let insert_pos = idx + section.len();
-            let after = &updated_body[insert_pos..];
-            let line_end = after.find('\n').unwrap_or(after.len());
-            updated_body = format!(
-                "{}{}\n{}{}",
-                &updated_body[..insert_pos],
-                &after[..line_end],
-                record,
-                &after[line_end..]
-            );
-        }
+        let subs_key = if status == "completed" {
+            "submissions"
+        } else {
+            "postponements"
+        };
+        let existing = obj
+            .get(subs_key)
+            .and_then(|s| s.as_str())
+            .unwrap_or("[]");
+        let mut arr: Vec<Value> = serde_json::from_str(existing).unwrap_or_default();
+        let rec = if status == "completed" {
+            json!({
+                "timestamp": Utc::now().to_rfc3339(),
+                "note": note_text,
+                "onTime": true,
+            })
+        } else {
+            json!({
+                "timestamp": Utc::now().to_rfc3339(),
+                "fromDate": Utc::now().to_rfc3339(),
+                "toDate": Utc::now().to_rfc3339(),
+                "reason": note_text,
+            })
+        };
+        arr.push(rec);
+        obj.insert(
+            subs_key.into(),
+            json!(serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())),
+        );
     }
 
-    let new_content = format!("{}\n{}", fm_lines.join("\n"), updated_body);
+    obj.insert("updated_at".into(), json!(now_ms));
+
     state
         .db
-        .put_file(&path, &new_content)
+        .upsert_task_json(&p, &serde_json::to_string(&task).map_err(|e| e.to_string())?)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -841,17 +819,17 @@ async fn tool_delete_task(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required parameter: id".to_string())?;
 
-    let path = resolve_path(state, user_id, &format!("data/tasks/{}.md", task_id));
+    let p = data_partition(state, user_id);
     state
         .db
-        .get_file(&path)
+        .get_task_json(&p, task_id)
         .await
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Task not found: {}", task_id))?;
 
     state
         .db
-        .delete_file(&path)
+        .delete_task_row(&p, task_id)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -888,47 +866,25 @@ async fn tool_add_stream_entry(
     let role = args.get("role").and_then(|v| v.as_str());
 
     let date_key = today_date_key();
-    let file_path = resolve_path(
-        state,
-        user_id,
-        &format!("data/stream/{}.md", date_key),
-    );
+    let id = Uuid::new_v4().to_string();
+    let ts = Utc::now().timestamp_millis();
+    let time_part = time_hms_from_ms(ts);
 
-    let existing = state
-        .db
-        .get_file(&file_path)
-        .await
-        .map_err(|e| e.to_string())?
-        .unwrap_or_default();
+    let entry = json!({
+        "id": id,
+        "content": content,
+        "entry_type": "spark",
+        "timestamp": ts,
+        "date_key": date_key,
+        "role_id": role,
+        "tags": "[]",
+        "attachments": "[]",
+    });
 
-    let now = now_iso();
-    let time_part = &now[11..19]; // HH:MM:SS
-
-    let mut line = format!("- {} | {}", time_part, content);
-    if let Some(r) = role {
-        line.push_str(&format!(" @role:{}", r));
-    }
-
-    let new_content = if existing.is_empty() {
-        format!(
-            "---\ndate: {}\nentries: 1\n---\n\n{}\n",
-            date_key, line
-        )
-    } else {
-        let (_, body) = parse_frontmatter(&existing);
-        let entry_count = body.lines().filter(|l| l.starts_with("- ")).count() + 1;
-        format!(
-            "---\ndate: {}\nentries: {}\n---\n\n{}\n{}\n",
-            date_key,
-            entry_count,
-            line,
-            body.trim()
-        )
-    };
-
+    let p = data_partition(state, user_id);
     state
         .db
-        .put_file(&file_path, &new_content)
+        .upsert_stream_entry_json(&p, &entry.to_string())
         .await
         .map_err(|e| e.to_string())?;
 
@@ -947,38 +903,26 @@ async fn tool_list_stream(
     let days = args
         .get("days")
         .and_then(|v| v.as_u64())
-        .unwrap_or(7) as usize;
+        .unwrap_or(7) as i32;
 
-    let stream_dir = resolve_path(state, user_id, "data/stream");
-    let files = state
+    let p = data_partition(state, user_id);
+    let rows = state
         .db
-        .list_files(&stream_dir)
+        .list_stream_recent_json(&p, days)
         .await
         .map_err(|e| e.to_string())?;
 
-    let recent: Vec<&String> = files.iter().take(days).collect();
     let mut entries = Vec::new();
-
-    for file in &recent {
-        let date_key = file.replace(".md", "");
-        let path = format!("{}/{}", stream_dir, file);
-        if let Ok(Some(content)) = state.db.get_file(&path).await {
-            let (_, body) = parse_frontmatter(&content);
-            for line in body.lines() {
-                let trimmed = line.trim();
-                if let Some(rest) = trimmed.strip_prefix("- ") {
-                    if let Some(pipe_idx) = rest.find(" | ") {
-                        let time = &rest[..pipe_idx];
-                        let text = &rest[pipe_idx + 3..];
-                        entries.push(json!({
-                            "date": date_key,
-                            "time": time,
-                            "content": text.trim(),
-                        }));
-                    }
-                }
-            }
-        }
+    for raw in rows {
+        let v: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        let date_key = v.get("date_key").and_then(|x| x.as_str()).unwrap_or("");
+        let ts = v.get("timestamp").and_then(|x| x.as_i64()).unwrap_or(0);
+        let text = v.get("content").and_then(|x| x.as_str()).unwrap_or("");
+        entries.push(json!({
+            "date": date_key,
+            "time": time_hms_from_ms(ts),
+            "content": text,
+        }));
     }
 
     Ok(json!({ "entries": entries, "count": entries.len() }))
@@ -997,56 +941,39 @@ async fn tool_search(
     let query_lower = query.to_lowercase();
 
     let mut results = Vec::new();
+    let p = data_partition(state, user_id);
 
     if scope == "all" || scope == "tasks" {
-        let tasks_dir = resolve_path(state, user_id, "data/tasks");
-        let task_files = state
-            .db
-            .list_files(&tasks_dir)
-            .await
-            .unwrap_or_default();
-
-        for file in &task_files {
-            let path = format!("{}/{}", tasks_dir, file);
-            if let Ok(Some(content)) = state.db.get_file(&path).await {
-                if content.to_lowercase().contains(&query_lower) {
-                    let task = task_file_to_json(&content);
-                    results.push(json!({
-                        "type": "task",
-                        "id": task.get("id").and_then(|v| v.as_str()).unwrap_or(""),
-                        "title": task.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-                        "status": task.get("status").and_then(|v| v.as_str()).unwrap_or(""),
-                    }));
-                }
+        let task_rows = state.db.list_tasks_json(&p).await.unwrap_or_default();
+        for raw in task_rows {
+            if !raw.to_lowercase().contains(&query_lower) {
+                continue;
             }
+            let task: Value = serde_json::from_str(&raw).unwrap_or(json!({}));
+            let t = normalize_task_for_mcp(task);
+            results.push(json!({
+                "type": "task",
+                "id": t.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "title": t.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                "status": t.get("status").and_then(|v| v.as_str()).unwrap_or(""),
+            }));
         }
     }
 
-    let stream_dir = resolve_path(state, user_id, "data/stream");
-    let stream_files = if scope == "all" || scope == "stream" {
-        state
-            .db
-            .list_files(&stream_dir)
-            .await
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-
-    for file in &stream_files {
-        let date_key = file.replace(".md", "");
-        let path = format!("{}/{}", stream_dir, file);
-        if let Ok(Some(content)) = state.db.get_file(&path).await {
-            let (_, body) = parse_frontmatter(&content);
-            for line in body.lines() {
-                if line.to_lowercase().contains(&query_lower) {
-                    results.push(json!({
-                        "type": "stream",
-                        "date": date_key,
-                        "content": line.trim(),
-                    }));
-                }
+    if scope == "all" || scope == "stream" {
+        let stream_rows = state.db.list_all_stream_json(&p).await.unwrap_or_default();
+        for raw in stream_rows {
+            if !raw.to_lowercase().contains(&query_lower) {
+                continue;
             }
+            let v: Value = serde_json::from_str(&raw).unwrap_or(json!({}));
+            let date_key = v.get("date_key").and_then(|x| x.as_str()).unwrap_or("");
+            let content = v.get("content").and_then(|x| x.as_str()).unwrap_or("");
+            results.push(json!({
+                "type": "stream",
+                "date": date_key,
+                "content": content,
+            }));
         }
     }
 

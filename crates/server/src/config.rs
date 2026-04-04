@@ -15,7 +15,6 @@ pub enum DbType {
     #[default]
     Sqlite,
     Postgres,
-    Mysql,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,7 +65,6 @@ impl ServerConfig {
 
         let db_type = match std::env::var("DB_TYPE").as_deref() {
             Ok("postgres" | "postgresql") => DbType::Postgres,
-            Ok("mysql") => DbType::Mysql,
             _ => DbType::Sqlite,
         };
 
@@ -119,7 +117,6 @@ impl ServerConfig {
             match v.as_str() {
                 "sqlite" => self.db_type = DbType::Sqlite,
                 "postgres" | "postgresql" => self.db_type = DbType::Postgres,
-                "mysql" => self.db_type = DbType::Mysql,
                 _ => {}
             }
         }

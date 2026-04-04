@@ -2277,12 +2277,13 @@ dependencies = [
 
 [[package]]
 name = "mlt-server"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "argon2",
  "async-trait",
  "axum",
+ "chrono",
  "http-body-util",
  "jsonwebtoken",
  "password-hash",
@@ -2298,7 +2299,7 @@ dependencies = [
 
 [[package]]
 name = "mlt-server-bin"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "mlt-server",
  "tokio",
@@ -2344,7 +2345,7 @@ dependencies = [
 
 [[package]]
 name = "my-little-todo"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "serde",
  "serde_json",

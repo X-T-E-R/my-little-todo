@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use axum::{
     middleware as axum_mw,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use config::ServerConfig;
@@ -63,15 +63,29 @@ pub fn create_app(
         ))
         .with_state(state.clone());
 
-    // File routes (protected)
-    let file_routes = Router::new()
+    // Tasks + stream (protected)
+    let task_routes = Router::new()
+        .route("/tasks", get(routes::tasks::list_tasks))
         .route(
-            "/files",
-            get(routes::files::get_file)
-                .put(routes::files::put_file)
-                .delete(routes::files::delete_file),
+            "/tasks/{id}",
+            get(routes::tasks::get_task)
+                .put(routes::tasks::put_task)
+                .delete(routes::tasks::delete_task),
         )
-        .route("/files/list", get(routes::files::list_files))
+        .layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ))
+        .with_state(state.clone());
+
+    let stream_routes = Router::new()
+        .route("/stream", get(routes::stream::list_stream_day))
+        .route("/stream/recent", get(routes::stream::list_stream_recent))
+        .route("/stream/dates", get(routes::stream::list_stream_dates))
+        .route(
+            "/stream/{id}",
+            put(routes::stream::put_stream_entry).delete(routes::stream::delete_stream_entry),
+        )
         .layer(axum_mw::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
@@ -192,7 +206,8 @@ pub fn create_app(
     let router = Router::new()
         .nest("/api", auth_routes)
         .nest("/api", auth_protected)
-        .nest("/api", file_routes)
+        .nest("/api", task_routes)
+        .nest("/api", stream_routes)
         .nest("/api", settings_routes)
         .nest("/api", export_routes)
         .nest("/api", admin_routes)

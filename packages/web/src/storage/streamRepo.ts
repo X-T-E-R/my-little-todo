@@ -1,35 +1,13 @@
 import type { StreamEntry, StreamEntryType } from '@my-little-todo/core';
-import {
-  STREAM_DIR,
-  formatDateKey,
-  formatTimeStorage,
-  parseStreamFile,
-  serializeStreamFile,
-} from '@my-little-todo/core';
-import { listFiles, readFile, writeFile } from './adapter';
-
-function dateKeyToFileName(dateKey: string): string {
-  return `${dateKey}.md`;
-}
-
-function fileNameToDateKey(name: string): string {
-  return name.replace('.md', '');
-}
+import { formatDateKey, formatTimeStorage } from '@my-little-todo/core';
+import { getDataStore } from './dataStore';
 
 export async function loadStreamDay(dateKey: string): Promise<StreamEntry[]> {
-  const content = await readFile(STREAM_DIR, dateKeyToFileName(dateKey));
-  if (!content) return [];
-  return parseStreamFile(content, dateKey);
+  return getDataStore().getStreamDay(dateKey);
 }
 
 export async function loadRecentDays(count = 7): Promise<StreamEntry[]> {
-  const files = await listFiles(STREAM_DIR);
-  const recent = files.slice(0, count);
-
-  const dayResults = await Promise.all(
-    recent.map((file) => loadStreamDay(fileNameToDateKey(file))),
-  );
-  return dayResults.flat().sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  return getDataStore().getRecentStream(count);
 }
 
 /**
@@ -64,21 +42,17 @@ export async function addStreamEntry(
     entryType,
   };
 
-  existing.push(entry);
-  const serialized = serializeStreamFile(existing, dateKey);
-  await writeFile(serialized, STREAM_DIR, dateKeyToFileName(dateKey));
-
+  await getDataStore().putStreamEntry(entry);
   return entry;
 }
 
 export async function updateStreamEntry(entry: StreamEntry): Promise<void> {
-  const dateKey = formatDateKey(entry.timestamp);
-  const existing = await loadStreamDay(dateKey);
-  const idx = existing.findIndex((e) => e.id === entry.id);
-  if (idx === -1) return;
-  existing[idx] = { ...entry, tags: extractTags(entry.content) };
-  const serialized = serializeStreamFile(existing, dateKey);
-  await writeFile(serialized, STREAM_DIR, dateKeyToFileName(dateKey));
+  const e = { ...entry, tags: extractTags(entry.content) };
+  await getDataStore().putStreamEntry(e);
+}
+
+export async function deleteStreamEntry(id: string): Promise<void> {
+  await getDataStore().deleteStreamEntry(id);
 }
 
 export async function linkEntryToTask(
@@ -90,8 +64,7 @@ export async function linkEntryToTask(
   const entry = existing.find((e) => e.id === entryId);
   if (!entry) return;
   entry.extractedTaskId = taskId;
-  const serialized = serializeStreamFile(existing, dateKey);
-  await writeFile(serialized, STREAM_DIR, dateKeyToFileName(dateKey));
+  await getDataStore().putStreamEntry(entry);
 }
 
 function extractTags(text: string): string[] {
@@ -100,6 +73,5 @@ function extractTags(text: string): string[] {
 }
 
 export async function listStreamDates(): Promise<string[]> {
-  const files = await listFiles(STREAM_DIR);
-  return files.map(fileNameToDateKey);
+  return getDataStore().listStreamDateKeys();
 }

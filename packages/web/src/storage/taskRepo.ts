@@ -1,37 +1,18 @@
 import type { Task, TaskStatus } from '@my-little-todo/core';
-import { TASKS_DIR, parseTaskFile, serializeTaskFile, taskId } from '@my-little-todo/core';
-import { deleteFile, listFiles, readFile, writeFile } from './adapter';
-
-function taskFileName(id: string): string {
-  return `${id}.md`;
-}
+import { taskId } from '@my-little-todo/core';
+import { getDataStore } from './dataStore';
 
 export async function loadAllTasks(): Promise<Task[]> {
-  const files = await listFiles(TASKS_DIR);
-  const results = await Promise.all(
-    files.map(async (file) => {
-      const content = await readFile(TASKS_DIR, file);
-      if (!content) return null;
-      try {
-        return parseTaskFile(content);
-      } catch {
-        return null;
-      }
-    }),
-  );
-  return results.filter((t): t is Task => t !== null);
+  return getDataStore().getAllTasks();
 }
 
 export async function loadTask(id: string): Promise<Task | null> {
-  const content = await readFile(TASKS_DIR, taskFileName(id));
-  if (!content) return null;
-  return parseTaskFile(content);
+  return getDataStore().getTask(id);
 }
 
 export async function saveTask(task: Task): Promise<void> {
   task.updatedAt = new Date();
-  const serialized = serializeTaskFile(task);
-  await writeFile(serialized, TASKS_DIR, taskFileName(task.id));
+  await getDataStore().putTask(task);
 }
 
 export async function createTask(
@@ -68,7 +49,6 @@ export async function createTask(
     submissions: [],
     postponements: [],
     statusHistory: [{ from: 'inbox' as const, to: 'inbox' as const, timestamp: now }],
-    /** Endowed progress: task already "started" at understood phase. */
     phase: 'understood',
     progressLogs: [],
   };
@@ -77,7 +57,7 @@ export async function createTask(
 }
 
 export async function deleteTask(id: string): Promise<void> {
-  await deleteFile(TASKS_DIR, taskFileName(id));
+  await getDataStore().deleteTask(id);
 }
 
 export async function addSubtask(parentId: string, title: string): Promise<Task | null> {

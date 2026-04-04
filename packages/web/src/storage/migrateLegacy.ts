@@ -1,16 +1,18 @@
 /**
- * One-time migration from the old embedded-server SQLite database
- * (app_data_dir/data/my-little-todo.db) to the new local DataStore SQLite
- * (data.db managed by @tauri-apps/plugin-sql).
+ * One-time migration from an old (v0.3.x) server-format SQLite database
+ * into the current relational DataStore.
  *
- * The old schema had: files(path, content, created_at, updated_at),
- * settings(user_id, key, value, updated_at), blobs(id, owner, filename,
- * mime_type, size, created_at) — all without deleted_at.
+ * Old DB has multi-user `files` table with paths like:
+ *   `{user_id}/data/tasks/xxx.md`
+ *   `{user_id}/data/stream/yyyy-mm-dd.md`
+ * and a `settings` table with `(user_id, key, value)`.
  *
- * This runs on first launch after the architecture change. It reads the old
- * DB via a second SQL plugin connection and writes into the active DataStore.
+ * Place the old `my-little-todo.db` at:
+ *   %AppData%\com.mylittletodo.app\my-little-todo.db
+ * (same dir as the new `data.db`, i.e. `sqlite:my-little-todo.db`).
  */
 
+import { parseStreamFile, parseTaskFile } from '@my-little-todo/core';
 import type { DataStore } from './dataStore';
 
 const MIGRATION_DONE_KEY = '__legacy_migration_done';
@@ -28,37 +30,95 @@ export async function migrateLegacyData(store: DataStore): Promise<void> {
 
   let oldDb: Awaited<ReturnType<typeof Database.load>>;
   try {
-    oldDb = await Database.load('sqlite:../data/my-little-todo.db');
+    oldDb = await Database.load('sqlite:my-little-todo.db');
   } catch {
-    // Old database doesn't exist — fresh install, nothing to migrate
-    await store.putSetting(MIGRATION_DONE_KEY, '1');
     return;
   }
 
   try {
-    // ── Migrate files ────────────────────────────────────────────
-    const files = await oldDb.select<{ path: string; content: string }[]>(
-      'SELECT path, content FROM files',
-    );
-    for (const f of files) {
-      const segments = f.path.split('/');
-      await store.writeFile(f.content, ...segments);
+    const hasFiles = await oldDb
+      .select<{ name: string }[]>("SELECT name FROM sqlite_master WHERE type='table' AND name='files'");
+    if (hasFiles.length === 0) {
+      console.warn('[Migration] Old DB has no `files` table — skipping');
+      return;
     }
-    console.log(`[Migration] Migrated ${files.length} files`);
 
-    // ── Migrate settings ─────────────────────────────────────────
-    // Old schema has (user_id, key, value); we take all settings
-    // regardless of user_id for the local single-user store.
-    const settings = await oldDb.select<{ key: string; value: string }[]>(
-      'SELECT DISTINCT key, value FROM settings',
+    const files = await oldDb.select<{ path: string; content: string }[]>(
+      'SELECT path, content FROM files WHERE deleted_at IS NULL',
     );
-    for (const s of settings) {
-      await store.putSetting(s.key, s.value);
+
+    let tasksMigrated = 0;
+    let streamEntriesMigrated = 0;
+
+    const TASK_SEGMENT = '/data/tasks/';
+    const STREAM_SEGMENT = '/data/stream/';
+
+    // Identify the primary user_id by counting files per user prefix
+    const userCounts = new Map<string, number>();
+    for (const f of files) {
+      const slash = f.path.indexOf('/');
+      if (slash > 0) {
+        const uid = f.path.slice(0, slash);
+        userCounts.set(uid, (userCounts.get(uid) ?? 0) + 1);
+      }
     }
-    console.log(`[Migration] Migrated ${settings.length} settings`);
+    let primaryUserId: string | null = null;
+    let maxCount = 0;
+    for (const [uid, count] of userCounts) {
+      if (count > maxCount) {
+        maxCount = count;
+        primaryUserId = uid;
+      }
+    }
+    console.log(`[Migration] Primary user: ${primaryUserId} (${maxCount} files)`);
+
+    for (const f of files) {
+      const p = f.path.replace(/\\/g, '/');
+      const taskIdx = p.indexOf(TASK_SEGMENT);
+      const streamIdx = p.indexOf(STREAM_SEGMENT);
+
+      if (taskIdx !== -1 && p.endsWith('.md')) {
+        try {
+          const task = parseTaskFile(f.content);
+          await store.putTask(task);
+          tasksMigrated++;
+        } catch (e) {
+          console.warn('[Migration] Failed task file', f.path, e);
+        }
+      } else if (streamIdx !== -1 && p.endsWith('.md')) {
+        const after = p.slice(streamIdx + STREAM_SEGMENT.length);
+        const dateKey = after.replace(/\.md$/, '');
+        try {
+          const entries = parseStreamFile(f.content, dateKey);
+          for (const entry of entries) {
+            await store.putStreamEntry(entry);
+            streamEntriesMigrated++;
+          }
+        } catch (e) {
+          console.warn('[Migration] Failed stream file', f.path, e);
+        }
+      }
+    }
+
+    const hasSettings = await oldDb
+      .select<{ name: string }[]>("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'");
+    if (hasSettings.length > 0 && primaryUserId) {
+      const settings = await oldDb.select<{ key: string; value: string }[]>(
+        'SELECT key, value FROM settings WHERE user_id = $1 AND deleted_at IS NULL',
+        [primaryUserId],
+      );
+      for (const s of settings) {
+        if (s.key === MIGRATION_DONE_KEY) continue;
+        await store.putSetting(s.key, s.value);
+      }
+      console.log(`[Migration] Imported ${settings.length} settings for user ${primaryUserId}`);
+    }
+
+    console.log(
+      `[Migration] Done — ${tasksMigrated} tasks, ${streamEntriesMigrated} stream entries`,
+    );
 
     await store.putSetting(MIGRATION_DONE_KEY, '1');
-    console.log('[Migration] Legacy data migration completed');
   } catch (err) {
     console.error('[Migration] Error during migration:', err);
   } finally {

@@ -7,7 +7,6 @@ import {
 } from '@my-little-todo/core';
 import { create } from 'zustand';
 import i18n from '../locales';
-import { getCachedTasks, setCachedTasks } from '../storage/cacheLayer';
 import {
   addSubtask as addSubtaskInRepo,
   createTask as createTaskInRepo,
@@ -67,13 +66,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     _taskLoadPromise = (async () => {
       set({ loading: true, error: null });
       try {
-        const cached = await getCachedTasks();
-        if (cached && get().tasks.length === 0) {
-          set({ tasks: cached as Task[], loading: false });
-        }
         const tasks = await loadAllTasks();
         set({ tasks, loading: false });
-        setCachedTasks(tasks);
       } catch (e) {
         if (get().tasks.length === 0) {
           set({ error: String(e), loading: false });
@@ -115,7 +109,6 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     set((state) => ({
       tasks: state.tasks.map((t) => (t.id === id ? optimistic : t)),
     }));
-    setCachedTasks(get().tasks);
 
     try {
       const updated = await updateStatusInRepo(id, status);
@@ -123,7 +116,6 @@ export const useTaskStore = create<TaskState>((set, get) => ({
         set((state) => ({
           tasks: state.tasks.map((t) => (t.id === id ? updated : t)),
         }));
-        setCachedTasks(get().tasks);
       }
     } catch {
       if (_statusVersions.get(id) === version) {

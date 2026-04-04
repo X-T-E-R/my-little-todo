@@ -1,48 +1,65 @@
+import type { StreamEntry, Task } from '@my-little-todo/core';
 import type { AttachmentConfig, UploadResult } from './blobApi';
 
+/** Tables that participate in sync replication. */
+export type SyncTable = 'tasks' | 'stream_entries' | 'settings' | 'blobs';
+
+/**
+ * Incremental change record for local sync (native stores).
+ * `version` matches the row's assigned monotonic version from `version_seq`.
+ */
 export interface LocalChangeRecord {
-  table: 'files' | 'settings';
+  table: SyncTable;
   key: string;
-  content: string | null;
+  /** JSON-serialized row payload; null when soft-deleted. */
+  data: string | null;
+  version: number;
   updatedAt: number;
   deletedAt: number | null;
 }
 
 /**
- * Unified data store abstraction that merges file storage, settings, and blob
- * management behind a single interface. Platform-specific implementations
- * (ApiDataStore, TauriSqliteDataStore, CapacitorSqliteDataStore) plug in here.
+ * Unified data store: relational tasks/stream + KV settings + blobs.
+ * Implementations: Tauri/Capacitor SQLite, HTTP API client.
  */
 export interface DataStore {
-  // ── File CRUD (tasks / stream markdown) ────────────────────────────
+  // ── Tasks ────────────────────────────────────────────────────────
 
-  readFile(...segments: string[]): Promise<string | null>;
-  writeFile(content: string, ...segments: string[]): Promise<void>;
-  deleteFile(...segments: string[]): Promise<void>;
-  listFiles(...segments: string[]): Promise<string[]>;
-  /** All file paths (full logical paths), for backup/export. */
-  listAllFiles(): Promise<string[]>;
+  getAllTasks(): Promise<Task[]>;
+  getTask(id: string): Promise<Task | null>;
+  putTask(task: Task): Promise<void>;
+  deleteTask(id: string): Promise<void>;
 
-  // ── Key-value settings ─────────────────────────────────────────────
+  // ── Stream ───────────────────────────────────────────────────────
+
+  getStreamDay(dateKey: string): Promise<StreamEntry[]>;
+  /** Recent entries across days, sorted newest first (default 14 days). */
+  getRecentStream(days?: number): Promise<StreamEntry[]>;
+  /** Distinct calendar day keys (YYYY-MM-DD), newest first. */
+  listStreamDateKeys(): Promise<string[]>;
+  putStreamEntry(entry: StreamEntry): Promise<void>;
+  deleteStreamEntry(id: string): Promise<void>;
+
+  // ── Settings (KV) ──────────────────────────────────────────────
 
   getSetting(key: string): Promise<string | null>;
   putSetting(key: string, value: string): Promise<void>;
   deleteSetting(key: string): Promise<void>;
   getAllSettings(): Promise<Record<string, string>>;
 
-  // ── Blob / attachment management ───────────────────────────────────
+  // ── Blobs ───────────────────────────────────────────────────────
 
   uploadBlob(file: File): Promise<UploadResult>;
   getBlobUrl(id: string): string;
   deleteBlob(id: string): Promise<void>;
   getAttachmentConfig(): Promise<AttachmentConfig>;
 
-  // ── Sync support (optional, native stores implement this) ─────────
+  // ── Sync (optional: native SQLite stores) ──────────────────────
 
-  getChangesSince?(sinceTimestamp: number): Promise<LocalChangeRecord[]>;
+  /** All rows with version > sinceVersion across synced tables. */
+  getChangesSince?(sinceVersion: number): Promise<LocalChangeRecord[]>;
+  getMaxVersion?(): Promise<number>;
 }
-
-// ── Global singleton ───────────────────────────────────────────────────
 
 let _store: DataStore | null = null;
 

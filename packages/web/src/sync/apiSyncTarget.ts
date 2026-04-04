@@ -117,7 +117,7 @@ export class ApiServerSyncTarget implements SyncTarget {
     const changes: ChangeRecord[] = (data.changes || []).map((c: Record<string, unknown>) => ({
       table: c.table as ChangeRecord['table'],
       key: c.key as string,
-      content: (c.content as string) ?? null,
+      data: (c.data as string) ?? null,
       version: c.version as number,
       updatedAt: c.updated_at as string,
       deletedAt: (c.deleted_at as string) ?? null,
@@ -134,7 +134,7 @@ export class ApiServerSyncTarget implements SyncTarget {
       changes: changes.map((c) => ({
         table: c.table,
         key: c.key,
-        content: c.content,
+        data: c.data,
         version: c.version,
         updated_at: c.updatedAt,
         deleted_at: c.deletedAt,

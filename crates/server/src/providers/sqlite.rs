@@ -1,7 +1,203 @@
 use async_trait::async_trait;
+use sqlx::Sqlite;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use super::traits::{BlobMeta, ChangeRecord, DatabaseProvider, NewUser, User};
+
+async fn bump_version_sqlite<'e, E: sqlx::Executor<'e, Database = Sqlite>>(e: E) -> anyhow::Result<i64> {
+    let row: (i64,) = sqlx::query_as(
+        "UPDATE version_seq SET current_version = current_version + 1 WHERE id = 1 RETURNING current_version",
+    )
+    .fetch_one(e)
+    .await?;
+    Ok(row.0)
+}
+
+async fn upsert_task_json_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    user_id: &str,
+    json: &str,
+) -> anyhow::Result<()> {
+    let v: serde_json::Value = serde_json::from_str(json)?;
+    let next_ver = bump_version_sqlite(&mut **tx).await?;
+    sqlx::query(
+        r#"INSERT INTO tasks (
+                user_id, id, title, description, status, body, created_at, updated_at, completed_at,
+                ddl, ddl_type, planned_at, role_id, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+                tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
+                version, deleted_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(user_id, id) DO UPDATE SET
+                title=excluded.title, description=excluded.description, status=excluded.status, body=excluded.body,
+                created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
+                ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
+                role_id=excluded.role_id, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
+                priority=excluded.priority, promoted=excluded.promoted, phase=excluded.phase, kanban_column=excluded.kanban_column,
+                tags=excluded.tags, subtask_ids=excluded.subtask_ids, resources=excluded.resources,
+                reminders=excluded.reminders, submissions=excluded.submissions, postponements=excluded.postponements,
+                status_history=excluded.status_history, progress_logs=excluded.progress_logs,
+                version=excluded.version, deleted_at=excluded.deleted_at"#,
+    )
+    .bind(user_id)
+    .bind(v["id"].as_str().unwrap_or(""))
+    .bind(v["title"].as_str().unwrap_or(""))
+    .bind(v["description"].as_str())
+    .bind(v["status"].as_str().unwrap_or("inbox"))
+    .bind(v["body"].as_str().unwrap_or(""))
+    .bind(v["created_at"].as_i64().unwrap_or(0))
+    .bind(v["updated_at"].as_i64().unwrap_or(0))
+    .bind(v["completed_at"].as_i64())
+    .bind(v["ddl"].as_i64())
+    .bind(v["ddl_type"].as_str())
+    .bind(v["planned_at"].as_i64())
+    .bind(v["role_id"].as_str())
+    .bind(v["parent_id"].as_str())
+    .bind(v["source_stream_id"].as_str())
+    .bind(v["priority"].as_f64())
+    .bind(v["promoted"].as_i64())
+    .bind(v["phase"].as_str())
+    .bind(v["kanban_column"].as_str())
+    .bind(v["tags"].as_str().unwrap_or("[]"))
+    .bind(v["subtask_ids"].as_str().unwrap_or("[]"))
+    .bind(v["resources"].as_str().unwrap_or("[]"))
+    .bind(v["reminders"].as_str().unwrap_or("[]"))
+    .bind(v["submissions"].as_str().unwrap_or("[]"))
+    .bind(v["postponements"].as_str().unwrap_or("[]"))
+    .bind(v["status_history"].as_str().unwrap_or("[]"))
+    .bind(v["progress_logs"].as_str().unwrap_or("[]"))
+    .bind(next_ver)
+    .bind(None::<String>)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn upsert_stream_entry_json_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    user_id: &str,
+    json: &str,
+) -> anyhow::Result<()> {
+    let v: serde_json::Value = serde_json::from_str(json)?;
+    let next_ver = bump_version_sqlite(&mut **tx).await?;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let updated_at = v
+        .get("updated_at")
+        .and_then(|x| x.as_i64())
+        .unwrap_or(now_ms);
+    sqlx::query(
+        r#"INSERT INTO stream_entries (
+                user_id, id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
+                tags, attachments, version, deleted_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(user_id, id) DO UPDATE SET
+                content=excluded.content, entry_type=excluded.entry_type, timestamp=excluded.timestamp,
+                date_key=excluded.date_key, role_id=excluded.role_id, extracted_task_id=excluded.extracted_task_id,
+                tags=excluded.tags, attachments=excluded.attachments, version=excluded.version, deleted_at=excluded.deleted_at,
+                updated_at=excluded.updated_at"#,
+    )
+    .bind(user_id)
+    .bind(v["id"].as_str().unwrap_or(""))
+    .bind(v["content"].as_str().unwrap_or(""))
+    .bind(v["entry_type"].as_str().unwrap_or("spark"))
+    .bind(v["timestamp"].as_i64().unwrap_or(0))
+    .bind(v["date_key"].as_str().unwrap_or(""))
+    .bind(v["role_id"].as_str())
+    .bind(v["extracted_task_id"].as_str())
+    .bind(v["tags"].as_str().unwrap_or("[]"))
+    .bind(v["attachments"].as_str().unwrap_or("[]"))
+    .bind(next_ver)
+    .bind(None::<String>)
+    .bind(updated_at)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn apply_remote_change_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    user_id: &str,
+    change: &ChangeRecord,
+) -> anyhow::Result<()> {
+    match change.table.as_str() {
+        "tasks" => {
+            if change.deleted_at.is_some() {
+                let next_ver = bump_version_sqlite(&mut **tx).await?;
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                sqlx::query(
+                    "UPDATE tasks SET deleted_at = ?, updated_at = ?, version = ?
+                     WHERE user_id = ? AND id = ? AND deleted_at IS NULL",
+                )
+                .bind(now_ms.to_string())
+                .bind(now_ms)
+                .bind(next_ver)
+                .bind(user_id)
+                .bind(&change.key)
+                .execute(&mut **tx)
+                .await?;
+            } else if let Some(data) = &change.data {
+                upsert_task_json_tx(tx, user_id, data).await?;
+            }
+        }
+        "stream_entries" => {
+            if change.deleted_at.is_some() {
+                let next_ver = bump_version_sqlite(&mut **tx).await?;
+                sqlx::query(
+                    "UPDATE stream_entries SET deleted_at = datetime('now'), version = ?
+                     WHERE user_id = ? AND id = ? AND deleted_at IS NULL",
+                )
+                .bind(next_ver)
+                .bind(user_id)
+                .bind(&change.key)
+                .execute(&mut **tx)
+                .await?;
+            } else if let Some(data) = &change.data {
+                upsert_stream_entry_json_tx(tx, user_id, data).await?;
+            }
+        }
+        "settings" => {
+            if change.deleted_at.is_some() {
+                let next_ver = bump_version_sqlite(&mut **tx).await?;
+                sqlx::query(
+                    "UPDATE settings SET deleted_at = datetime('now'), updated_at = datetime('now'), version = ?
+                     WHERE user_id = ? AND key = ? AND deleted_at IS NULL",
+                )
+                .bind(next_ver)
+                .bind(user_id)
+                .bind(&change.key)
+                .execute(&mut **tx)
+                .await?;
+            } else if let Some(data) = &change.data {
+                let v: serde_json::Value = serde_json::from_str(data)?;
+                let value = v["value"].as_str().unwrap_or("");
+                let next_ver = bump_version_sqlite(&mut **tx).await?;
+                sqlx::query(
+                    "INSERT INTO settings (user_id, key, value, updated_at, version, deleted_at)
+                     VALUES (?, ?, ?, datetime('now'), ?, NULL)
+                     ON CONFLICT(user_id, key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = datetime('now'),
+                       version = excluded.version,
+                       deleted_at = NULL",
+                )
+                .bind(user_id)
+                .bind(&change.key)
+                .bind(value)
+                .bind(next_ver)
+                .execute(&mut **tx)
+                .await?;
+            }
+        }
+        "blobs" => {}
+        _ => {}
+    }
+    Ok(())
+}
 
 pub struct SqliteProvider {
     pool: SqlitePool,
@@ -258,96 +454,351 @@ impl SqliteProvider {
                 .await?;
         }
 
+        // --- V5: relational tasks + stream_entries (replaces virtual files for app data) ---
+        if current_version < 5 {
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS tasks (
+                    user_id TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    status TEXT NOT NULL DEFAULT 'inbox',
+                    body TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    completed_at INTEGER,
+                    ddl INTEGER,
+                    ddl_type TEXT,
+                    planned_at INTEGER,
+                    role_id TEXT,
+                    parent_id TEXT,
+                    source_stream_id TEXT,
+                    priority REAL,
+                    promoted INTEGER,
+                    phase TEXT,
+                    kanban_column TEXT,
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    subtask_ids TEXT NOT NULL DEFAULT '[]',
+                    resources TEXT NOT NULL DEFAULT '[]',
+                    reminders TEXT NOT NULL DEFAULT '[]',
+                    submissions TEXT NOT NULL DEFAULT '[]',
+                    postponements TEXT NOT NULL DEFAULT '[]',
+                    status_history TEXT NOT NULL DEFAULT '[]',
+                    progress_logs TEXT NOT NULL DEFAULT '[]',
+                    version INTEGER NOT NULL DEFAULT 0,
+                    deleted_at TEXT,
+                    PRIMARY KEY (user_id, id)
+                )",
+            )
+            .execute(&pool)
+            .await?;
+
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_user_version ON tasks (user_id, version)",
+            )
+            .execute(&pool)
+            .await?;
+
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS stream_entries (
+                    user_id TEXT NOT NULL,
+                    id TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    entry_type TEXT NOT NULL DEFAULT 'spark',
+                    timestamp INTEGER NOT NULL,
+                    date_key TEXT NOT NULL,
+                    role_id TEXT,
+                    extracted_task_id TEXT,
+                    tags TEXT NOT NULL DEFAULT '[]',
+                    attachments TEXT NOT NULL DEFAULT '[]',
+                    version INTEGER NOT NULL DEFAULT 0,
+                    deleted_at TEXT,
+                    PRIMARY KEY (user_id, id)
+                )",
+            )
+            .execute(&pool)
+            .await?;
+
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_stream_user_date ON stream_entries (user_id, date_key)",
+            )
+            .execute(&pool)
+            .await?;
+
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_stream_user_version ON stream_entries (user_id, version)",
+            )
+            .execute(&pool)
+            .await?;
+
+            sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (5)")
+                .execute(&pool)
+                .await?;
+        }
+
+        // --- V6: stream_entries.updated_at (LWW uses wall time on edit, not original timestamp) ---
+        if current_version < 6 {
+            let has_updated_at: bool = sqlx::query_as::<_, (i64,)>(
+                "SELECT COUNT(*) FROM pragma_table_info('stream_entries') WHERE name = 'updated_at'",
+            )
+            .fetch_one(&pool)
+            .await
+            .map(|r| r.0 > 0)
+            .unwrap_or(false);
+
+            if !has_updated_at {
+                sqlx::query("ALTER TABLE stream_entries ADD COLUMN updated_at INTEGER")
+                    .execute(&pool)
+                    .await?;
+                sqlx::query("UPDATE stream_entries SET updated_at = timestamp WHERE updated_at IS NULL")
+                    .execute(&pool)
+                    .await?;
+            }
+
+            sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (6)")
+                .execute(&pool)
+                .await?;
+        }
+
         Ok(Self { pool })
     }
 }
 
 #[async_trait]
 impl DatabaseProvider for SqliteProvider {
-    // --- File operations ---
+    // --- Tasks ---
 
-    async fn get_file(&self, path: &str) -> anyhow::Result<Option<String>> {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT content FROM files WHERE path = ? AND deleted_at IS NULL")
-                .bind(path)
-                .fetch_optional(&self.pool)
-                .await?;
+    async fn list_tasks_json(&self, user_id: &str) -> anyhow::Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            r#"SELECT json_object(
+                'id', id, 'title', title, 'description', description, 'status', status, 'body', body,
+                'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
+                'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
+                'role_id', role_id, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
+                'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
+                'status_history', status_history, 'progress_logs', progress_logs,
+                'version', version, 'deleted_at', deleted_at
+            ) FROM tasks WHERE user_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC"#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    }
+
+    async fn get_task_json(&self, user_id: &str, id: &str) -> anyhow::Result<Option<String>> {
+        let row: Option<(String,)> = sqlx::query_as(
+            r#"SELECT json_object(
+                'id', id, 'title', title, 'description', description, 'status', status, 'body', body,
+                'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
+                'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
+                'role_id', role_id, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
+                'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
+                'status_history', status_history, 'progress_logs', progress_logs,
+                'version', version, 'deleted_at', deleted_at
+            ) FROM tasks WHERE user_id = ? AND id = ? AND deleted_at IS NULL"#,
+        )
+        .bind(user_id)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(row.map(|r| r.0))
     }
 
-    async fn put_file(&self, path: &str, content: &str) -> anyhow::Result<()> {
-        let next_ver = self.next_version().await?;
+    async fn upsert_task_json(&self, user_id: &str, json: &str) -> anyhow::Result<()> {
+        let v: serde_json::Value = serde_json::from_str(json)?;
+        let next_ver = bump_version_sqlite(&self.pool).await?;
         sqlx::query(
-            "INSERT INTO files (path, content, updated_at, version, deleted_at)
-             VALUES (?, ?, datetime('now'), ?, NULL)
-             ON CONFLICT(path) DO UPDATE SET
-               content = excluded.content,
-               updated_at = datetime('now'),
-               version = excluded.version,
-               deleted_at = NULL",
+            r#"INSERT INTO tasks (
+                user_id, id, title, description, status, body, created_at, updated_at, completed_at,
+                ddl, ddl_type, planned_at, role_id, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+                tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
+                version, deleted_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(user_id, id) DO UPDATE SET
+                title=excluded.title, description=excluded.description, status=excluded.status, body=excluded.body,
+                created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
+                ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
+                role_id=excluded.role_id, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
+                priority=excluded.priority, promoted=excluded.promoted, phase=excluded.phase, kanban_column=excluded.kanban_column,
+                tags=excluded.tags, subtask_ids=excluded.subtask_ids, resources=excluded.resources,
+                reminders=excluded.reminders, submissions=excluded.submissions, postponements=excluded.postponements,
+                status_history=excluded.status_history, progress_logs=excluded.progress_logs,
+                version=excluded.version, deleted_at=excluded.deleted_at"#,
         )
-        .bind(path)
-        .bind(content)
+        .bind(user_id)
+        .bind(v["id"].as_str().unwrap_or(""))
+        .bind(v["title"].as_str().unwrap_or(""))
+        .bind(v["description"].as_str())
+        .bind(v["status"].as_str().unwrap_or("inbox"))
+        .bind(v["body"].as_str().unwrap_or(""))
+        .bind(v["created_at"].as_i64().unwrap_or(0))
+        .bind(v["updated_at"].as_i64().unwrap_or(0))
+        .bind(v["completed_at"].as_i64())
+        .bind(v["ddl"].as_i64())
+        .bind(v["ddl_type"].as_str())
+        .bind(v["planned_at"].as_i64())
+        .bind(v["role_id"].as_str())
+        .bind(v["parent_id"].as_str())
+        .bind(v["source_stream_id"].as_str())
+        .bind(v["priority"].as_f64())
+        .bind(v["promoted"].as_i64())
+        .bind(v["phase"].as_str())
+        .bind(v["kanban_column"].as_str())
+        .bind(v["tags"].as_str().unwrap_or("[]"))
+        .bind(v["subtask_ids"].as_str().unwrap_or("[]"))
+        .bind(v["resources"].as_str().unwrap_or("[]"))
+        .bind(v["reminders"].as_str().unwrap_or("[]"))
+        .bind(v["submissions"].as_str().unwrap_or("[]"))
+        .bind(v["postponements"].as_str().unwrap_or("[]"))
+        .bind(v["status_history"].as_str().unwrap_or("[]"))
+        .bind(v["progress_logs"].as_str().unwrap_or("[]"))
         .bind(next_ver)
+        .bind(None::<String>)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
-    async fn delete_file(&self, path: &str) -> anyhow::Result<()> {
-        let next_ver = self.next_version().await?;
+    async fn delete_task_row(&self, user_id: &str, id: &str) -> anyhow::Result<()> {
+        let next_ver = bump_version_sqlite(&self.pool).await?;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        // tasks.updated_at is INTEGER (epoch ms); do not use datetime('now') TEXT into INTEGER column.
         sqlx::query(
-            "UPDATE files SET deleted_at = datetime('now'), updated_at = datetime('now'), version = ?
-             WHERE path = ? AND deleted_at IS NULL",
+            "UPDATE tasks SET deleted_at = ?, updated_at = ?, version = ?
+             WHERE user_id = ? AND id = ? AND deleted_at IS NULL",
         )
+        .bind(now_ms.to_string())
+        .bind(now_ms)
         .bind(next_ver)
-        .bind(path)
+        .bind(user_id)
+        .bind(id)
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
-    async fn list_files(&self, dir: &str) -> anyhow::Result<Vec<String>> {
-        let prefix = if dir.ends_with('/') {
-            dir.to_string()
-        } else {
-            format!("{}/", dir)
-        };
-        let like_direct = format!("{}%", prefix);
-        let like_nested = format!("{}%/%", prefix);
+    // --- Stream ---
 
+    async fn list_stream_day_json(&self, user_id: &str, date_key: &str) -> anyhow::Result<Vec<String>> {
         let rows: Vec<(String,)> = sqlx::query_as(
-            "SELECT path FROM files
-             WHERE path LIKE ? AND path NOT LIKE ? AND path LIKE '%.md'
-               AND deleted_at IS NULL
-             ORDER BY path DESC",
+            r#"SELECT json_object(
+                'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
+                'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
+                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'updated_at', COALESCE(updated_at, timestamp)
+            ) FROM stream_entries WHERE user_id = ? AND date_key = ? AND deleted_at IS NULL ORDER BY timestamp ASC"#,
         )
-        .bind(&like_direct)
-        .bind(&like_nested)
+        .bind(user_id)
+        .bind(date_key)
         .fetch_all(&self.pool)
         .await?;
-
-        Ok(rows
-            .into_iter()
-            .map(|r| r.0[prefix.len()..].to_string())
-            .collect())
+        Ok(rows.into_iter().map(|r| r.0).collect())
     }
 
-    async fn list_all_files(&self, prefix: &str) -> anyhow::Result<Vec<String>> {
-        let rows: Vec<(String,)> = if prefix.is_empty() {
-            sqlx::query_as("SELECT path FROM files WHERE deleted_at IS NULL ORDER BY path")
-                .fetch_all(&self.pool)
-                .await?
-        } else {
-            let pattern = format!("{}/%", prefix);
-            sqlx::query_as(
-                "SELECT path FROM files WHERE path LIKE ? AND deleted_at IS NULL ORDER BY path",
-            )
-            .bind(&pattern)
-            .fetch_all(&self.pool)
-            .await?
-        };
+    async fn list_stream_recent_json(&self, user_id: &str, days: i32) -> anyhow::Result<Vec<String>> {
+        let offset = format!("-{} days", days.max(1));
+        let rows: Vec<(String,)> = sqlx::query_as(
+            r#"SELECT json_object(
+                'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
+                'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
+                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'updated_at', COALESCE(updated_at, timestamp)
+            ) FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL
+            AND date_key >= date('now', ?) ORDER BY timestamp DESC"#,
+        )
+        .bind(user_id)
+        .bind(&offset)
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows.into_iter().map(|r| r.0).collect())
+    }
+
+    async fn list_stream_date_keys(&self, user_id: &str) -> anyhow::Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT date_key FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL ORDER BY date_key DESC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    }
+
+    async fn list_all_stream_json(&self, user_id: &str) -> anyhow::Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            r#"SELECT json_object(
+                'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
+                'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
+                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'updated_at', COALESCE(updated_at, timestamp)
+            ) FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL
+            ORDER BY date_key DESC, timestamp DESC"#,
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    }
+
+    async fn upsert_stream_entry_json(&self, user_id: &str, json: &str) -> anyhow::Result<()> {
+        let v: serde_json::Value = serde_json::from_str(json)?;
+        let next_ver = bump_version_sqlite(&self.pool).await?;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let updated_at = v
+            .get("updated_at")
+            .and_then(|x| x.as_i64())
+            .unwrap_or(now_ms);
+        sqlx::query(
+            r#"INSERT INTO stream_entries (
+                user_id, id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
+                tags, attachments, version, deleted_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(user_id, id) DO UPDATE SET
+                content=excluded.content, entry_type=excluded.entry_type, timestamp=excluded.timestamp,
+                date_key=excluded.date_key, role_id=excluded.role_id, extracted_task_id=excluded.extracted_task_id,
+                tags=excluded.tags, attachments=excluded.attachments, version=excluded.version, deleted_at=excluded.deleted_at,
+                updated_at=excluded.updated_at"#,
+        )
+        .bind(user_id)
+        .bind(v["id"].as_str().unwrap_or(""))
+        .bind(v["content"].as_str().unwrap_or(""))
+        .bind(v["entry_type"].as_str().unwrap_or("spark"))
+        .bind(v["timestamp"].as_i64().unwrap_or(0))
+        .bind(v["date_key"].as_str().unwrap_or(""))
+        .bind(v["role_id"].as_str())
+        .bind(v["extracted_task_id"].as_str())
+        .bind(v["tags"].as_str().unwrap_or("[]"))
+        .bind(v["attachments"].as_str().unwrap_or("[]"))
+        .bind(next_ver)
+        .bind(None::<String>)
+        .bind(updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_stream_entry_row(&self, user_id: &str, id: &str) -> anyhow::Result<()> {
+        let next_ver = bump_version_sqlite(&self.pool).await?;
+        sqlx::query(
+            "UPDATE stream_entries SET deleted_at = datetime('now'), version = ?
+             WHERE user_id = ? AND id = ? AND deleted_at IS NULL",
+        )
+        .bind(next_ver)
+        .bind(user_id)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     // --- User operations ---
@@ -460,7 +911,7 @@ impl DatabaseProvider for SqliteProvider {
     }
 
     async fn put_setting(&self, user_id: &str, key: &str, value: &str) -> anyhow::Result<()> {
-        let next_ver = self.next_version().await?;
+        let next_ver = bump_version_sqlite(&self.pool).await?;
         sqlx::query(
             "INSERT INTO settings (user_id, key, value, updated_at, version, deleted_at)
              VALUES (?, ?, ?, datetime('now'), ?, NULL)
@@ -480,7 +931,7 @@ impl DatabaseProvider for SqliteProvider {
     }
 
     async fn delete_setting(&self, user_id: &str, key: &str) -> anyhow::Result<()> {
-        let next_ver = self.next_version().await?;
+        let next_ver = bump_version_sqlite(&self.pool).await?;
         sqlx::query(
             "UPDATE settings SET deleted_at = datetime('now'), updated_at = datetime('now'), version = ?
              WHERE user_id = ? AND key = ? AND deleted_at IS NULL",
@@ -513,15 +964,20 @@ impl DatabaseProvider for SqliteProvider {
         mime_type: &str,
         size: i64,
     ) -> anyhow::Result<()> {
+        let next_ver = bump_version_sqlite(&self.pool).await?;
         sqlx::query(
-            "INSERT INTO blobs (id, owner, filename, mime_type, size) VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT(id) DO UPDATE SET filename = excluded.filename, mime_type = excluded.mime_type, size = excluded.size",
+            "INSERT INTO blobs (id, owner, filename, mime_type, size, version, deleted_at)
+             VALUES (?, ?, ?, ?, ?, ?, NULL)
+             ON CONFLICT(id) DO UPDATE SET
+               filename = excluded.filename, mime_type = excluded.mime_type, size = excluded.size,
+               version = excluded.version, deleted_at = NULL",
         )
         .bind(id)
         .bind(owner)
         .bind(filename)
         .bind(mime_type)
         .bind(size)
+        .bind(next_ver)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -547,7 +1003,7 @@ impl DatabaseProvider for SqliteProvider {
     }
 
     async fn delete_blob_meta(&self, id: &str) -> anyhow::Result<()> {
-        let next_ver = self.next_version().await?;
+        let next_ver = bump_version_sqlite(&self.pool).await?;
         sqlx::query(
             "UPDATE blobs SET deleted_at = datetime('now'), version = ?
              WHERE id = ? AND deleted_at IS NULL",
@@ -584,53 +1040,111 @@ impl DatabaseProvider for SqliteProvider {
 
     // --- Sync operations ---
 
-    async fn get_changes_since(&self, since_version: i64) -> anyhow::Result<Vec<ChangeRecord>> {
+    async fn get_changes_since(&self, user_id: &str, since_version: i64) -> anyhow::Result<Vec<ChangeRecord>> {
         let mut changes = Vec::new();
 
-        let file_rows: Vec<(String, Option<String>, i64, String, Option<String>)> =
-            sqlx::query_as(
-                "SELECT path, content, version, updated_at, deleted_at
-                 FROM files WHERE version > ? ORDER BY version",
-            )
-            .bind(since_version)
-            .fetch_all(&self.pool)
-            .await?;
+        let task_rows: Vec<(String, String, i64, i64, Option<String>)> = sqlx::query_as(
+            r#"SELECT id,
+                json_object(
+                    'id', id, 'title', title, 'description', description, 'status', status, 'body', body,
+                    'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
+                    'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
+                    'role_id', role_id, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                    'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                    'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
+                    'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
+                    'status_history', status_history, 'progress_logs', progress_logs,
+                    'version', version, 'deleted_at', deleted_at
+                ),
+                version, updated_at, deleted_at
+                FROM tasks WHERE user_id = ? AND version > ? ORDER BY version"#,
+        )
+        .bind(user_id)
+        .bind(since_version)
+        .fetch_all(&self.pool)
+        .await?;
 
-        for r in file_rows {
+        for r in task_rows {
             changes.push(ChangeRecord {
-                table: "files".into(),
+                table: "tasks".into(),
                 key: r.0,
-                content: r.1,
+                data: if r.4.is_some() {
+                    None
+                } else {
+                    Some(r.1)
+                },
+                version: r.2,
+                updated_at: r.3.to_string(),
+                deleted_at: r.4,
+            });
+        }
+
+        let stream_rows: Vec<(String, String, i64, i64, Option<String>)> = sqlx::query_as(
+            r#"SELECT id,
+                json_object(
+                    'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
+                    'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
+                    'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                    'updated_at', COALESCE(updated_at, timestamp)
+                ),
+                version,
+                COALESCE(updated_at, timestamp),
+                deleted_at
+                FROM stream_entries WHERE user_id = ? AND version > ? ORDER BY version"#,
+        )
+        .bind(user_id)
+        .bind(since_version)
+        .fetch_all(&self.pool)
+        .await?;
+
+        for r in stream_rows {
+            changes.push(ChangeRecord {
+                table: "stream_entries".into(),
+                key: r.0,
+                data: if r.4.is_some() {
+                    None
+                } else {
+                    Some(r.1)
+                },
+                version: r.2,
+                updated_at: r.3.to_string(),
+                deleted_at: r.4,
+            });
+        }
+
+        let setting_rows: Vec<(String, Option<String>, i64, String, Option<String>)> = sqlx::query_as(
+            "SELECT key, value, version, updated_at, deleted_at
+             FROM settings WHERE user_id = ? AND version > ? ORDER BY version",
+        )
+        .bind(user_id)
+        .bind(since_version)
+        .fetch_all(&self.pool)
+        .await?;
+
+        for r in setting_rows {
+            let payload = r.1.as_ref().map(|val| {
+                serde_json::json!({
+                    "key": r.0,
+                    "value": val,
+                    "version": r.2,
+                })
+                .to_string()
+            });
+            changes.push(ChangeRecord {
+                table: "settings".into(),
+                key: r.0.clone(),
+                data: if r.4.is_some() { None } else { payload },
                 version: r.2,
                 updated_at: r.3,
                 deleted_at: r.4,
             });
         }
 
-        let setting_rows: Vec<(String, String, Option<String>, i64, String, Option<String>)> =
-            sqlx::query_as(
-                "SELECT user_id, key, value, version, updated_at, deleted_at
-                 FROM settings WHERE version > ? ORDER BY version",
-            )
-            .bind(since_version)
-            .fetch_all(&self.pool)
-            .await?;
-
-        for r in setting_rows {
-            changes.push(ChangeRecord {
-                table: "settings".into(),
-                key: format!("{}:{}", r.0, r.1),
-                content: r.2,
-                version: r.3,
-                updated_at: r.4,
-                deleted_at: r.5,
-            });
-        }
-
         let blob_rows: Vec<(String, i64, String, Option<String>)> = sqlx::query_as(
             "SELECT id, version, created_at, deleted_at
-             FROM blobs WHERE version > ? ORDER BY version",
+             FROM blobs WHERE owner = ? AND version > ? ORDER BY version",
         )
+        .bind(user_id)
         .bind(since_version)
         .fetch_all(&self.pool)
         .await?;
@@ -638,8 +1152,8 @@ impl DatabaseProvider for SqliteProvider {
         for r in blob_rows {
             changes.push(ChangeRecord {
                 table: "blobs".into(),
-                key: r.0,
-                content: None,
+                key: r.0.clone(),
+                data: None,
                 version: r.1,
                 updated_at: r.2,
                 deleted_at: r.3,
@@ -659,77 +1173,40 @@ impl DatabaseProvider for SqliteProvider {
         Ok(row.0)
     }
 
-    async fn apply_remote_change(&self, change: &ChangeRecord) -> anyhow::Result<()> {
-        let next_ver = self.next_version().await?;
-        match change.table.as_str() {
-            "files" => {
-                if change.deleted_at.is_some() {
-                    sqlx::query(
-                        "UPDATE files SET deleted_at = ?, updated_at = ?, version = ?
-                         WHERE path = ?",
-                    )
-                    .bind(&change.deleted_at)
-                    .bind(&change.updated_at)
-                    .bind(next_ver)
-                    .bind(&change.key)
-                    .execute(&self.pool)
-                    .await?;
-                } else if let Some(content) = &change.content {
-                    sqlx::query(
-                        "INSERT INTO files (path, content, updated_at, version, deleted_at)
-                         VALUES (?, ?, ?, ?, NULL)
-                         ON CONFLICT(path) DO UPDATE SET
-                           content = excluded.content,
-                           updated_at = excluded.updated_at,
-                           version = excluded.version,
-                           deleted_at = NULL",
-                    )
-                    .bind(&change.key)
-                    .bind(content)
-                    .bind(&change.updated_at)
-                    .bind(next_ver)
-                    .execute(&self.pool)
-                    .await?;
-                }
-            }
-            "settings" => {
-                let parts: Vec<&str> = change.key.splitn(2, ':').collect();
-                if parts.len() == 2 {
-                    let (user_id, key) = (parts[0], parts[1]);
-                    if change.deleted_at.is_some() {
-                        sqlx::query(
-                            "UPDATE settings SET deleted_at = ?, updated_at = ?, version = ?
-                             WHERE user_id = ? AND key = ?",
-                        )
-                        .bind(&change.deleted_at)
-                        .bind(&change.updated_at)
-                        .bind(next_ver)
-                        .bind(user_id)
-                        .bind(key)
-                        .execute(&self.pool)
-                        .await?;
-                    } else if let Some(value) = &change.content {
-                        sqlx::query(
-                            "INSERT INTO settings (user_id, key, value, updated_at, version, deleted_at)
-                             VALUES (?, ?, ?, ?, ?, NULL)
-                             ON CONFLICT(user_id, key) DO UPDATE SET
-                               value = excluded.value,
-                               updated_at = excluded.updated_at,
-                               version = excluded.version,
-                               deleted_at = NULL",
-                        )
-                        .bind(user_id)
-                        .bind(key)
-                        .bind(value)
-                        .bind(&change.updated_at)
-                        .bind(next_ver)
-                        .execute(&self.pool)
-                        .await?;
-                    }
-                }
-            }
-            _ => {}
+    async fn get_max_version_for_user(&self, user_id: &str) -> anyhow::Result<i64> {
+        let row: (i64,) = sqlx::query_as(
+            r#"SELECT COALESCE(MAX(v), 0) FROM (
+                SELECT version AS v FROM tasks WHERE user_id = ?
+                UNION ALL
+                SELECT version FROM stream_entries WHERE user_id = ?
+                UNION ALL
+                SELECT version FROM settings WHERE user_id = ?
+                UNION ALL
+                SELECT version FROM blobs WHERE owner = ?
+            )"#,
+        )
+        .bind(user_id)
+        .bind(user_id)
+        .bind(user_id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.0)
+    }
+
+    async fn apply_remote_change(&self, user_id: &str, change: &ChangeRecord) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        apply_remote_change_tx(&mut tx, user_id, change).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn apply_remote_changes_batch(&self, user_id: &str, changes: &[ChangeRecord]) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for change in changes {
+            apply_remote_change_tx(&mut tx, user_id, change).await?;
         }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -738,17 +1215,5 @@ impl DatabaseProvider for SqliteProvider {
     async fn close(&self) -> anyhow::Result<()> {
         self.pool.close().await;
         Ok(())
-    }
-}
-
-impl SqliteProvider {
-    async fn next_version(&self) -> anyhow::Result<i64> {
-        let row: (i64,) = sqlx::query_as(
-            "UPDATE version_seq SET current_version = current_version + 1
-             WHERE id = 1 RETURNING current_version",
-        )
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(row.0)
     }
 }

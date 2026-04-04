@@ -42,20 +42,19 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
         runtimeCaching: [
           {
-            urlPattern: /\/api\/files\/list/,
+            urlPattern: /\/api\/tasks/,
             handler: 'StaleWhileRevalidate',
             options: {
-              cacheName: 'api-file-list',
-              expiration: { maxEntries: 50, maxAgeSeconds: 24 * 60 * 60 },
+              cacheName: 'api-tasks',
+              expiration: { maxEntries: 100, maxAgeSeconds: 24 * 60 * 60 },
             },
           },
           {
-            urlPattern: /\/api\/files\?/,
-            handler: 'NetworkFirst',
+            urlPattern: /\/api\/stream/,
+            handler: 'StaleWhileRevalidate',
             options: {
-              cacheName: 'api-files',
+              cacheName: 'api-stream',
               expiration: { maxEntries: 200, maxAgeSeconds: 24 * 60 * 60 },
-              networkTimeoutSeconds: 5,
             },
           },
           {

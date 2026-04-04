@@ -77,7 +77,8 @@ pub struct MigrateRequest {
 #[derive(Serialize)]
 pub struct MigrateResponse {
     pub ok: bool,
-    pub files_migrated: usize,
+    pub tasks_migrated: usize,
+    pub stream_migrated: usize,
     pub settings_migrated: usize,
     pub message: String,
 }
@@ -90,7 +91,6 @@ pub async fn migrate_data(
     let target_db = match body.target_db_type.as_str() {
         "sqlite" => DbType::Sqlite,
         "postgres" | "postgresql" => DbType::Postgres,
-        "mysql" => DbType::Mysql,
         other => return Err(bad_request(&format!("Unknown db_type: {}", other))),
     };
 
@@ -119,30 +119,35 @@ pub async fn migrate_data(
         String::new()
     };
 
-    // Migrate files
-    let all_files = state
+    // Migrate tasks + stream (relational rows)
+    let task_rows = state
         .db
-        .list_all_files(&prefix)
+        .list_tasks_json(&prefix)
         .await
-        .map_err(|e| internal(&format!("Failed listing files: {}", e)))?;
+        .map_err(|e| internal(&format!("Failed listing tasks: {}", e)))?;
 
-    let mut files_migrated = 0usize;
-    for file_path in &all_files {
-        let full_path = if prefix.is_empty() {
-            file_path.clone()
-        } else {
-            format!("{}/{}", prefix, file_path)
-        };
+    let mut tasks_migrated = 0usize;
+    for json in &task_rows {
+        target_provider
+            .upsert_task_json(&prefix, json)
+            .await
+            .map_err(|e| internal(&format!("Failed upserting task: {}", e)))?;
+        tasks_migrated += 1;
+    }
 
-        if let Ok(Some(content)) = state.db.get_file(&full_path).await {
-            target_provider
-                .put_file(&full_path, &content)
-                .await
-                .map_err(|e| {
-                    internal(&format!("Failed writing file {}: {}", full_path, e))
-                })?;
-            files_migrated += 1;
-        }
+    let stream_rows = state
+        .db
+        .list_all_stream_json(&prefix)
+        .await
+        .map_err(|e| internal(&format!("Failed listing stream: {}", e)))?;
+
+    let mut stream_migrated = 0usize;
+    for json in &stream_rows {
+        target_provider
+            .upsert_stream_entry_json(&prefix, json)
+            .await
+            .map_err(|e| internal(&format!("Failed upserting stream entry: {}", e)))?;
+        stream_migrated += 1;
     }
 
     // Migrate settings
@@ -172,7 +177,8 @@ pub async fn migrate_data(
 
     Ok(Json(MigrateResponse {
         ok: true,
-        files_migrated,
+        tasks_migrated,
+        stream_migrated,
         settings_migrated,
         message: format!(
             "Migration complete. Update your config to use {:?} and restart.",
@@ -184,14 +190,9 @@ pub async fn migrate_data(
 // ── GET /api/export/json — export all user data as JSON ──────────────
 
 #[derive(Serialize)]
-pub struct ExportFile {
-    pub path: String,
-    pub content: String,
-}
-
-#[derive(Serialize)]
 pub struct ExportJsonResponse {
-    pub files: Vec<ExportFile>,
+    pub tasks: Vec<String>,
+    pub stream_entries: Vec<String>,
     pub settings: Vec<(String, String)>,
 }
 
@@ -205,26 +206,17 @@ pub async fn export_json(
         String::new()
     };
 
-    let all_paths = state
+    let tasks = state
         .db
-        .list_all_files(&prefix)
+        .list_tasks_json(&prefix)
         .await
         .map_err(|e| internal(&e.to_string()))?;
 
-    let mut files = Vec::with_capacity(all_paths.len());
-    for rel in &all_paths {
-        let full = if prefix.is_empty() {
-            rel.clone()
-        } else {
-            format!("{}/{}", prefix, rel)
-        };
-        if let Ok(Some(content)) = state.db.get_file(&full).await {
-            files.push(ExportFile {
-                path: rel.clone(),
-                content,
-            });
-        }
-    }
+    let stream_entries = state
+        .db
+        .list_all_stream_json(&prefix)
+        .await
+        .map_err(|e| internal(&e.to_string()))?;
 
     let settings = state
         .db
@@ -232,7 +224,11 @@ pub async fn export_json(
         .await
         .map_err(|e| internal(&e.to_string()))?;
 
-    Ok(Json(ExportJsonResponse { files, settings }))
+    Ok(Json(ExportJsonResponse {
+        tasks,
+        stream_entries,
+        settings,
+    }))
 }
 
 // ── GET /api/export/markdown — download all .md files as concatenated JSON
@@ -248,8 +244,8 @@ pub async fn export_markdown(
         String::new()
     };
 
-    let all_paths = match state.db.list_all_files(&prefix).await {
-        Ok(p) => p,
+    let tasks = match state.db.list_tasks_json(&prefix).await {
+        Ok(t) => t,
         Err(e) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -260,14 +256,13 @@ pub async fn export_markdown(
     };
 
     let mut entries = Vec::new();
-    for rel in &all_paths {
-        let full = if prefix.is_empty() {
-            rel.clone()
-        } else {
-            format!("{}/{}", prefix, rel)
-        };
-        if let Ok(Some(content)) = state.db.get_file(&full).await {
-            entries.push(serde_json::json!({ "path": rel, "content": content }));
+    for raw in tasks {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("task");
+            let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("");
+            let body = v.get("body").and_then(|x| x.as_str()).unwrap_or("");
+            let md = format!("# {}\n\n{}", title, body);
+            entries.push(serde_json::json!({ "path": format!("data/tasks/{}.md", id), "content": md }));
         }
     }
 
@@ -290,6 +285,12 @@ pub struct ImportFile {
 
 #[derive(Deserialize)]
 pub struct ImportJsonRequest {
+    #[serde(default)]
+    pub tasks: Vec<String>,
+    #[serde(default)]
+    pub stream_entries: Vec<String>,
+    /// Legacy virtual-file import (ignored; use migration tool for old DBs).
+    #[serde(default)]
     pub files: Vec<ImportFile>,
     #[serde(default)]
     pub settings: Vec<(String, String)>,
@@ -298,7 +299,8 @@ pub struct ImportJsonRequest {
 #[derive(Serialize)]
 pub struct ImportJsonResponse {
     pub ok: bool,
-    pub files_imported: usize,
+    pub tasks_imported: usize,
+    pub stream_imported: usize,
     pub settings_imported: usize,
 }
 
@@ -313,21 +315,30 @@ pub async fn import_json(
         String::new()
     };
 
-    let mut files_imported = 0usize;
-    for file in &body.files {
-        let validated = crate::utils::validate_path(&file.path)
-            .map_err(|e| bad_request(&format!("Invalid path '{}': {}", file.path, e)))?;
-        let full = if prefix.is_empty() {
-            validated
-        } else {
-            format!("{}/{}", prefix, validated)
-        };
+    if !body.files.is_empty() {
+        return Err(bad_request(
+            "Legacy `files` import is no longer supported; use DB migration or re-export from a current client.",
+        ));
+    }
+
+    let mut tasks_imported = 0usize;
+    for json in &body.tasks {
         state
             .db
-            .put_file(&full, &file.content)
+            .upsert_task_json(&prefix, json)
             .await
-            .map_err(|e| internal(&format!("Failed writing file {}: {}", full, e)))?;
-        files_imported += 1;
+            .map_err(|e| internal(&format!("Failed importing task: {}", e)))?;
+        tasks_imported += 1;
+    }
+
+    let mut stream_imported = 0usize;
+    for json in &body.stream_entries {
+        state
+            .db
+            .upsert_stream_entry_json(&prefix, json)
+            .await
+            .map_err(|e| internal(&format!("Failed importing stream entry: {}", e)))?;
+        stream_imported += 1;
     }
 
     let mut settings_imported = 0usize;
@@ -342,7 +353,8 @@ pub async fn import_json(
 
     Ok(Json(ImportJsonResponse {
         ok: true,
-        files_imported,
+        tasks_imported,
+        stream_imported,
         settings_imported,
     }))
 }
@@ -371,7 +383,7 @@ pub async fn export_to_disk(
         String::new()
     };
 
-    let count = crate::export::full_export_to_disk(&state.db, &user_id, &body.path, &prefix)
+    let count = crate::export::full_export_to_disk(&state.db, &prefix, &body.path)
         .await
         .map_err(|e| internal(&format!("Export failed: {}", e)))?;
 
