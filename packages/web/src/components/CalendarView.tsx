@@ -1,5 +1,5 @@
 import type { Task } from '@my-little-todo/core';
-import { isOverdue } from '@my-little-todo/core';
+import { displayTaskTitle, isOverdue } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -327,24 +327,24 @@ export function CalendarView({
                   <p className="text-[10px] font-medium" style={{ color: 'var(--color-warning)' }}>
                     {t('Due')}
                   </p>
-                  {selectedDay.ddlTasks.map((t) => (
+                  {selectedDay.ddlTasks.map((taskItem) => (
                     <button
-                      key={t.id}
+                      key={taskItem.id}
                       type="button"
-                      onClick={() => onSelectTask(t.id)}
+                      onClick={() => onSelectTask(taskItem.id)}
                       className="w-full text-left flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-[var(--color-bg)]"
                     >
                       <div
                         className="w-2 h-2 rounded-full shrink-0"
                         style={{
                           background:
-                            t.ddl && isOverdue(t.ddl)
+                            taskItem.ddl && isOverdue(taskItem.ddl)
                               ? 'var(--color-danger)'
                               : 'var(--color-warning)',
                         }}
                       />
                       <span className="text-[12px] truncate" style={{ color: 'var(--color-text)' }}>
-                        {t.title}
+                        {displayTaskTitle(taskItem)}
                       </span>
                     </button>
                   ))}
@@ -356,11 +356,11 @@ export function CalendarView({
                   <p className="text-[10px] font-medium" style={{ color: 'var(--color-accent)' }}>
                     {t('Planned')}
                   </p>
-                  {selectedDay.plannedTasks.map((t) => (
+                  {selectedDay.plannedTasks.map((taskItem) => (
                     <button
-                      key={t.id}
+                      key={taskItem.id}
                       type="button"
-                      onClick={() => onSelectTask(t.id)}
+                      onClick={() => onSelectTask(taskItem.id)}
                       className="w-full text-left flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-[var(--color-bg)]"
                     >
                       <div
@@ -368,7 +368,7 @@ export function CalendarView({
                         style={{ background: 'var(--color-accent)' }}
                       />
                       <span className="text-[12px] truncate" style={{ color: 'var(--color-text)' }}>
-                        {t.title}
+                        {displayTaskTitle(taskItem)}
                       </span>
                     </button>
                   ))}

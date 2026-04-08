@@ -75,3 +75,18 @@ function extractTags(text: string): string[] {
 export async function listStreamDates(): Promise<string[]> {
   return getDataStore().listStreamDateKeys();
 }
+
+export async function searchStreamEntries(query: string, limit = 200) {
+  return getDataStore().searchStreamEntries(query, limit);
+}
+
+/** Random spark older than `minAgeDays` (from recent window). Used by time capsule. */
+export async function pickTimeCapsuleEntry(minAgeDays: number) {
+  const entries = await loadRecentDays(Math.max(minAgeDays + 1, 120));
+  const cutoff = Date.now() - minAgeDays * 86400000;
+  const sparks = entries.filter(
+    (e) => e.entryType === 'spark' && e.timestamp.getTime() < cutoff,
+  );
+  if (sparks.length === 0) return null;
+  return sparks[Math.floor(Math.random() * sparks.length)] ?? null;
+}

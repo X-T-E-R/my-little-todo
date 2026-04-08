@@ -82,6 +82,7 @@ pub fn create_app(
         .route("/stream", get(routes::stream::list_stream_day))
         .route("/stream/recent", get(routes::stream::list_stream_recent))
         .route("/stream/dates", get(routes::stream::list_stream_dates))
+        .route("/stream/search", get(routes::stream::search_stream))
         .route(
             "/stream/{id}",
             put(routes::stream::put_stream_entry).delete(routes::stream::delete_stream_entry),

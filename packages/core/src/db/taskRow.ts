@@ -10,11 +10,13 @@ import type {
   TaskResource,
   TaskStatus,
 } from '../models/task.js';
+import { taskRoleIds } from '../utils/taskRoles.js';
 
 /** Flat row shape matching SQLite `tasks` table (snake_case columns). */
 export interface TaskDbRow {
   id: string;
   title: string;
+  title_customized: number;
   description: string | null;
   status: string;
   body: string;
@@ -25,6 +27,8 @@ export interface TaskDbRow {
   ddl_type: string | null;
   planned_at: number | null;
   role_id: string | null;
+  /** JSON string array of role ids; when set, supersedes single role_id for multi-role tasks. */
+  role_ids: string | null;
   parent_id: string | null;
   source_stream_id: string | null;
   priority: number | null;
@@ -111,6 +115,17 @@ function reviveProgressLog(raw: unknown): ProgressLog {
   };
 }
 
+function roleFieldsFromDbRow(row: TaskDbRow): Pick<Task, 'roleId' | 'roleIds'> {
+  let roleIdsParsed = row.role_ids ? parseJson<string[]>(row.role_ids, []) : [];
+  if (!Array.isArray(roleIdsParsed)) roleIdsParsed = [];
+  if (roleIdsParsed.length === 0 && row.role_id) {
+    roleIdsParsed = [row.role_id];
+  }
+  const primaryRole = roleIdsParsed[0] ?? row.role_id ?? undefined;
+  const multiRoles = roleIdsParsed.length > 1 ? roleIdsParsed : undefined;
+  return { roleId: primaryRole, roleIds: multiRoles };
+}
+
 export function taskFromDbRow(row: TaskDbRow): Task {
   const tags = parseJson<string[]>(row.tags, []);
   const subtaskIds = parseJson<string[]>(row.subtask_ids, []);
@@ -124,6 +139,7 @@ export function taskFromDbRow(row: TaskDbRow): Task {
   return {
     id: row.id,
     title: row.title,
+    titleCustomized: (row.title_customized ?? 0) === 1,
     description: row.description ?? undefined,
     status: row.status as TaskStatus,
     body: row.body,
@@ -133,7 +149,7 @@ export function taskFromDbRow(row: TaskDbRow): Task {
     ddl: row.ddl != null ? new Date(row.ddl) : undefined,
     ddlType: (row.ddl_type as Task['ddlType']) ?? undefined,
     plannedAt: row.planned_at != null ? new Date(row.planned_at) : undefined,
-    roleId: row.role_id ?? undefined,
+    ...roleFieldsFromDbRow(row),
     parentId: row.parent_id ?? undefined,
     sourceStreamId: row.source_stream_id ?? undefined,
     priority: row.priority ?? undefined,
@@ -156,9 +172,13 @@ function toJson<T>(v: T): string {
 }
 
 export function taskToDbRow(task: Task, version: number, deletedAt: number | null): TaskDbRow {
+  const ids = taskRoleIds(task);
+  const roleIdsJson = ids.length > 1 ? JSON.stringify(ids) : null;
+
   return {
     id: task.id,
     title: task.title,
+    title_customized: task.titleCustomized ? 1 : 0,
     description: task.description ?? null,
     status: task.status,
     body: task.body,
@@ -169,6 +189,7 @@ export function taskToDbRow(task: Task, version: number, deletedAt: number | nul
     ddl_type: task.ddlType ?? null,
     planned_at: task.plannedAt?.getTime() ?? null,
     role_id: task.roleId ?? null,
+    role_ids: roleIdsJson,
     parent_id: task.parentId ?? null,
     source_stream_id: task.sourceStreamId ?? null,
     priority: task.priority ?? null,

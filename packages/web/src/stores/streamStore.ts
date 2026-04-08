@@ -7,16 +7,24 @@ import {
   addStreamEntry,
   linkEntryToTask,
   loadRecentDays,
+  searchStreamEntries,
   updateStreamEntry,
 } from '../storage/streamRepo';
 import { createTask } from '../storage/taskRepo';
 
 interface StreamState {
   entries: StreamEntry[];
+  /** How many calendar days back `entries` covers (for "load more"). */
+  daysLoaded: number;
   loading: boolean;
   error: string | null;
+  searchQuery: string;
+  searchResults: StreamEntry[] | null;
 
   load: () => Promise<void>;
+  loadMore: () => Promise<void>;
+  runSearch: (query: string) => Promise<void>;
+  clearSearch: () => void;
   addEntry: (
     content: string,
     saveAsTask?: boolean,
@@ -43,16 +51,20 @@ let _streamLoadPromise: Promise<void> | null = null;
 
 export const useStreamStore = create<StreamState>((set, get) => ({
   entries: [],
+  daysLoaded: 14,
   loading: false,
   error: null,
+  searchQuery: '',
+  searchResults: null,
 
   load: async () => {
     if (_streamLoadPromise) return _streamLoadPromise;
     _streamLoadPromise = (async () => {
-      set({ loading: true, error: null });
+      set({ loading: true, error: null, searchResults: null, searchQuery: '' });
       try {
-        const entries = await loadRecentDays(14);
-        set({ entries, loading: false });
+        const days = 14;
+        const entries = await loadRecentDays(days);
+        set({ entries, daysLoaded: days, loading: false });
       } catch (e) {
         if (get().entries.length === 0) {
           set({ error: String(e), loading: false });
@@ -65,6 +77,35 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     })();
     return _streamLoadPromise;
   },
+
+  loadMore: async () => {
+    const prev = get().daysLoaded;
+    const nextDays = prev + 14;
+    set({ loading: true });
+    try {
+      const entries = await loadRecentDays(nextDays);
+      set({ entries, daysLoaded: nextDays, loading: false });
+    } catch {
+      set({ loading: false });
+    }
+  },
+
+  runSearch: async (query: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      set({ searchQuery: '', searchResults: null });
+      return;
+    }
+    set({ loading: true });
+    try {
+      const searchResults = await searchStreamEntries(trimmed, 200);
+      set({ searchQuery: trimmed, searchResults, loading: false });
+    } catch {
+      set({ loading: false });
+    }
+  },
+
+  clearSearch: () => set({ searchQuery: '', searchResults: null }),
 
   addEntry: async (
     content: string,
@@ -101,13 +142,14 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       }));
 
       if (saveAsTask) {
-        const task = await createTask(content.slice(0, 80).trim(), {
+        const task = await createTask('', {
           sourceStreamId: entry.id,
           tags: meta?.tags ?? entry.tags,
           roleId: entry.roleId,
           body: meta?.body ?? content,
           ddl: meta?.ddl,
           ddlType: meta?.ddlType,
+          titleCustomized: false,
         });
         const dateKey = formatDateKey(entry.timestamp);
         await linkEntryToTask(entry.id, dateKey, task.id);
@@ -135,21 +177,27 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     await updateStreamEntry(entry);
     set((state) => ({
       entries: state.entries.map((e) => (e.id === entry.id ? entry : e)),
+      searchResults: state.searchResults
+        ? state.searchResults.map((e) => (e.id === entry.id ? entry : e))
+        : null,
     }));
   },
 
   deleteEntry: async (entryId: string) => {
-    const entry = get().entries.find((e) => e.id === entryId);
-    if (!entry) return;
-
     const prevEntries = get().entries;
-    set((state) => ({ entries: state.entries.filter((e) => e.id !== entryId) }));
+    const prevSearch = get().searchResults;
+    set((state) => ({
+      entries: state.entries.filter((e) => e.id !== entryId),
+      searchResults: state.searchResults
+        ? state.searchResults.filter((e) => e.id !== entryId)
+        : null,
+    }));
 
     try {
       const { deleteStreamEntry } = await import('../storage/streamRepo');
       await deleteStreamEntry(entryId);
     } catch {
-      set({ entries: prevEntries });
+      set({ entries: prevEntries, searchResults: prevSearch });
     }
   },
 
@@ -158,11 +206,12 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     if (!entry) throw new Error('Entry not found');
     if (entry.extractedTaskId) return entry.extractedTaskId;
 
-    const task = await createTask(entry.content.slice(0, 80).trim(), {
+    const task = await createTask('', {
       sourceStreamId: entryId,
       tags: entry.tags,
       roleId: entry.roleId,
       body: entry.content,
+      titleCustomized: false,
     });
 
     const dateKey = formatDateKey(entry.timestamp);

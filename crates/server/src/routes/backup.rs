@@ -53,8 +53,12 @@ pub async fn update_config(
     axum::Extension(_user_id): axum::Extension<String>,
     Json(_body): Json<BackupConfigRequest>,
 ) -> BackupResult<serde_json::Value> {
-    // Will be implemented when backup providers are fully wired
-    Ok(Json(serde_json::json!({ "ok": true, "note": "Backup configuration saved (provider not yet active)" })))
+    Err((
+        axum::http::StatusCode::NOT_IMPLEMENTED,
+        Json(ErrorBody {
+            error: "Server-side backup/sync target configuration is not implemented yet. Use the desktop app (Tauri) for WebDAV/API sync targets.".to_string(),
+        }),
+    ))
 }
 
 pub async fn run_backup(

@@ -1,45 +1,57 @@
 import {
+  type StreamEntryDbRow,
+  type TaskDbRow,
   streamEntryFromDbRow,
   streamEntryToDbRow,
   taskFromDbRow,
   taskToDbRow,
-  type StreamEntryDbRow,
-  type TaskDbRow,
 } from '@my-little-todo/core';
 import { motion } from 'framer-motion';
 import {
   Activity,
   Bell,
+  Bot,
   CalendarClock,
   CheckCircle,
+  ChevronDown,
   Cloud,
   Coffee,
   Command,
   Copy,
+  Database,
   Download,
   ExternalLink,
+  Filter,
   FolderOpen,
+  Github,
   Globe,
   HardDriveDownload,
   Info,
   Key,
+  LayoutGrid,
   Loader2,
   LogOut,
   Moon,
   RefreshCw,
   RotateCcw,
+  Search,
   Server,
   Shield,
   Sparkles,
   Upload,
   User,
+  Wind,
+  X,
   XCircle,
+  Zap,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type React from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScheduleEditor } from '../components/ScheduleEditor';
 import i18n from '../locales';
+import { BUILT_IN_MODULES, useModuleStore } from '../modules';
 import { getDataStore } from '../storage/dataStore';
 import { deleteSetting, getSetting, getSettingsApiBase, putSetting } from '../storage/settingsApi';
 import {
@@ -74,9 +86,16 @@ type SettingsTab =
   | 'shortcuts'
   | 'sync'
   | 'data'
+  | 'plugins'
   | 'about';
 
-const BASE_TABS: { id: SettingsTab; label: string; icon: typeof Key }[] = [
+type NavTab = {
+  id: SettingsTab;
+  label: string;
+  icon: LucideIcon;
+};
+
+const PRIMARY_TABS: NavTab[] = [
   { id: 'general', label: 'General', icon: Moon },
   { id: 'account', label: 'Account', icon: User },
   { id: 'ai', label: 'AI', icon: Sparkles },
@@ -84,8 +103,19 @@ const BASE_TABS: { id: SettingsTab; label: string; icon: typeof Key }[] = [
   { id: 'shortcuts', label: 'Shortcuts', icon: Command },
   { id: 'sync', label: 'Sync', icon: Cloud },
   { id: 'data', label: 'Data', icon: FolderOpen },
-  { id: 'about', label: 'About', icon: Info },
+  { id: 'plugins', label: 'Plugins', icon: LayoutGrid },
 ];
+
+const ABOUT_TAB: NavTab = { id: 'about', label: 'About', icon: Info };
+
+const PLUGIN_ICONS: Record<string, LucideIcon> = {
+  kanban: LayoutGrid,
+  'time-capsule': Sparkles,
+  'ai-coach': Bot,
+  'energy-indicator': Zap,
+  'brain-dump': Coffee,
+  'advanced-filter': Filter,
+};
 
 function ShortcutRow({
   label,
@@ -128,7 +158,7 @@ function ShortcutRow({
   }, [recording, onRecord]);
 
   return (
-    <div ref={rowRef} className="flex items-center justify-between py-1.5">
+    <div ref={rowRef} className="flex items-center justify-between px-4 py-2.5">
       <span className="text-[13px]" style={{ color: 'var(--color-text)' }}>
         {label}
       </span>
@@ -140,7 +170,7 @@ function ShortcutRow({
           background: recording ? 'var(--color-accent-soft)' : 'var(--color-bg)',
           border: recording ? '1px solid var(--color-accent)' : '1px solid var(--color-border)',
           color: recording ? 'var(--color-accent)' : 'var(--color-text-secondary)',
-          minWidth: '80px',
+          minWidth: '100px',
           textAlign: 'center',
         }}
       >
@@ -339,6 +369,17 @@ function GeneralTab() {
 
       <hr style={{ borderColor: 'var(--color-border)' }} />
 
+      {/* Stream layout */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <Wind size={16} className="text-[var(--color-accent)]" />
+          <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Stream')}</h3>
+        </div>
+        <StreamDirectionSetting />
+      </section>
+
+      <hr style={{ borderColor: 'var(--color-border)' }} />
+
       {/* Onboarding */}
       <section>
         <div className="flex items-center gap-2 mb-3">
@@ -369,6 +410,40 @@ function GeneralTab() {
           </button>
         </div>
       </section>
+    </div>
+  );
+}
+
+function StreamDirectionSetting() {
+  const { t } = useTranslation('settings');
+  const [value, setValue] = useState<'bottom-up' | 'top-down'>('bottom-up');
+
+  useEffect(() => {
+    getSetting('stream-direction').then((v) => {
+      if (v === 'top-down' || v === 'bottom-up') setValue(v);
+    });
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="text-sm font-medium text-[var(--color-text)]">
+          {t('Stream timeline direction')}
+        </p>
+        <p className="text-xs text-[var(--color-text-tertiary)]">{t('stream_direction_hint')}</p>
+      </div>
+      <select
+        value={value}
+        onChange={async (e) => {
+          const v = e.target.value as 'bottom-up' | 'top-down';
+          setValue(v);
+          await putSetting('stream-direction', v);
+        }}
+        className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] shrink-0"
+      >
+        <option value="bottom-up">{t('stream_direction_bottom_up')}</option>
+        <option value="top-down">{t('stream_direction_top_down')}</option>
+      </select>
     </div>
   );
 }
@@ -572,14 +647,23 @@ function AccountTab() {
   );
 }
 
-function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+function ToggleSwitch({
+  checked,
+  onChange,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
-      onClick={() => onChange(!checked)}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
       className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
         checked ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-border)]'
-      }`}
+      } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       <span
         className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
@@ -590,25 +674,196 @@ function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (v: b
   );
 }
 
+function TimeCapsuleToggle() {
+  const [enabled, setEnabled] = useState(false);
+  useEffect(() => {
+    getSetting('time-capsule-enabled').then((v) => setEnabled(v === 'true'));
+  }, []);
+  return (
+    <ToggleSwitch
+      checked={enabled}
+      onChange={async (v) => {
+        setEnabled(v);
+        await putSetting('time-capsule-enabled', v ? 'true' : 'false');
+      }}
+    />
+  );
+}
+
+function PluginsTab() {
+  const { t } = useTranslation('settings');
+  const [subTab, setSubTab] = useState<'core' | 'third-party'>('core');
+  const moduleHydrated = useModuleStore((s) => s.hydrated);
+  const moduleEnabled = useModuleStore((s) => s.enabled);
+  const hydrateModules = useModuleStore((s) => s.hydrate);
+  const setModuleEnabled = useModuleStore((s) => s.setModuleEnabled);
+  const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
+
+  useEffect(() => {
+    void hydrateModules();
+  }, [hydrateModules]);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-xs text-[var(--color-text-tertiary)]">
+        {t('Modules intro')}
+      </p>
+
+      <div className="flex gap-1 rounded-xl bg-[var(--color-bg)] p-1 self-start">
+        {([
+          { id: 'core' as const, label: t('Core Plugins') },
+          { id: 'third-party' as const, label: t('Third-party Plugins') },
+        ]).map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setSubTab(tab.id)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              subTab === tab.id
+                ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm'
+                : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {subTab === 'core' && (
+        <div className="space-y-1">
+          {BUILT_IN_MODULES.map((mod) => {
+            const Icon = PLUGIN_ICONS[mod.id] ?? Info;
+            const enabled = moduleEnabled[mod.id] ?? mod.defaultEnabled;
+            const hasExtra = mod.id === 'time-capsule' || mod.id === 'kanban';
+            const isExpanded = expandedPlugin === mod.id;
+            return (
+              <div
+                key={mod.id}
+                className="rounded-xl border border-[var(--color-border)] overflow-hidden"
+                style={{ background: 'var(--color-surface)' }}
+              >
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <Icon size={18} style={{ color: enabled ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-[var(--color-text)]">{t(mod.nameKey)}</p>
+                    <p className="text-[11px] text-[var(--color-text-tertiary)] truncate">{t(mod.descriptionKey)}</p>
+                  </div>
+                  {hasExtra && (
+                    <button
+                      type="button"
+                      onClick={() => setExpandedPlugin(isExpanded ? null : mod.id)}
+                      className="shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--color-bg)]"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      <ChevronDown size={14} className="transition-transform" style={{ transform: isExpanded ? 'rotate(180deg)' : undefined }} />
+                    </button>
+                  )}
+                  <ToggleSwitch
+                    disabled={!moduleHydrated}
+                    checked={enabled}
+                    onChange={(v) => void setModuleEnabled(mod.id, v)}
+                  />
+                </div>
+
+                {hasExtra && isExpanded && (
+                  <div className="border-t border-[var(--color-border)] px-4 py-3 space-y-3">
+                    {mod.id === 'time-capsule' && (
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-medium text-[var(--color-text)]">
+                            {t('Time capsule (random toasts)')}
+                          </p>
+                          <p className="text-[11px] text-[var(--color-text-tertiary)]">
+                            {t('When enabled, the app may occasionally show an old inspiration in a toast. Default is off.')}
+                          </p>
+                        </div>
+                        <TimeCapsuleToggle />
+                      </div>
+                    )}
+                    {mod.id === 'kanban' && (
+                      <p className="text-xs text-[var(--color-text-tertiary)]">
+                        {t('kanban_plugin_hint')}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {subTab === 'third-party' && (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <LayoutGrid size={32} style={{ color: 'var(--color-text-tertiary)', opacity: 0.4 }} />
+          <p className="mt-3 text-sm font-medium text-[var(--color-text-secondary)]">
+            {t('No third-party plugins')}
+          </p>
+          <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
+            {t('Third-party plugin support coming soon')}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ShortcutsTab() {
   const { t } = useTranslation('settings');
   const shortcuts = useShortcutStore((s) => s.shortcuts);
   const updateShortcut = useShortcutStore((s) => s.updateShortcut);
   const resetToDefaults = useShortcutStore((s) => s.resetToDefaults);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const globalShortcuts = shortcuts.filter((s) => s.scope === 'global');
-  const editorShortcuts = shortcuts.filter((s) => s.scope === 'editor');
+  const scopes = [
+    { key: 'global' as const, label: t('Global') },
+    { key: 'editor' as const, label: t('Editor') },
+    { key: 'plugin' as const, label: t('Plugins') },
+  ] as const;
+
+  const filteredByScope = (scope: string) =>
+    shortcuts
+      .filter((s) => s.scope === scope)
+      .filter(
+        (s) =>
+          !searchQuery ||
+          s.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.keys.toLowerCase().includes(searchQuery.toLowerCase()),
+      );
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-[var(--color-text-tertiary)]">
-          {t('Click on a shortcut area, then press a new key combination to customize.')}
-        </p>
+      <div className="flex items-center gap-3">
+        <div
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2"
+          style={{
+            background: 'var(--color-surface)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          <Search size={14} style={{ color: 'var(--color-text-tertiary)' }} className="shrink-0" />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t('Search shortcuts...')}
+            className="min-w-0 flex-1 bg-transparent text-xs outline-none"
+            style={{ color: 'var(--color-text)' }}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="shrink-0"
+              style={{ color: 'var(--color-text-tertiary)' }}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
         <button
           type="button"
           onClick={resetToDefaults}
-          className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-medium transition-colors hover:bg-[var(--color-bg)] shrink-0 ml-4"
+          className="flex items-center gap-1 rounded-lg px-2.5 py-2 text-[11px] font-medium transition-colors hover:bg-[var(--color-bg)] shrink-0"
           style={{ color: 'var(--color-text-tertiary)', border: '1px solid var(--color-border)' }}
         >
           <RotateCcw size={11} />
@@ -616,45 +871,47 @@ function ShortcutsTab() {
         </button>
       </div>
 
-      <div>
-        <p
-          className="text-[11px] font-semibold uppercase tracking-wider mb-2"
-          style={{ color: 'var(--color-text-tertiary)' }}
-        >
-          {t('Global')}
-        </p>
-        <div className="space-y-0.5">
-          {globalShortcuts.map((s) => (
-            <ShortcutRow
-              key={s.id}
-              label={s.label}
-              keys={s.keys}
-              onRecord={(keys) => updateShortcut(s.id, keys)}
-            />
-          ))}
-        </div>
-      </div>
+      <p className="text-xs text-[var(--color-text-tertiary)]">
+        {t('Click on a shortcut area, then press a new key combination to customize.')}
+      </p>
 
-      <hr style={{ borderColor: 'var(--color-border)' }} />
-
-      <div>
-        <p
-          className="text-[11px] font-semibold uppercase tracking-wider mb-2"
-          style={{ color: 'var(--color-text-tertiary)' }}
-        >
-          {t('Editor')}
-        </p>
-        <div className="space-y-0.5">
-          {editorShortcuts.map((s) => (
-            <ShortcutRow
-              key={s.id}
-              label={s.label}
-              keys={s.keys}
-              onRecord={(keys) => updateShortcut(s.id, keys)}
-            />
-          ))}
-        </div>
-      </div>
+      {scopes.map(({ key, label }) => {
+        const items = filteredByScope(key);
+        if (items.length === 0) return null;
+        return (
+          <div key={key}>
+            <div
+              className="flex items-center gap-2 mb-2 px-1"
+            >
+              <p
+                className="text-[11px] font-semibold uppercase tracking-wider"
+                style={{ color: 'var(--color-text-tertiary)' }}
+              >
+                {label}
+              </p>
+              <span
+                className="rounded-full px-1.5 py-0.5 text-[9px] font-bold"
+                style={{ background: 'var(--color-accent-soft)', color: 'var(--color-accent)' }}
+              >
+                {items.length}
+              </span>
+            </div>
+            <div
+              className="rounded-xl border border-[var(--color-border)] overflow-hidden divide-y divide-[var(--color-border)]"
+              style={{ background: 'var(--color-surface)' }}
+            >
+              {items.map((s) => (
+                <ShortcutRow
+                  key={s.id}
+                  label={s.label}
+                  keys={s.keys}
+                  onRecord={(keys) => updateShortcut(s.id, keys)}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1234,7 +1491,10 @@ function DataTab() {
       {/* Migration — server mode only */}
       {!native && (
         <section>
-          <h3 className="text-sm font-bold text-[var(--color-text)] mb-1">{t('Data Migration')}</h3>
+          <div className="flex items-center gap-2 mb-2">
+            <Database size={16} className="text-[var(--color-accent)]" />
+            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Data Migration')}</h3>
+          </div>
           <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
             {t(
               'Copy data from the current storage backend to another. Migration does not auto-switch; you need to update the config file (config.toml / .env) and restart.',
@@ -1333,10 +1593,10 @@ function DataTab() {
               <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
                 {t('Enable Continuous Export')}
               </span>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (autoExportEnabled) {
+              <ToggleSwitch
+                checked={autoExportEnabled}
+                onChange={async (v) => {
+                  if (!v) {
                     setAutoExportSaving(true);
                     await deleteSetting('auto-export-path');
                     setAutoExportEnabled(false);
@@ -1346,17 +1606,7 @@ function DataTab() {
                     setAutoExportEnabled(true);
                   }
                 }}
-                className="relative h-6 w-11 rounded-full transition-colors shrink-0"
-                style={{
-                  background: autoExportEnabled ? 'var(--color-accent)' : 'var(--color-border)',
-                }}
-              >
-                <motion.div
-                  className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"
-                  animate={{ left: autoExportEnabled ? '22px' : '2px' }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                />
-              </button>
+              />
             </div>
 
             {autoExportEnabled && (
@@ -1453,10 +1703,26 @@ function DataTab() {
   );
 }
 
+function WebApiRealtimeSyncSection() {
+  const { t } = useTranslation('settings');
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <Cloud size={16} className="text-[var(--color-accent)]" />
+        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Cloud Sync')}</h3>
+      </div>
+      <p className="text-xs text-[var(--color-text-tertiary)]">
+        {t(
+          'Data syncs in real time through the API server. No separate sync target is needed on this client.',
+        )}
+      </p>
+    </section>
+  );
+}
+
 function SyncTab() {
   const { t } = useTranslation('settings');
   const platform = getPlatform();
-  const native = isNativeClient();
 
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testMsg, setTestMsg] = useState('');
@@ -1465,7 +1731,7 @@ function SyncTab() {
   const [urlSaved, setUrlSaved] = useState(false);
 
   useEffect(() => {
-    if (native) return;
+    if (isTauriEnv()) return;
     (async () => {
       try {
         const res = await fetch(`${getSettingsApiBase()}/health`, {
@@ -1476,7 +1742,7 @@ function SyncTab() {
         /* server not reachable */
       }
     })();
-  }, [native]);
+  }, []);
 
   const handleTest = async () => {
     setTestStatus('testing');
@@ -1505,7 +1771,7 @@ function SyncTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      {native ? (
+      {isTauriEnv() ? (
         <section>
           <div className="flex items-center gap-2 mb-3">
             <HardDriveDownload size={16} className="text-[var(--color-accent)]" />
@@ -1613,7 +1879,7 @@ function SyncTab() {
       )}
 
       <hr style={{ borderColor: 'var(--color-border)' }} />
-      <CloudSyncSection />
+      {isTauriEnv() ? <CloudSyncSection /> : <WebApiRealtimeSyncSection />}
     </div>
   );
 }
@@ -1737,8 +2003,7 @@ function ApiTokenSection() {
 
 function CloudSyncSection() {
   const { t } = useTranslation('settings');
-  const native = isNativeClient();
-  const [provider, setProvider] = useState<'' | 'api-server' | 's3' | 'webdav'>('');
+  const [provider, setProvider] = useState<'' | 'api-server' | 'webdav'>('');
   const [apiAuthMode, setApiAuthMode] = useState<'token' | 'credentials'>('credentials');
   const [config, setConfig] = useState({
     endpoint: '',
@@ -1761,56 +2026,36 @@ function CloudSyncSection() {
   useEffect(() => {
     (async () => {
       try {
-        if (native) {
-          const store = getDataStore();
-          const p = await store.getSetting('sync-provider');
-          if (p) {
-            setProvider(p as '' | 'api-server' | 's3' | 'webdav');
-            const raw = await store.getSetting('sync-config');
-            if (raw) {
-              try {
-                const parsed = JSON.parse(raw);
-                setConfig((prev) => ({ ...prev, ...parsed }));
-                if (parsed.auth_mode === 'token' || parsed.auth_mode === 'credentials') {
-                  setApiAuthMode(parsed.auth_mode);
-                }
-              } catch {
-                /* ignore */
-              }
-            }
+        const store = getDataStore();
+        const p = await store.getSetting('sync-provider');
+        if (p) {
+          if (p === 's3') {
+            setProvider('');
+          } else {
+            setProvider(p as '' | 'api-server' | 'webdav');
           }
-          const iv = await store.getSetting('sync-interval');
-          if (iv) setSyncInterval(iv);
-          const cs = await store.getSetting('sync-conflict-strategy');
-          if (cs === 'lww' || cs === 'manual') setConflictStrategy(cs);
-        } else {
-          const authToken = getAuthToken();
-          const h: HeadersInit = {};
-          if (authToken) h.Authorization = `Bearer ${authToken}`;
-          const res = await fetch(`${getSettingsApiBase()}/api/backup/config`, { headers: h });
-          if (res.ok) {
-            const data = await res.json();
-            if (data.provider) {
-              setProvider(data.provider as '' | 'api-server' | 's3' | 'webdav');
-              setConfig((prev) => ({
-                ...prev,
-                endpoint: data.endpoint ?? '',
-                token: data.token ?? '',
-                bucket: data.bucket ?? '',
-                access_key: data.access_key ?? '',
-                secret_key: data.secret_key ?? '',
-                region: data.region ?? '',
-                username: data.username ?? '',
-                password: data.password ?? '',
-              }));
+          const raw = await store.getSetting('sync-config');
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              setConfig((prev) => ({ ...prev, ...parsed }));
+              if (parsed.auth_mode === 'token' || parsed.auth_mode === 'credentials') {
+                setApiAuthMode(parsed.auth_mode);
+              }
+            } catch {
+              /* ignore */
             }
           }
         }
+        const iv = await store.getSetting('sync-interval');
+        if (iv) setSyncInterval(iv);
+        const cs = await store.getSetting('sync-conflict-strategy');
+        if (cs === 'lww' || cs === 'manual') setConflictStrategy(cs);
       } catch {
         /* ignore */
       }
     })();
-  }, [native]);
+  }, []);
 
   useEffect(() => {
     const engine = getSyncEngine();
@@ -1834,70 +2079,28 @@ function CloudSyncSection() {
     setSaving(true);
     setStatus('');
     try {
-      if (native) {
-        const store = getDataStore();
-        await store.putSetting('sync-provider', provider);
-        const cfgToSave: Record<string, string> = {};
-        if (provider === 'api-server') {
-          cfgToSave.endpoint = config.endpoint;
-          cfgToSave.auth_mode = apiAuthMode;
-          if (apiAuthMode === 'token') {
-            if (config.token) cfgToSave.token = config.token;
-          } else {
-            cfgToSave.username = config.username;
-            cfgToSave.password = config.password;
-          }
-        } else if (provider === 's3') {
-          cfgToSave.endpoint = config.endpoint;
-          cfgToSave.bucket = config.bucket;
-          cfgToSave.access_key = config.access_key;
-          cfgToSave.secret_key = config.secret_key;
-          if (config.region) cfgToSave.region = config.region;
+      const store = getDataStore();
+      await store.putSetting('sync-provider', provider);
+      const cfgToSave: Record<string, string> = {};
+      if (provider === 'api-server') {
+        cfgToSave.endpoint = config.endpoint;
+        cfgToSave.auth_mode = apiAuthMode;
+        if (apiAuthMode === 'token') {
+          if (config.token) cfgToSave.token = config.token;
         } else {
-          cfgToSave.endpoint = config.endpoint;
           cfgToSave.username = config.username;
           cfgToSave.password = config.password;
         }
-        await store.putSetting('sync-config', JSON.stringify(cfgToSave));
-        await store.putSetting('sync-interval', syncInterval);
-        await store.putSetting('sync-conflict-strategy', conflictStrategy);
-        await initSyncFromConfig();
-        setStatus(t('Configuration Saved'));
       } else {
-        const authToken = getAuthToken();
-        const h: HeadersInit = { 'Content-Type': 'application/json' };
-        if (authToken) h.Authorization = `Bearer ${authToken}`;
-        const body: Record<string, string | undefined> = { provider };
-        if (provider === 'api-server') {
-          body.endpoint = config.endpoint;
-          body.auth_mode = apiAuthMode;
-          if (apiAuthMode === 'token') {
-            body.token = config.token || undefined;
-          } else {
-            body.username = config.username;
-            body.password = config.password;
-          }
-        } else if (provider === 's3') {
-          body.endpoint = config.endpoint;
-          body.bucket = config.bucket;
-          body.access_key = config.access_key;
-          body.secret_key = config.secret_key;
-          body.region = config.region || undefined;
-        } else {
-          body.endpoint = config.endpoint;
-          body.username = config.username;
-          body.password = config.password;
-        }
-        const res = await fetch(`${getSettingsApiBase()}/api/backup/config`, {
-          method: 'PUT',
-          headers: h,
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        setStatus(
-          res.ok ? t('Configuration Saved') : t('Error: {{message}}', { message: data.error }),
-        );
+        cfgToSave.endpoint = config.endpoint;
+        cfgToSave.username = config.username;
+        cfgToSave.password = config.password;
       }
+      await store.putSetting('sync-config', JSON.stringify(cfgToSave));
+      await store.putSetting('sync-interval', syncInterval);
+      await store.putSetting('sync-conflict-strategy', conflictStrategy);
+      await initSyncFromConfig();
+      setStatus(t('Configuration Saved'));
     } catch (err) {
       setStatus(
         t('Save failed: {{message}}', {
@@ -1916,7 +2119,12 @@ function CloudSyncSection() {
       const engine = getSyncEngine();
       if (engine.hasTargets()) {
         await engine.syncAll();
-        setSyncStatus(t('Sync completed'));
+        const firstErr = engine.getFirstError();
+        if (firstErr) {
+          setSyncStatus(t('Sync failed: {{message}}', { message: firstErr }));
+        } else {
+          setSyncStatus(t('Sync completed'));
+        }
       } else {
         setSyncStatus(t('No sync target configured'));
       }
@@ -1943,7 +2151,7 @@ function CloudSyncSection() {
       </div>
       <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
         {t(
-          'Sync data across devices via an API server, S3-compatible storage, or WebDAV. Configure a sync target and interval below.',
+          'Sync data across devices via an API server or WebDAV. Configure a sync target and interval below.',
         )}
       </p>
 
@@ -1952,13 +2160,12 @@ function CloudSyncSection() {
           <label className={labelClass}>{t('Sync Provider')}</label>
           <select
             value={provider}
-            onChange={(e) => setProvider(e.target.value as '' | 'api-server' | 's3' | 'webdav')}
+            onChange={(e) => setProvider(e.target.value as '' | 'api-server' | 'webdav')}
             className={inputClass}
           >
             <option value="">{t('Not Configured')}</option>
             <option value="api-server">{t('API Server (My Little Todo)')}</option>
-            <option value="s3">{t('S3 Compatible Storage (AWS/MinIO/R2)')}</option>
-            <option value="webdav">WebDAV</option>
+            <option value="webdav">{t('WebDAV')}</option>
           </select>
         </div>
 
@@ -2040,65 +2247,10 @@ function CloudSyncSection() {
           </div>
         )}
 
-        {provider === 's3' && (
-          <div className="space-y-3">
-            <div>
-              <label className={labelClass}>Endpoint URL</label>
-              <input
-                type="text"
-                value={config.endpoint}
-                onChange={(e) => setConfig({ ...config, endpoint: e.target.value })}
-                placeholder="https://s3.amazonaws.com"
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Bucket</label>
-              <input
-                type="text"
-                value={config.bucket}
-                onChange={(e) => setConfig({ ...config, bucket: e.target.value })}
-                placeholder="my-todo-sync"
-                className={inputClass}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className={labelClass}>Access Key</label>
-                <input
-                  type="password"
-                  value={config.access_key}
-                  onChange={(e) => setConfig({ ...config, access_key: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className={labelClass}>Secret Key</label>
-                <input
-                  type="password"
-                  value={config.secret_key}
-                  onChange={(e) => setConfig({ ...config, secret_key: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
-            </div>
-            <div>
-              <label className={labelClass}>{t('Region (Optional)')}</label>
-              <input
-                type="text"
-                value={config.region}
-                onChange={(e) => setConfig({ ...config, region: e.target.value })}
-                placeholder="us-east-1"
-                className={inputClass}
-              />
-            </div>
-          </div>
-        )}
-
         {provider === 'webdav' && (
           <div className="space-y-3">
             <div>
-              <label className={labelClass}>WebDAV URL</label>
+              <label className={labelClass}>{t('WebDAV URL')}</label>
               <input
                 type="url"
                 value={config.endpoint}
@@ -2149,7 +2301,7 @@ function CloudSyncSection() {
               </select>
             </div>
 
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium text-[var(--color-text)]">
                   {t('Auto-resolve conflicts (Last Write Wins)')}
@@ -2160,24 +2312,10 @@ function CloudSyncSection() {
                     : t('You will be prompted to choose when conflicts occur.')}
                 </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={conflictStrategy === 'lww'}
-                onClick={() => setConflictStrategy((prev) => (prev === 'lww' ? 'manual' : 'lww'))}
-                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
-                style={{
-                  backgroundColor:
-                    conflictStrategy === 'lww' ? 'var(--color-accent)' : 'var(--color-border)',
-                }}
-              >
-                <span
-                  className="pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-lg transition-transform duration-200 ease-in-out"
-                  style={{
-                    transform: conflictStrategy === 'lww' ? 'translateX(20px)' : 'translateX(0)',
-                  }}
-                />
-              </button>
+              <ToggleSwitch
+                checked={conflictStrategy === 'lww'}
+                onChange={(v) => setConflictStrategy(v ? 'lww' : 'manual')}
+              />
             </div>
           </>
         )}
@@ -2371,6 +2509,7 @@ function AboutTab() {
   const githubApkUrl = useRef('');
   const githubHtmlUrl = useRef('');
   const autoCheckDone = useRef(false);
+  const [openSourceOpen, setOpenSourceOpen] = useState(false);
 
   const handleCheckUpdate = useCallback(
     async (silent = false) => {
@@ -2511,6 +2650,70 @@ function AboutTab() {
         {t('Buy me a bubble tea')}
         <ExternalLink size={12} className="text-[var(--color-text-tertiary)]" />
       </a>
+
+      <a
+        href="https://github.com/X-T-E-R/my-little-todo"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-2 mt-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors w-fit"
+        style={{
+          background: 'var(--color-surface)',
+          border: '1px solid var(--color-border)',
+          color: 'var(--color-text-secondary)',
+        }}
+      >
+        <Github size={16} className="text-[var(--color-text)]" />
+        {t('Source code on GitHub')}
+        <ExternalLink size={12} className="text-[var(--color-text-tertiary)]" />
+      </a>
+
+      <div
+        className="mt-2 rounded-xl overflow-hidden"
+        style={{ border: '1px solid var(--color-border)', background: 'var(--color-surface)' }}
+      >
+        <button
+          type="button"
+          onClick={() => setOpenSourceOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-medium"
+          style={{ color: 'var(--color-text-secondary)' }}
+          aria-expanded={openSourceOpen}
+        >
+          <span>{t('Open source & licenses')}</span>
+          <ChevronDown
+            size={18}
+            className="shrink-0 transition-transform text-[var(--color-text-tertiary)]"
+            style={{ transform: openSourceOpen ? 'rotate(180deg)' : undefined }}
+          />
+        </button>
+        {openSourceOpen && (
+          <div
+            className="px-4 pb-4 pt-0 text-xs leading-relaxed space-y-3"
+            style={{ color: 'var(--color-text-tertiary)' }}
+          >
+            <p>
+              {t('App license')}: MIT — {t('See LICENSE in the repository root.')}
+            </p>
+            <p className="font-medium text-[var(--color-text-secondary)]">
+              {t('Third-party libraries (runtime)')}
+            </p>
+            <ul className="list-disc pl-4 space-y-1">
+              <li>React, react-dom (MIT)</li>
+              <li>Zustand (MIT)</li>
+              <li>framer-motion (MIT)</li>
+              <li>@dnd-kit/core, @dnd-kit/utilities (MIT)</li>
+              <li>i18next, react-i18next (MIT)</li>
+              <li>marked (MIT)</li>
+              <li>lucide-react (ISC)</li>
+              <li>jszip (MIT / GPL-3.0 dual — see package)</li>
+              <li>@tauri-apps/api & plugins (Apache-2.0 / MIT)</li>
+              <li>Tailwind CSS (MIT)</li>
+            </ul>
+            <p className="text-[10px] opacity-80">
+              {t('Exact versions are listed in package.json.')}
+            </p>
+          </div>
+        )}
+      </div>
 
       {supportsUpdate && (
         <div
@@ -3172,8 +3375,20 @@ const TAB_CONTENT: Record<SettingsTab, () => React.JSX.Element> = {
   shortcuts: ShortcutsTab,
   sync: SyncTab,
   data: DataTab,
+  plugins: PluginsTab,
   about: AboutTab,
 };
+
+function renderActiveSettingsTab(tab: SettingsTab): React.ReactNode {
+  const C = TAB_CONTENT[tab];
+  return C ? <C /> : <GeneralTab />;
+}
+
+function getSettingsHeading(tab: SettingsTab, t: (k: string) => string): string {
+  const all = [...PRIMARY_TABS, ABOUT_TAB];
+  const found = all.find((x) => x.id === tab);
+  return found ? t(found.label) : '';
+}
 
 /* ── Main Settings View ── */
 
@@ -3184,15 +3399,13 @@ export function SettingsView() {
   const authMode = useAuthStore((s) => s.authMode);
   const showShortcuts = hasKeyboardShortcuts();
 
-  const TABS = BASE_TABS.filter((tab) => {
+  const allTabs = [...PRIMARY_TABS, ABOUT_TAB].filter((tab) => {
     if (tab.id === 'shortcuts' && !showShortcuts) return false;
     if (tab.id === 'account' && authMode === 'none') return false;
     return true;
   });
 
-  const visibleTabs = TABS;
-
-  const ActiveContent = TAB_CONTENT[activeTab] ?? GeneralTab;
+  const heading = getSettingsHeading(activeTab, t);
 
   return (
     <div className={`flex h-full bg-[var(--color-bg)] ${isMobile ? 'flex-col' : ''}`}>
@@ -3201,7 +3414,7 @@ export function SettingsView() {
           className="flex items-center gap-0.5 px-2 pt-2 pb-1 overflow-x-auto shrink-0"
           style={{ borderBottom: '1px solid var(--color-border)' }}
         >
-          {visibleTabs.map((tab) => {
+          {allTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
@@ -3223,30 +3436,33 @@ export function SettingsView() {
         </div>
       ) : (
         <nav
-          className="flex flex-col gap-1 py-8 px-3 shrink-0"
-          style={{ width: '180px', borderRight: '1px solid var(--color-border)' }}
+          className="flex flex-col gap-1 py-8 px-3 shrink-0 overflow-y-auto"
+          style={{ width: '200px', borderRight: '1px solid var(--color-border)' }}
         >
-          <h1 className="px-3 mb-4 text-lg font-bold" style={{ color: 'var(--color-text)' }}>
+          <h1 className="px-3 mb-4 text-lg font-bold shrink-0" style={{ color: 'var(--color-text)' }}>
             {t('Settings')}
           </h1>
 
-          {visibleTabs.map((tab) => {
+          {allTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
+            const isAbout = tab.id === 'about';
             return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-colors text-left select-none outline-none"
-                style={{
-                  background: isActive ? 'var(--color-accent-soft)' : 'transparent',
-                  color: isActive ? 'var(--color-accent)' : 'var(--color-text-secondary)',
-                }}
-              >
-                <Icon size={16} />
-                {t(tab.label)}
-              </button>
+              <React.Fragment key={tab.id}>
+                {isAbout && <hr className="my-2 border-[var(--color-border)]" />}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-colors text-left select-none outline-none shrink-0"
+                  style={{
+                    background: isActive ? 'var(--color-accent-soft)' : 'transparent',
+                    color: isActive ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                  }}
+                >
+                  <Icon size={16} />
+                  {t(tab.label)}
+                </button>
+              </React.Fragment>
             );
           })}
         </nav>
@@ -3261,9 +3477,9 @@ export function SettingsView() {
             transition={{ duration: 0.15 }}
           >
             <h2 className="text-base font-bold mb-6" style={{ color: 'var(--color-text)' }}>
-              {t(visibleTabs.find((tab) => tab.id === activeTab)?.label ?? '')}
+              {heading}
             </h2>
-            <ActiveContent />
+            {renderActiveSettingsTab(activeTab)}
           </motion.div>
         </div>
       </div>

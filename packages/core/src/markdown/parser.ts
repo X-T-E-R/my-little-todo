@@ -190,6 +190,37 @@ function parseReminderLine(line: string): TaskReminder | null {
 
 const KANBAN_COLUMNS: KanbanColumn[] = ['ideas', 'planned', 'doing', 'finishing', 'done_recent'];
 
+/** YAML scalars may retain quote characters when parsed as plain strings. */
+function normalizeRoleId(s: string): string {
+  let t = s.trim();
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
+    t = t.slice(1, -1);
+  }
+  return t;
+}
+
+function roleFieldsFromMeta(meta: FrontMatter): Pick<Task, 'roleId' | 'roleIds'> {
+  const rawLegacy = (meta.role as string | undefined) ?? (meta.project as string | undefined);
+  const legacy = rawLegacy ? normalizeRoleId(String(rawLegacy)) : undefined;
+  const rawRoles = meta.roles;
+  let roleIds: string[] | undefined;
+  if (Array.isArray(rawRoles)) {
+    roleIds = rawRoles.map((x) => normalizeRoleId(String(x))).filter(Boolean);
+  } else if (typeof rawRoles === 'string' && rawRoles.trim()) {
+    roleIds = [normalizeRoleId(rawRoles.trim())];
+  }
+  if (!roleIds?.length && legacy) {
+    return { roleId: legacy, roleIds: undefined };
+  }
+  if (roleIds && roleIds.length > 1) {
+    return { roleId: roleIds[0], roleIds };
+  }
+  if (roleIds?.length === 1) {
+    return { roleId: roleIds[0], roleIds: undefined };
+  }
+  return { roleId: undefined, roleIds: undefined };
+}
+
 function parseProgressLogLine(trimmed: string): ProgressLog | null {
   const m = /^- ([^|]+) \| ([^|]+) \| ([^|]+) \| (.+)$/.exec(trimmed);
   if (!m) return null;
@@ -202,6 +233,7 @@ function parseProgressLogLine(trimmed: string): ProgressLog | null {
   return { id, timestamp: new Date(ts), content, source };
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: task meta assembly from front matter
 function buildTaskFromMeta(
   meta: FrontMatter,
   bodyText: string,
@@ -231,6 +263,8 @@ function buildTaskFromMeta(
   return {
     id: (meta.id as string) ?? '',
     title: (meta.title as string) ?? '',
+    titleCustomized:
+      meta.title_customized === true || meta.title_customized === 'true' ? true : undefined,
     description: meta.description as string | undefined,
     status: (meta.status as TaskStatus) ?? 'inbox',
     createdAt: new Date((meta.created as string) ?? Date.now()),
@@ -239,7 +273,7 @@ function buildTaskFromMeta(
     ddl: meta.ddl ? new Date(meta.ddl as string) : undefined,
     ddlType: meta.ddl_type as DdlType | undefined,
     plannedAt: meta.planned ? new Date(meta.planned as string) : undefined,
-    roleId: (meta.role as string | undefined) ?? (meta.project as string | undefined),
+    ...roleFieldsFromMeta(meta),
     tags,
     priority: meta.priority ? Number(meta.priority) : undefined,
     body: bodyText,

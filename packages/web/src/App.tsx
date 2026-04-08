@@ -14,9 +14,11 @@ import { SyncIndicator } from './components/SyncIndicator';
 import { TaskDetailPanel } from './components/TaskDetailPanel';
 import { ToastContainer } from './components/Toast';
 import { getSetting } from './storage/settingsApi';
+import { useModuleStore } from './modules';
 import {
   useCoachActivityStore,
   useExecCoachStore,
+  ensureFocusSessionHydrated,
   useFocusSessionStore,
   useRoleStore,
   useScheduleStore,
@@ -28,6 +30,7 @@ import { useAuthStore } from './stores/authStore';
 import { useToastStore } from './stores/toastStore';
 import { startReminderService } from './utils/notificationService';
 import { isNativeClient } from './utils/platform';
+import { matchesShortcut } from './utils/shortcuts';
 import { useIsMobile } from './utils/useIsMobile';
 import { useShortcuts } from './utils/useShortcuts';
 import { BoardView } from './views/BoardView';
@@ -52,6 +55,7 @@ const TAB_CONFIG = [
 export function App() {
   const { t } = useTranslation('nav');
   const { t: tCoach } = useTranslation('coach');
+  const { t: tStream } = useTranslation('stream');
   const [currentView, setCurrentView] = useState<View>('now');
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [showQuickInput, setShowQuickInput] = useState(false);
@@ -67,6 +71,15 @@ export function App() {
   const touchAppOpen = useExecCoachStore((s) => s.touchAppOpen);
   const showToast = useToastStore((s) => s.showToast);
   const focusLocked = useFocusSessionStore((s) => s.session?.locked);
+  const hydrateModules = useModuleStore((s) => s.hydrate);
+  const kanbanEnabled = useModuleStore((s) => s.isEnabled('kanban'));
+  const energyEnabled = useModuleStore((s) => s.isEnabled('energy-indicator'));
+  const brainDumpEnabled = useModuleStore((s) => s.isEnabled('brain-dump'));
+
+  const visibleTabs = useMemo(
+    () => TAB_CONFIG.filter((tab) => tab.key !== 'board' || kanbanEnabled),
+    [kanbanEnabled],
+  );
 
   const { authMode, token, loading: authLoading, checkAuthMode, checkAuth } = useAuthStore();
   const native = isNativeClient();
@@ -101,6 +114,8 @@ export function App() {
     loadSchedules();
     loadExecCoach();
     loadCoachActivity();
+    void ensureFocusSessionHydrated();
+    void hydrateModules();
     startReminderService();
     getSetting('onboarding-completed')
       .then((val) => {
@@ -125,28 +140,43 @@ export function App() {
     loadSchedules,
     loadExecCoach,
     loadCoachActivity,
+    hydrateModules,
   ]);
 
   const handleViewChange = useCallback((newView: View) => {
+    if (newView === 'board' && !useModuleStore.getState().isEnabled('kanban')) return;
     setCurrentView((prev) => {
       if (newView === prev) return prev;
-      const currentIndex = TAB_CONFIG.findIndex((tab) => tab.key === prev);
-      const newIndex = TAB_CONFIG.findIndex((tab) => tab.key === newView);
+      const tabs = TAB_CONFIG.filter(
+        (tab) => tab.key !== 'board' || useModuleStore.getState().isEnabled('kanban'),
+      );
+      const currentIndex = tabs.findIndex((tab) => tab.key === prev);
+      const newIndex = tabs.findIndex((tab) => tab.key === newView);
       setDirection(newIndex > currentIndex ? 1 : -1);
-      useCoachActivityStore.getState().record({
-        type: 'view_switch',
-        payload: { from: prev, to: newView },
-      });
       return newView;
     });
   }, []);
 
   useEffect(() => {
+    if (!kanbanEnabled && currentView === 'board') handleViewChange('now');
+  }, [kanbanEnabled, currentView, handleViewChange]);
+
+  useEffect(() => {
     touchAppOpen();
   }, [touchAppOpen]);
 
+  useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const detail = (e as CustomEvent<{ view?: View }>).detail;
+      if (detail?.view === 'now') handleViewChange('now');
+    };
+    window.addEventListener('mlt-navigate', onNavigate);
+    return () => window.removeEventListener('mlt-navigate', onNavigate);
+  }, [handleViewChange]);
+
   /** Gentle "welcome back" when returning after a long gap (same browser tab session). */
   useEffect(() => {
+    if (!useModuleStore.getState().isEnabled('ai-coach')) return;
     const last = sessionStorage.getItem('mlt-coach-last-visit');
     const now = Date.now();
     if (last && now - Number(last) > 8 * 3600000) {
@@ -155,16 +185,46 @@ export function App() {
     sessionStorage.setItem('mlt-coach-last-visit', String(now));
   }, [showToast, tCoach]);
 
+  /** Randomly surface an older spark as a low-friction “time capsule” (opt-in via settings). */
   useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      if (!useModuleStore.getState().isEnabled('time-capsule')) return;
+      const { getSetting } = await import('./storage/settingsApi');
+      const enabled = (await getSetting('time-capsule-enabled')) === 'true';
+      if (!enabled) return;
+      const last = Number(localStorage.getItem('mlt-capsule-last') || '0');
+      if (Date.now() - last < 25 * 60 * 1000) return;
+      if (Math.random() > 0.09) return;
+      const { pickTimeCapsuleEntry } = await import('./storage/streamRepo');
+      const entry = await pickTimeCapsuleEntry(30);
+      if (cancelled || !entry) return;
+      localStorage.setItem('mlt-capsule-last', String(Date.now()));
+      showToast({
+        type: 'info',
+        message: tStream('Time capsule hint', { preview: entry.content.slice(0, 160) }),
+        duration: 14000,
+      });
+    };
+    const id = window.setInterval(() => void tick(), 10 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [showToast, tStream]);
+
+  const brainDumpKeys = useShortcutStore((s) => s.getKeys('plugin.brainDump'));
+  useEffect(() => {
+    if (!brainDumpEnabled) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+      if (brainDumpKeys && matchesShortcut(e, brainDumpKeys)) {
         e.preventDefault();
         setShowBrainDump(true);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [brainDumpEnabled, brainDumpKeys]);
 
   const handleNewTask = useCallback(() => setShowQuickInput((v) => !v), []);
 
@@ -173,7 +233,9 @@ export function App() {
       'app.newTask': () => handleNewTask(),
       'app.viewNow': () => handleViewChange('now'),
       'app.viewStream': () => handleViewChange('stream'),
-      'app.viewBoard': () => handleViewChange('board'),
+      'app.viewBoard': () => {
+        if (useModuleStore.getState().isEnabled('kanban')) handleViewChange('board');
+      },
       'app.viewSettings': () => handleViewChange('settings'),
     }),
     [handleNewTask, handleViewChange],
@@ -248,7 +310,9 @@ export function App() {
               {currentView === 'now' && (
                 <NowView
                   onNavigateToStream={() => handleViewChange('stream')}
-                  onBrainDump={() => setShowBrainDump(true)}
+                  onBrainDump={
+                    brainDumpEnabled ? () => setShowBrainDump(true) : undefined
+                  }
                 />
               )}
               {currentView === 'stream' && <StreamView />}
@@ -260,7 +324,9 @@ export function App() {
           <RoleLandingCard />
 
           <QuickInputBar open={showQuickInput} onClose={() => setShowQuickInput(false)} />
-          <BrainDumpOverlay open={showBrainDump} onClose={() => setShowBrainDump(false)} />
+          {brainDumpEnabled && (
+            <BrainDumpOverlay open={showBrainDump} onClose={() => setShowBrainDump(false)} />
+          )}
         </main>
 
         {!focusLocked && (
@@ -268,10 +334,10 @@ export function App() {
             className="relative z-10 flex items-stretch border-t border-[var(--color-border)] bg-[var(--color-surface)]/80 px-1 pt-1.5 backdrop-blur-md gap-1"
             style={{ paddingBottom: 'calc(8px + var(--safe-area-bottom))' }}
           >
-            <div className="flex items-center justify-center px-1 shrink-0">
-              <EnergyIndicator />
+            <div className="flex items-center justify-center gap-1 px-1 shrink-0">
+              {energyEnabled && <EnergyIndicator />}
             </div>
-            {TAB_CONFIG.map((tab) => {
+            {visibleTabs.map((tab) => {
               const isActive = currentView === tab.key;
               return (
                 <button
@@ -305,7 +371,9 @@ export function App() {
 
       <ToastContainer />
       <OfflineIndicator />
-      <SyncIndicator />
+      <div className="fixed bottom-20 right-3 z-50" style={{ marginBottom: 'var(--safe-area-bottom)' }}>
+        <SyncIndicator />
+      </div>
       <SyncConflictDialog />
     </div>
   );

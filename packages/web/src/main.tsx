@@ -56,12 +56,17 @@ async function main() {
     startAutoSync(createDirectExecutor(_apiBaseUrl));
   }
 
-  // Initialize sync engine from saved config (native clients)
-  if (getPlatform() === 'tauri' || getPlatform() === 'capacitor') {
+  // Sync engine: only Tauri uses local SQLite + incremental sync targets (API/WebDAV).
+  // Web and Capacitor use the API as primary storage — no separate sync engine.
+  if (getPlatform() === 'tauri') {
     const { initSyncFromConfig } = await import('./sync/syncManager');
-    initSyncFromConfig().catch((err) =>
+    await initSyncFromConfig().catch((err) =>
       console.warn('[SyncEngine] Failed to initialize from config:', err),
     );
+    const { getSyncEngine } = await import('./sync/syncEngine');
+    const flush = () => getSyncEngine().flushPendingLocalSync();
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
   }
 
   const root = document.getElementById('root');

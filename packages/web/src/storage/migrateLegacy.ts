@@ -36,8 +36,9 @@ export async function migrateLegacyData(store: DataStore): Promise<void> {
   }
 
   try {
-    const hasFiles = await oldDb
-      .select<{ name: string }[]>("SELECT name FROM sqlite_master WHERE type='table' AND name='files'");
+    const hasFiles = await oldDb.select<{ name: string }[]>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='files'",
+    );
     if (hasFiles.length === 0) {
       console.warn('[Migration] Old DB has no `files` table — skipping');
       return;
@@ -100,8 +101,9 @@ export async function migrateLegacyData(store: DataStore): Promise<void> {
       }
     }
 
-    const hasSettings = await oldDb
-      .select<{ name: string }[]>("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'");
+    const hasSettings = await oldDb.select<{ name: string }[]>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='settings'",
+    );
     if (hasSettings.length > 0 && primaryUserId) {
       const settings = await oldDb.select<{ key: string; value: string }[]>(
         'SELECT key, value FROM settings WHERE user_id = $1 AND deleted_at IS NULL',

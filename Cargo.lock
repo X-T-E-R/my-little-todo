@@ -2277,7 +2277,7 @@ dependencies = [
 
 [[package]]
 name = "mlt-server"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2299,7 +2299,7 @@ dependencies = [
 
 [[package]]
 name = "mlt-server-bin"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "mlt-server",
  "tokio",
@@ -2345,7 +2345,7 @@ dependencies = [
 
 [[package]]
 name = "my-little-todo"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "serde",
  "serde_json",

@@ -179,7 +179,9 @@ export function startAutoSync(
 export function createDirectExecutor(_baseUrl: string) {
   return {
     async writeFile(_content: string, ..._segments: string[]): Promise<void> {
-      console.warn('[offlineQueue] Discarding legacy queued writeFile (data layer is relational now).');
+      console.warn(
+        '[offlineQueue] Discarding legacy queued writeFile (data layer is relational now).',
+      );
     },
     async deleteFile(..._segments: string[]): Promise<void> {
       console.warn('[offlineQueue] Discarding legacy queued deleteFile.');

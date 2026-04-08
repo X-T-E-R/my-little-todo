@@ -3,6 +3,7 @@ import { initReactI18next } from 'react-i18next';
 
 import enBoard from './en/board.json';
 import enCoach from './en/coach.json';
+import enSettings from './en/settings.json';
 import zhBoard from './zh-CN/board.json';
 import zhCalendar from './zh-CN/calendar.json';
 import zhCoach from './zh-CN/coach.json';
@@ -44,7 +45,7 @@ export const resources = {
     now: {},
     stream: {},
     board: enBoard,
-    settings: {},
+    settings: enSettings,
     task: {},
     onboarding: {},
     login: {},

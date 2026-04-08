@@ -1,6 +1,7 @@
 import type { StreamEntry } from '../models/stream.js';
 import type { Task } from '../models/task.js';
 import { formatDateKey, formatTimeStorage } from '../utils/date.js';
+import { taskRoleIds } from '../utils/taskRoles.js';
 
 export function serializeStreamFile(entries: StreamEntry[], dateKey: string): string {
   const lines: string[] = ['---', `date: ${dateKey}`, `entries: ${entries.length}`, '---', ''];
@@ -27,6 +28,7 @@ function serializeTaskMetaHeader(task: Task): string[] {
     '---',
     `id: ${task.id}`,
     `title: ${task.title}`,
+    ...(task.titleCustomized ? (['title_customized: true'] as const) : []),
     `status: ${task.status}`,
     `created: ${task.createdAt.toISOString()}`,
     `updated: ${task.updatedAt.toISOString()}`,
@@ -36,7 +38,12 @@ function serializeTaskMetaHeader(task: Task): string[] {
   if (task.ddl) meta.push(`ddl: ${task.ddl.toISOString()}`);
   if (task.ddlType) meta.push(`ddl_type: ${task.ddlType}`);
   if (task.plannedAt) meta.push(`planned: ${task.plannedAt.toISOString()}`);
-  if (task.roleId) meta.push(`role: ${task.roleId}`);
+  const rids = taskRoleIds(task);
+  if (rids.length > 1) {
+    meta.push(`roles: [${rids.map((id) => `"${id}"`).join(', ')}]`);
+  } else if (rids.length === 1) {
+    meta.push(`role: ${rids[0]}`);
+  }
   if (task.tags.length > 0) meta.push(`tags: [${task.tags.join(', ')}]`);
   if (task.priority != null) meta.push(`priority: ${task.priority}`);
   if (task.sourceStreamId) meta.push(`source: ${task.sourceStreamId}`);

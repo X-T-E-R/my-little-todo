@@ -1,3 +1,4 @@
+import { displayTaskTitle } from '@my-little-todo/core';
 import i18n from '../locales';
 import { useTaskStore } from '../stores';
 
@@ -73,7 +74,10 @@ function checkReminders(): void {
       if (r.notified) return r;
       if (r.time.getTime() <= now.getTime()) {
         sendNotification(
-          i18n.t('notifications.Reminder: {{title}}', { ns: 'common', title: task.title }),
+          i18n.t('notifications.Reminder: {{title}}', {
+            ns: 'common',
+            title: displayTaskTitle(task),
+          }),
           r.label || i18n.t('notifications.You set a task reminder', { ns: 'common' }),
         );
         hasChanges = true;

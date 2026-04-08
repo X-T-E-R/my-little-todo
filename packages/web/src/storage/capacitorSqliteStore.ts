@@ -1,11 +1,11 @@
 import {
+  type StreamEntryDbRow,
+  type TaskDbRow,
   formatDateKey,
   streamEntryFromDbRow,
   streamEntryToDbRow,
   taskFromDbRow,
   taskToDbRow,
-  type StreamEntryDbRow,
-  type TaskDbRow,
 } from '@my-little-todo/core';
 import type { StreamEntry, Task } from '@my-little-todo/core';
 import type { AttachmentConfig, UploadResult } from './blobApi';
@@ -72,7 +72,34 @@ async function ensureSchema(db: CapDB): Promise<void> {
       } catch {
         /* column may already exist */
       }
-      await db.execute(`INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (3, ${Date.now()})`);
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (3, ${Date.now()})`,
+      );
+    }
+    const rows2 = await db.query('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1');
+    const ver2 = rows2.values?.[0]?.version != null ? Number(rows2.values[0].version) : 0;
+    if (ver2 < 4) {
+      try {
+        await db.execute('ALTER TABLE tasks ADD COLUMN role_ids TEXT');
+      } catch {
+        /* column may already exist */
+      }
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (4, ${Date.now()})`,
+      );
+    }
+    const rows3 = await db.query('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1');
+    const ver3 = rows3.values?.[0]?.version != null ? Number(rows3.values[0].version) : 0;
+    if (ver3 < 5) {
+      try {
+        await db.execute('ALTER TABLE tasks ADD COLUMN title_customized INTEGER NOT NULL DEFAULT 0');
+        await db.execute(`UPDATE tasks SET title = '', title_customized = 0`);
+      } catch {
+        /* column may already exist */
+      }
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (${SCHEMA_VERSION}, ${Date.now()})`,
+      );
     }
   }
 }
@@ -87,6 +114,7 @@ function rowToTaskDbRow(r: Record<string, unknown>): TaskDbRow {
   return {
     id: String(r.id),
     title: String(r.title),
+    title_customized: r.title_customized != null ? Number(r.title_customized) : 0,
     description: r.description != null ? String(r.description) : null,
     status: String(r.status),
     body: String(r.body),
@@ -97,6 +125,7 @@ function rowToTaskDbRow(r: Record<string, unknown>): TaskDbRow {
     ddl_type: r.ddl_type != null ? String(r.ddl_type) : null,
     planned_at: r.planned_at != null ? Number(r.planned_at) : null,
     role_id: r.role_id != null ? String(r.role_id) : null,
+    role_ids: r.role_ids != null ? String(r.role_ids) : null,
     parent_id: r.parent_id != null ? String(r.parent_id) : null,
     source_stream_id: r.source_stream_id != null ? String(r.source_stream_id) : null,
     priority: r.priority != null ? Number(r.priority) : null,
@@ -142,7 +171,9 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
 
   return {
     async getAllTasks(): Promise<Task[]> {
-      const rows = await db.query('SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC');
+      const rows = await db.query(
+        'SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC',
+      );
       if (!rows.values) return [];
       return rows.values.map((r) => taskFromDbRow(rowToTaskDbRow(r)));
     },
@@ -159,16 +190,16 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const row = taskToDbRow(t, v, null);
       await db.execute(
         `INSERT INTO tasks (
-          id, title, description, status, body, created_at, updated_at, completed_at,
-          ddl, ddl_type, planned_at, role_id, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+          id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
+          ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
           tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
           version, deleted_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
-          title=excluded.title, description=excluded.description, status=excluded.status, body=excluded.body,
+          title=excluded.title, title_customized=excluded.title_customized, description=excluded.description, status=excluded.status, body=excluded.body,
           created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
           ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
-          role_id=excluded.role_id, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
+          role_id=excluded.role_id, role_ids=excluded.role_ids, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
           priority=excluded.priority, promoted=excluded.promoted, phase=excluded.phase, kanban_column=excluded.kanban_column,
           tags=excluded.tags, subtask_ids=excluded.subtask_ids, resources=excluded.resources,
           reminders=excluded.reminders, submissions=excluded.submissions, postponements=excluded.postponements,
@@ -177,6 +208,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
         [
           row.id,
           row.title,
+          row.title_customized,
           row.description,
           row.status,
           row.body,
@@ -187,6 +219,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           row.ddl_type,
           row.planned_at,
           row.role_id,
+          row.role_ids,
           row.parent_id,
           row.source_stream_id,
           row.priority,
@@ -243,6 +276,18 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       );
       if (!rows.values) return [];
       return rows.values.map((r) => String(r.date_key));
+    },
+
+    async searchStreamEntries(query: string, limit = 200): Promise<StreamEntry[]> {
+      const needle = query.trim();
+      if (!needle) return [];
+      const lim = Math.min(Math.max(1, limit), 500);
+      const rows = await db.query(
+        'SELECT * FROM stream_entries WHERE deleted_at IS NULL AND instr(lower(content), lower(?)) > 0 ORDER BY timestamp DESC LIMIT ?',
+        [needle, lim],
+      );
+      if (!rows.values) return [];
+      return rows.values.map((r) => streamEntryFromDbRow(rowToStreamDbRow(r)));
     },
 
     async putStreamEntry(entry: StreamEntry): Promise<void> {

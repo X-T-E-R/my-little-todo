@@ -1,5 +1,5 @@
 import type { Task, TaskStatus } from '@my-little-todo/core';
-import { daysUntil, isOverdue } from '@my-little-todo/core';
+import { daysUntil, displayTaskTitle, isOverdue, taskRoleIds, withTaskRoles } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Check,
@@ -19,10 +19,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { OnboardingTip } from '../components/OnboardingTip';
 import { RecommendationHistory } from '../components/RecommendationHistory';
-import { RolePill } from '../components/RolePickerPopover';
+import { RolePillMulti } from '../components/RolePickerPopover';
 import { TaskContextMenu } from '../components/TaskContextMenu';
 import {
-  countViewSwitchesInWindow,
+  countTaskSwitchesInWindow,
   filterByRole,
   formatDdlLabel,
   isInScheduleBlock,
@@ -30,10 +30,13 @@ import {
   useBehaviorStore,
   useCoachActivityStore,
   useExecCoachStore,
+  ensureFocusSessionHydrated,
   useFocusSessionStore,
+  useNowOverrideStore,
   useRoleStore,
   useScheduleStore,
   useTaskStore,
+  type FocusSessionState,
 } from '../stores';
 import type { EnergyLevel } from '../stores/execCoachStore';
 import { pickRecommendation } from '../stores/taskStore';
@@ -50,14 +53,6 @@ const GENTLE_INTERVENTIONS = [
   "Rejecting is okay — but if you don't want to do any task, maybe try a different environment or approach.",
   "Consecutive rejections might mean you need a break, or the task breakdown isn't right. Want to adjust?",
 ];
-
-interface FocusState {
-  taskId: string;
-  startedAt: Date;
-  notes: string;
-  /** Commitment lock — stricter exit (friction, not punishment). */
-  locked?: boolean;
-}
 
 function pickForNow(list: Task[], allTasks: Task[], energy: EnergyLevel) {
   return pickRecommendation(list, { energyLevel: energy, allTasks });
@@ -110,7 +105,7 @@ function FocusSubtaskRow({
           textDecoration: done ? 'line-through' : 'none',
         }}
       >
-        {subtask.title}
+        {displayTaskTitle(subtask)}
       </span>
     </button>
   );
@@ -118,7 +113,7 @@ function FocusSubtaskRow({
 
 function FocusModeView({
   task,
-  focusState,
+  session,
   locked,
   lowEnergy,
   onShelve,
@@ -126,7 +121,7 @@ function FocusModeView({
   onOpenDetail,
 }: {
   task: Task;
-  focusState: FocusState;
+  session: FocusSessionState;
   locked: boolean;
   lowEnergy: boolean;
   onShelve: () => void;
@@ -134,10 +129,11 @@ function FocusModeView({
   onOpenDetail: () => void;
 }) {
   const { tasks, updateTask, updateStatus } = useTaskStore();
+  const updateFocusSession = useFocusSessionStore((s) => s.updateSession);
   const { t } = useTranslation('now');
   const { t: tc } = useTranslation('coach');
   const [elapsed, setElapsed] = useState(0);
-  const [localNotes, setLocalNotes] = useState(focusState.notes);
+  const [localNotes, setLocalNotes] = useState(session.notes);
   const [showNotes, setShowNotes] = useState(false);
   const [exitStep, setExitStep] = useState<'idle' | 'reason' | 'cooldown'>('idle');
   const [exitReason, setExitReason] = useState('');
@@ -147,16 +143,20 @@ function FocusModeView({
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setElapsed(Date.now() - focusState.startedAt.getTime());
+      setElapsed(Date.now() - session.startedAt.getTime());
     }, 1000);
     return () => clearInterval(interval);
-  }, [focusState.startedAt]);
+  }, [session.startedAt]);
+
+  useEffect(() => {
+    setLocalNotes(session.notes);
+  }, [session.notes, session.taskId]);
 
   const handleNotesChange = (val: string) => {
     setLocalNotes(val);
     if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
     notesTimerRef.current = setTimeout(() => {
-      focusState.notes = val;
+      updateFocusSession({ notes: val });
     }, 300);
   };
 
@@ -237,12 +237,12 @@ function FocusModeView({
             className="text-2xl sm:text-4xl font-extrabold tracking-tight leading-tight"
             style={{ color: 'var(--color-text)' }}
           >
-            {task.title}
+            {displayTaskTitle(task)}
           </h1>
           <div className="mt-3 flex justify-center">
-            <RolePill
-              roleId={task.roleId}
-              onChangeRole={(newRoleId) => updateTask({ ...task, roleId: newRoleId })}
+            <RolePillMulti
+              roleIds={taskRoleIds(task)}
+              onChangeRoleIds={(ids) => updateTask({ ...task, ...withTaskRoles(task, ids) })}
               size="md"
             />
           </div>
@@ -265,7 +265,7 @@ function FocusModeView({
             <div className="flex items-center gap-1.5">
               <Play size={12} style={{ color: 'var(--color-success)' }} />
               <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                {t('Started at {{time}}', { time: formatTimeOfDay(focusState.startedAt) })}
+                {t('Started at {{time}}', { time: formatTimeOfDay(session.startedAt) })}
               </span>
             </div>
             <div className="w-px h-4" style={{ background: 'var(--color-border)' }} />
@@ -492,12 +492,16 @@ export function NowView({
   const [rejectionCount, setRejectionCount] = useState(0);
   const [showIntervention, setShowIntervention] = useState(false);
   const [isOffTime, setIsOffTime] = useState(false);
-  const [focusState, setFocusState] = useState<FocusState | null>(null);
   const [showCompletionCelebration, setShowCompletionCelebration] = useState(false);
   const [taskCtxMenu, setTaskCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [lockTick, setLockTick] = useState<number | null>(null);
   const [showRhythmMirror, setShowRhythmMirror] = useState(false);
   const [celebrateLine, setCelebrateLine] = useState<string | null>(null);
+  const [focusStoreHydrated, setFocusStoreHydrated] = useState(false);
+  const [chosenByUserTaskId, setChosenByUserTaskId] = useState<string | null>(null);
+  const session = useFocusSessionStore((s) => s.session);
+  const setSession = useFocusSessionStore((s) => s.setSession);
+  const overrideTaskId = useNowOverrideStore((s) => s.overrideTaskId);
   const { tasks, loading, load, selectTask, updateTask, updateStatus, deleteTask } = useTaskStore();
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const filtered = useMemo(() => filterByRole(tasks, currentRoleId), [tasks, currentRoleId]);
@@ -518,27 +522,36 @@ export function NowView({
   }, [load, loadBehavior, loadSchedules, loadCoachActivity]);
 
   useEffect(() => {
-    if (focusState) {
-      useFocusSessionStore.getState().setSession({
-        taskId: focusState.taskId,
-        startedAt: focusState.startedAt,
-        notes: focusState.notes,
-        locked: !!focusState.locked,
+    if (!overrideTaskId || loading) return;
+    const t = tasks.find((x) => x.id === overrideTaskId);
+    if (t) {
+      setCurrentTask(t);
+      setSession(null);
+      setChosenByUserTaskId(t.id);
+      useNowOverrideStore.getState().setOverrideTaskId(null);
+      useCoachActivityStore.getState().record({
+        type: 'task_focus_start',
+        payload: { taskId: t.id, source: 'now_override' },
       });
     } else {
-      useFocusSessionStore.getState().setSession(null);
+      useNowOverrideStore.getState().setOverrideTaskId(null);
     }
-  }, [focusState]);
+  }, [overrideTaskId, tasks, loading]);
 
   useEffect(() => {
-    if (filtered.length > 0 && !currentTask && !focusState) {
+    ensureFocusSessionHydrated().finally(() => setFocusStoreHydrated(true));
+  }, []);
+
+  useEffect(() => {
+    if (!focusStoreHydrated) return;
+    if (filtered.length > 0 && !currentTask && !session) {
       setCurrentTask(pickForNow(filtered, tasks, energyLevel));
     }
-  }, [filtered, currentTask, focusState, tasks, energyLevel]);
+  }, [focusStoreHydrated, filtered, currentTask, session, tasks, energyLevel]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset state when role filter changes
   useEffect(() => {
-    if (!focusState) {
+    if (!session) {
       setCurrentTask(pickForNow(filtered, tasks, energyLevel));
       setRejectionCount(0);
       setShowRejectPanel(false);
@@ -547,7 +560,7 @@ export function NowView({
   }, [currentRoleId]);
 
   useEffect(() => {
-    const n = countViewSwitchesInWindow(activityEvents, 30 * 60 * 1000);
+    const n = countTaskSwitchesInWindow(activityEvents, 30 * 60 * 1000);
     if (n >= 5 && energyLevel === 'high') {
       setShowRhythmMirror(true);
     }
@@ -560,14 +573,14 @@ export function NowView({
       if (!currentTask) return;
       recordEvent({
         taskId: currentTask.id,
-        taskTitle: currentTask.title,
+        taskTitle: displayTaskTitle(currentTask),
         action: 'accepted',
       });
       useCoachActivityStore.getState().record({
         type: 'task_focus_start',
         payload: { taskId: currentTask.id, locked: true },
       });
-      setFocusState({
+      setSession({
         taskId: currentTask.id,
         startedAt: new Date(),
         notes: '',
@@ -585,7 +598,7 @@ export function NowView({
       const reason = REJECTION_REASONS.find((r) => r.id === reasonId);
       recordEvent({
         taskId: currentTask.id,
-        taskTitle: currentTask.title,
+        taskTitle: displayTaskTitle(currentTask),
         action: 'rejected',
         rejectionReason: reason?.label,
       });
@@ -601,6 +614,13 @@ export function NowView({
     const remaining = filtered.filter((t) => t.id !== currentTask?.id);
     const next = pickForNow(remaining, tasks, energyLevel);
     setCurrentTask(next);
+    if (next) {
+      setChosenByUserTaskId(null);
+      useCoachActivityStore.getState().record({
+        type: 'task_focus_start',
+        payload: { taskId: next.id, source: 'now_recommendation' },
+      });
+    }
   };
 
   const handleDismissIntervention = () => {
@@ -608,6 +628,13 @@ export function NowView({
     const remaining = filtered.filter((t) => t.id !== currentTask?.id);
     const next = pickForNow(remaining, tasks, energyLevel);
     setCurrentTask(next);
+    if (next) {
+      setChosenByUserTaskId(null);
+      useCoachActivityStore.getState().record({
+        type: 'task_focus_start',
+        payload: { taskId: next.id, source: 'now_recommendation' },
+      });
+    }
   };
 
   const handleOffTime = () => {
@@ -619,33 +646,48 @@ export function NowView({
   const handleBackToWork = () => {
     setIsOffTime(false);
     setRejectionCount(0);
-    setCurrentTask(pickForNow(filtered, tasks, energyLevel));
+    const next = pickForNow(filtered, tasks, energyLevel);
+    setCurrentTask(next);
+    if (next) {
+      setChosenByUserTaskId(null);
+      useCoachActivityStore.getState().record({
+        type: 'task_focus_start',
+        payload: { taskId: next.id, source: 'now_recommendation' },
+      });
+    }
   };
 
   const handleRandom = () => {
     if (currentTask) {
       recordEvent({
         taskId: currentTask.id,
-        taskTitle: currentTask.title,
+        taskTitle: displayTaskTitle(currentTask),
         action: 'swapped',
       });
     }
     const next = pickRandom(filtered);
     setCurrentTask(next);
+    if (next) {
+      setChosenByUserTaskId(null);
+      useCoachActivityStore.getState().record({
+        type: 'task_focus_start',
+        payload: { taskId: next.id, source: 'now_recommendation' },
+      });
+    }
   };
 
   const handleStartWorking = () => {
     if (!currentTask) return;
     recordEvent({
       taskId: currentTask.id,
-      taskTitle: currentTask.title,
+      taskTitle: displayTaskTitle(currentTask),
       action: 'accepted',
     });
     useCoachActivityStore.getState().record({
       type: 'task_focus_start',
       payload: { taskId: currentTask.id, locked: false },
     });
-    setFocusState({
+    setSession({
       taskId: currentTask.id,
       startedAt: new Date(),
       notes: '',
@@ -659,19 +701,21 @@ export function NowView({
   };
 
   const handleShelve = () => {
-    setFocusState(null);
-    const remaining = filtered.filter((t) => t.id !== focusState?.taskId);
+    const shelvedId = session?.taskId;
+    setSession(null);
+    setChosenByUserTaskId(null);
+    const remaining = filtered.filter((t) => t.id !== shelvedId);
     const next = pickForNow(remaining, tasks, energyLevel);
     setCurrentTask(next);
   };
 
   const handleFocusComplete = useCallback(async () => {
-    if (!focusState) return;
-    await updateStatus(focusState.taskId, 'completed');
+    if (!session) return;
+    await updateStatus(session.taskId, 'completed');
     bumpCompletionCount();
     const keys = ['celebrate_a', 'celebrate_b', 'celebrate_c', 'celebrate_d'] as const;
     setCelebrateLine(tCoach(keys[Math.floor(Math.random() * keys.length)] ?? 'celebrate_a'));
-    setFocusState(null);
+    setSession(null);
     setShowCompletionCelebration(true);
     setTimeout(() => {
       setShowCompletionCelebration(false);
@@ -681,11 +725,11 @@ export function NowView({
         pickForNow(freshFiltered, freshTasks, useExecCoachStore.getState().energyLevel),
       );
     }, 2500);
-  }, [focusState, updateStatus, bumpCompletionCount, tCoach]);
+  }, [session, updateStatus, bumpCompletionCount, tCoach, setSession]);
 
   const handleOpenDetail = () => {
-    if (focusState) {
-      selectTask(focusState.taskId);
+    if (session) {
+      selectTask(session.taskId);
     }
   };
 
@@ -729,14 +773,14 @@ export function NowView({
   }
 
   // Focus mode
-  if (focusState) {
-    const focusTask = tasks.find((t) => t.id === focusState.taskId);
+  if (session) {
+    const focusTask = tasks.find((t) => t.id === session.taskId);
     if (focusTask) {
       return (
         <FocusModeView
           task={focusTask}
-          focusState={focusState}
-          locked={!!focusState.locked}
+          session={session}
+          locked={!!session.locked}
           lowEnergy={energyLevel === 'low'}
           onShelve={handleShelve}
           onComplete={handleFocusComplete}
@@ -744,7 +788,7 @@ export function NowView({
         />
       );
     }
-    setFocusState(null);
+    setSession(null);
   }
 
   if (isOffTime) {
@@ -880,7 +924,7 @@ export function NowView({
               style={{ color: 'var(--color-text-secondary)' }}
             >
               {tCoach('wip_mirror_body', {
-                count: countViewSwitchesInWindow(activityEvents, 30 * 60 * 1000),
+                count: countTaskSwitchesInWindow(activityEvents, 30 * 60 * 1000),
               })}
             </p>
             <div className="mt-4 flex flex-col gap-2">
@@ -959,14 +1003,22 @@ export function NowView({
             className="text-3xl sm:text-5xl font-extrabold tracking-tight leading-tight transition-colors hover:text-[var(--color-accent)]"
             style={{ color: 'var(--color-text)' }}
           >
-            {currentTask.title}
+            {displayTaskTitle(currentTask)}
           </button>
+          {chosenByUserTaskId === currentTask.id && (
+            <p
+              className="mt-2 text-[11px] font-semibold uppercase tracking-wider"
+              style={{ color: 'var(--color-accent)' }}
+            >
+              {t('Chosen by you')}
+            </p>
+          )}
           <div className="mt-3 flex justify-center">
-            <RolePill
-              roleId={currentTask.roleId}
-              onChangeRole={(newRoleId) => {
-                updateTask({ ...currentTask, roleId: newRoleId });
-              }}
+            <RolePillMulti
+              roleIds={taskRoleIds(currentTask)}
+              onChangeRoleIds={(ids) =>
+                updateTask({ ...currentTask, ...withTaskRoles(currentTask, ids) })
+              }
               size="md"
             />
           </div>
@@ -1270,11 +1322,23 @@ export function NowView({
                   freshTasks,
                   useRoleStore.getState().currentRoleId,
                 );
+                setChosenByUserTaskId(null);
                 setCurrentTask(
                   pickForNow(freshFiltered, freshTasks, useExecCoachStore.getState().energyLevel),
                 );
               })
             }
+            onDoItNow={() => useNowOverrideStore.getState().requestDoItNow(currentTask.id)}
+            onBoostPriority={() => {
+              updateTask({
+                ...currentTask,
+                priority: Math.min(10, (currentTask.priority ?? 5) + 1),
+                status:
+                  currentTask.status === 'inbox' || currentTask.status === 'active'
+                    ? 'today'
+                    : currentTask.status,
+              });
+            }}
           />
         )}
       </div>

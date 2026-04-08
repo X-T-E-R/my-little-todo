@@ -1,6 +1,7 @@
 import type { StreamEntry, StreamEntryType } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
+  ArrowUp,
   Calendar,
   CheckSquare,
   ChevronRight,
@@ -10,6 +11,7 @@ import {
   RefreshCw,
   Trash2,
   UserCircle,
+  Zap,
 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -41,6 +43,8 @@ interface ContextMenuProps {
   onMarkComplete?: () => void;
   isCompleted?: boolean;
   onSetParent?: () => void;
+  onDoItNow?: () => void;
+  onBoostPriority?: () => void;
 }
 
 export function ConfirmableDeleteItem({
@@ -143,6 +147,8 @@ export function ContextMenu({
   onMarkComplete,
   isCompleted,
   onSetParent,
+  onDoItNow,
+  onBoostPriority,
 }: ContextMenuProps) {
   const { t } = useTranslation('task');
   const { t: tStream } = useTranslation('stream');
@@ -243,6 +249,16 @@ export function ContextMenu({
       >
         <MenuItem icon={Pencil} label={t('Edit content')} onClick={onEdit} />
         <MenuItem icon={CheckSquare} label={t('Open detail')} onClick={onOpenDetail} />
+
+        {(onDoItNow || onBoostPriority) && (
+          <>
+            <div className="my-1 mx-2" style={{ borderTop: '1px solid var(--color-border)' }} />
+            {onDoItNow && <MenuItem icon={Zap} label={t('Do it now')} onClick={onDoItNow} />}
+            {onBoostPriority && (
+              <MenuItem icon={ArrowUp} label={t('Boost priority')} onClick={onBoostPriority} />
+            )}
+          </>
+        )}
 
         <div className="my-1 mx-2" style={{ borderTop: '1px solid var(--color-border)' }} />
 

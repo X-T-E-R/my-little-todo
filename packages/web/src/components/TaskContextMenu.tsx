@@ -1,7 +1,9 @@
 import type { Task } from '@my-little-todo/core';
+import { displayTaskTitle } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   Archive,
+  ArrowUp,
   Calendar,
   CheckCircle,
   ChevronRight,
@@ -12,6 +14,7 @@ import {
   Pencil,
   Trash2,
   UserCircle,
+  Zap,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -32,6 +35,10 @@ interface TaskContextMenuProps {
   onDelete: () => void;
   onPromote?: () => void;
   onSetParent?: () => void;
+  /** Jump to Now with this task as the focus target */
+  onDoItNow?: () => void;
+  /** Raise priority / mark for today */
+  onBoostPriority?: () => void;
 }
 
 function CascadeSubmenu({
@@ -90,6 +97,8 @@ export function TaskContextMenu({
   onDelete,
   onPromote,
   onSetParent,
+  onDoItNow,
+  onBoostPriority,
 }: TaskContextMenuProps) {
   const { t } = useTranslation('task');
   const [openSub, setOpenSub] = useState<'role' | null>(null);
@@ -164,6 +173,16 @@ export function TaskContextMenu({
       >
         <MenuItem icon={Pencil} label={t('Edit detail')} onClick={onOpenDetail} />
 
+        {(onDoItNow || onBoostPriority) && (
+          <>
+            <div className="my-1 mx-2" style={{ borderTop: '1px solid var(--color-border)' }} />
+            {onDoItNow && <MenuItem icon={Zap} label={t('Do it now')} onClick={onDoItNow} />}
+            {onBoostPriority && (
+              <MenuItem icon={ArrowUp} label={t('Boost priority')} onClick={onBoostPriority} />
+            )}
+          </>
+        )}
+
         <div className="my-1 mx-2" style={{ borderTop: '1px solid var(--color-border)' }} />
 
         <MenuItem icon={ListPlus} label={t('Add subtask')} onClick={onAddSubtask} />
@@ -206,7 +225,7 @@ export function TaskContextMenu({
         <MenuItem
           icon={ClipboardCopy}
           label={t('Copy title')}
-          onClick={() => navigator.clipboard.writeText(task.title)}
+          onClick={() => navigator.clipboard.writeText(displayTaskTitle(task))}
         />
 
         <div className="my-1 mx-2" style={{ borderTop: '1px solid var(--color-border)' }} />

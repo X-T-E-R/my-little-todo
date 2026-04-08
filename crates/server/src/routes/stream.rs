@@ -47,6 +47,32 @@ fn default_days() -> i32 {
     14
 }
 
+#[derive(Deserialize)]
+pub struct StreamSearchQuery {
+    pub q: String,
+    #[serde(default = "default_search_limit")]
+    pub limit: i64,
+}
+
+fn default_search_limit() -> i64 {
+    200
+}
+
+/// GET /api/stream/search?q=...&limit=200
+pub async fn search_stream(
+    State(state): State<AppState>,
+    Query(q): Query<StreamSearchQuery>,
+    axum::Extension(ext_id): axum::Extension<String>,
+) -> ApiResult<Vec<String>> {
+    let user_id = data_partition(&state, &ext_id);
+    let rows = state
+        .db
+        .search_stream_json(&user_id, &q.q, q.limit)
+        .await
+        .map_err(|e| internal(&e.to_string()))?;
+    Ok(Json(rows))
+}
+
 /// GET /api/stream?date=YYYY-MM-DD
 pub async fn list_stream_day(
     State(state): State<AppState>,

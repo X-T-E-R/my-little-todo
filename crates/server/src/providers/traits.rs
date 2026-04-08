@@ -56,6 +56,8 @@ pub trait DatabaseProvider: Send + Sync {
     async fn list_stream_date_keys(&self, user_id: &str) -> anyhow::Result<Vec<String>>;
     /// All stream entries for export / search (non-deleted).
     async fn list_all_stream_json(&self, user_id: &str) -> anyhow::Result<Vec<String>>;
+    /// Full-text-ish search over `content` (case-insensitive substring).
+    async fn search_stream_json(&self, user_id: &str, q: &str, limit: i64) -> anyhow::Result<Vec<String>>;
     async fn upsert_stream_entry_json(&self, user_id: &str, json: &str) -> anyhow::Result<()>;
     async fn delete_stream_entry_row(&self, user_id: &str, id: &str) -> anyhow::Result<()>;
 

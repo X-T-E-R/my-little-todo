@@ -1,8 +1,8 @@
 import {
-  streamEntryFromDbRow,
-  taskFromDbRow,
   type StreamEntryDbRow,
   type TaskDbRow,
+  streamEntryFromDbRow,
+  taskFromDbRow,
 } from '@my-little-todo/core';
 import { getDataStore } from '../storage/dataStore';
 import type {
@@ -15,7 +15,7 @@ import type {
 } from './types';
 
 const SYNC_META_PREFIX = '__sync_';
-const DEFAULT_DEBOUNCE_MS = 30_000;
+const DEFAULT_DEBOUNCE_MS = 5_000;
 
 /**
  * The SyncEngine manages one or more SyncTargets, pulling remote changes
@@ -131,6 +131,7 @@ export class SyncEngine {
     if (!state || state.status === 'syncing') return;
 
     this.updateState(targetId, { status: 'syncing', error: undefined });
+    console.info(`[Sync] Starting sync for target "${targetId}"`);
 
     try {
       const store = getDataStore();
@@ -150,9 +151,14 @@ export class SyncEngine {
         }));
       }
 
+      console.info(`[Sync] Local changes: ${localChanges.length} (since push v${lastPushVersion})`);
+
       // ── 2. Pull remote changes ────────────────────────────────
       const lastPullVersion = await this.loadSyncMeta(targetId, 'lastPullVersion');
       const pullResult = await target.pull(lastPullVersion);
+      console.info(
+        `[Sync] Pulled ${pullResult.changes.length} remote changes (since pull v${lastPullVersion}, server v${pullResult.currentVersion})`,
+      );
 
       // ── 3. Detect conflicts ───────────────────────────────────
       const localKeyMap = new Map<string, ChangeRecord>();
@@ -235,11 +241,18 @@ export class SyncEngine {
 
       let lastPushVersionOut = await this.loadSyncMeta(targetId, 'lastPushVersion');
       if (changesToPush.length > 0) {
+        console.info(`[Sync] Pushing ${changesToPush.length} changes...`);
         const pushResult = await target.push(changesToPush);
         await this.saveSyncMeta(targetId, 'lastPushVersion', pushResult.currentVersion);
         lastPushVersionOut = pushResult.currentVersion;
+        console.info(
+          `[Sync] Push complete: applied=${pushResult.applied}, server v${pushResult.currentVersion}`,
+        );
       }
 
+      console.info(
+        `[Sync] Sync complete for "${targetId}" — pull v${pullResult.currentVersion}, push v${lastPushVersionOut}`,
+      );
       this.updateState(targetId, {
         status: 'idle',
         lastSyncAt: Date.now(),
@@ -247,9 +260,11 @@ export class SyncEngine {
         lastPushVersion: lastPushVersionOut,
       });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Sync] Error syncing "${targetId}":`, msg);
       this.updateState(targetId, {
         status: 'error',
-        error: err instanceof Error ? err.message : String(err),
+        error: msg,
       });
     }
   }
@@ -258,6 +273,14 @@ export class SyncEngine {
     if (this.targets.size === 0) return;
     const promises = Array.from(this.targets.keys()).map((id) => this.syncTarget(id));
     await Promise.allSettled(promises);
+  }
+
+  /** Return the first error message across all targets, if any. */
+  getFirstError(): string | undefined {
+    for (const s of this.states.values()) {
+      if (s.status === 'error' && s.error) return s.error;
+    }
+    return undefined;
   }
 
   // ── Auto sync (periodic) ──────────────────────────────────────────
@@ -314,6 +337,16 @@ export class SyncEngine {
 
   setDebounceMs(ms: number): void {
     this.debounceMs = ms;
+  }
+
+  /** Clear debounced timer and start sync immediately (e.g. before page unload). */
+  flushPendingLocalSync(): void {
+    if (this.targets.size === 0) return;
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    void this.syncAll();
   }
 
   // ── Apply a single remote change to the local DataStore ───────────

@@ -3,7 +3,7 @@
  * Tasks and stream entries are first-class tables (not virtual files).
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 5;
 
 export const CREATE_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -18,7 +18,8 @@ export const CREATE_TABLES_SQL = [
 
   `CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    title_customized INTEGER NOT NULL DEFAULT 0,
     description TEXT,
     status TEXT NOT NULL DEFAULT 'inbox',
     body TEXT NOT NULL DEFAULT '',
@@ -29,6 +30,7 @@ export const CREATE_TABLES_SQL = [
     ddl_type TEXT,
     planned_at INTEGER,
     role_id TEXT,
+    role_ids TEXT,
     parent_id TEXT,
     source_stream_id TEXT,
     priority REAL,

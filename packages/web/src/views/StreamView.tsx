@@ -1,4 +1,4 @@
-import { daysUntil, formatTime, isOverdue } from '@my-little-todo/core';
+import { daysUntil, displayTaskTitle, formatTime, isOverdue } from '@my-little-todo/core';
 import type { StreamEntry, StreamEntryType } from '@my-little-todo/core';
 import type { Task } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -6,11 +6,14 @@ import {
   ArrowUpCircle,
   Calendar,
   Check,
+  ChevronDown,
   Clock,
+  Dices,
   Filter,
   ListPlus,
   MoreHorizontal,
   Pencil,
+  Search,
   Send,
   Sparkles,
   Tag,
@@ -20,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
+import { AdvancedFilterPanel } from '../components/AdvancedFilterPanel';
 import { ContextMenu } from '../components/ContextMenu';
 import { DndReparentProvider, DndTaskWrapper } from '../components/DndReparentContext';
 import { MarkdownToolbar } from '../components/MarkdownToolbar';
@@ -28,15 +32,22 @@ import { ParentTaskPicker } from '../components/ParentTaskPicker';
 import { RolePill } from '../components/RolePickerPopover';
 import { getAttachmentConfig, uploadBlob } from '../storage/blobApi';
 import type { AttachmentConfig } from '../storage/blobApi';
+import { getSetting } from '../storage/settingsApi';
+import { useModuleStore } from '../modules';
+import { pickTimeCapsuleEntry } from '../storage/streamRepo';
 import { useShortcutStore } from '../stores';
 import {
+  applyAdvancedFilter,
+  countConditions,
   filterByRole,
   formatDdlLabel,
   groupEntriesByDate,
   useRoleStore,
+  useStreamFilterStore,
   useStreamStore,
 } from '../stores';
-import { useTaskStore } from '../stores';
+import { useNowOverrideStore, useTaskStore } from '../stores';
+import { useToastStore } from '../stores/toastStore';
 import { ENTRY_TYPE_KEYS, ENTRY_TYPE_META } from '../utils/entryTypeUtils';
 import {
   clearFormat,
@@ -84,7 +95,7 @@ function SubtaskPreview({ linkedTask }: { linkedTask: Task }) {
                 textDecoration: done ? 'line-through' : 'none',
               }}
             >
-              {sub.title}
+              {displayTaskTitle(sub)}
             </span>
           </div>
         );
@@ -589,120 +600,6 @@ function InlineDdlInput({
   );
 }
 
-/* ── Filter Bar ── */
-
-function StreamFilterBar({
-  typeFilter,
-  onTypeFilterChange,
-  tagFilter,
-  onTagFilterChange,
-  availableTags,
-}: {
-  typeFilter: 'all' | StreamEntryType;
-  onTypeFilterChange: (f: 'all' | StreamEntryType) => void;
-  tagFilter: Set<string>;
-  onTagFilterChange: (tags: Set<string>) => void;
-  availableTags: string[];
-}) {
-  const { t } = useTranslation('stream');
-  const [showTags, setShowTags] = useState(false);
-  const isFiltering = typeFilter !== 'all' || tagFilter.size > 0;
-
-  return (
-    <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 -mb-1">
-      <div
-        className="flex items-center gap-1 rounded-lg p-0.5 shrink-0"
-        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
-      >
-        {[
-          { key: 'all' as const, label: t('All'), icon: null },
-          ...ENTRY_TYPE_KEYS.map((k) => ({
-            key: k as const,
-            label: t(ENTRY_TYPE_META[k].labelKey),
-            icon: ENTRY_TYPE_META[k].icon,
-          })),
-        ].map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => onTypeFilterChange(key)}
-            className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors"
-            style={{
-              background: typeFilter === key ? 'var(--color-accent-soft)' : 'transparent',
-              color: typeFilter === key ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
-            }}
-          >
-            {Icon && <Icon size={11} />}
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {availableTags.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setShowTags(!showTags)}
-          className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors shrink-0"
-          style={{
-            background:
-              showTags || tagFilter.size > 0 ? 'var(--color-accent-soft)' : 'var(--color-surface)',
-            color:
-              showTags || tagFilter.size > 0 ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
-            border: '1px solid var(--color-border)',
-          }}
-        >
-          <Filter size={11} />
-          {tagFilter.size > 0 ? t('Tags ({{count}})', { count: tagFilter.size }) : t('Tags')}
-        </button>
-      )}
-
-      {isFiltering && (
-        <button
-          type="button"
-          onClick={() => {
-            onTypeFilterChange('all');
-            onTagFilterChange(new Set());
-          }}
-          className="text-[10px] font-medium shrink-0"
-          style={{ color: 'var(--color-text-tertiary)' }}
-        >
-          {t('Clear filters')}
-        </button>
-      )}
-
-      {showTags && (
-        <div className="w-full flex flex-wrap gap-1 mt-1">
-          {availableTags.map((tag) => {
-            const active = tagFilter.has(tag);
-            return (
-              <button
-                key={tag}
-                type="button"
-                onClick={() => {
-                  const next = new Set(tagFilter);
-                  if (active) next.delete(tag);
-                  else next.add(tag);
-                  onTagFilterChange(next);
-                }}
-                className="rounded-full px-2 py-0.5 text-[11px] font-medium transition-colors"
-                style={{
-                  background: active ? 'var(--color-accent-soft)' : 'var(--color-bg)',
-                  color: active ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
-                  border: active
-                    ? '1px solid var(--color-accent)'
-                    : '1px solid var(--color-border)',
-                }}
-              >
-                #{tag}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ── Main StreamView ── */
 
 const DRAFT_KEY = 'mlt-stream-draft';
@@ -749,8 +646,12 @@ export function StreamView() {
   } | null>(null);
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [searchInput, setSearchInput] = useState('');
+  const [collapsedDates, setCollapsedDates] = useState<Set<string>>(() => new Set());
   const [typeFilter, setTypeFilter] = useState<'all' | StreamEntryType>('all');
-  const [tagFilter, setTagFilter] = useState<Set<string>>(new Set());
+  const [sortMode, setSortMode] = useState<'default' | 'newest' | 'oldest'>('default');
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
+  const filterToolbarRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
@@ -758,6 +659,11 @@ export function StreamView() {
   const entries = useStreamStore((s) => s.entries);
   const loading = useStreamStore((s) => s.loading);
   const load = useStreamStore((s) => s.load);
+  const loadMore = useStreamStore((s) => s.loadMore);
+  const runSearch = useStreamStore((s) => s.runSearch);
+  const clearSearch = useStreamStore((s) => s.clearSearch);
+  const searchResults = useStreamStore((s) => s.searchResults);
+  const daysLoaded = useStreamStore((s) => s.daysLoaded);
   const addEntry = useStreamStore((s) => s.addEntry);
   const updateEntry = useStreamStore((s) => s.updateEntry);
   const deleteEntry = useStreamStore((s) => s.deleteEntry);
@@ -769,6 +675,7 @@ export function StreamView() {
   const loadTasks = useTaskStore((s) => s.load);
   const selectTask = useTaskStore((s) => s.selectTask);
   const updateStatus = useTaskStore((s) => s.updateStatus);
+  const updateTask = useTaskStore((s) => s.updateTask);
   const reparentTask = useTaskStore((s) => s.reparentTask);
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const roles = useRoleStore((s) => s.roles);
@@ -776,23 +683,72 @@ export function StreamView() {
   const shortcuts = useShortcutStore((s) => s.shortcuts);
   const editorShortcuts = useMemo(() => shortcuts.filter((s) => s.scope === 'editor'), [shortcuts]);
 
+  const filterRoot = useStreamFilterStore((s) => s.root);
+  const setFilterRoot = useStreamFilterStore((s) => s.setRoot);
+  const resetFilter = useStreamFilterStore((s) => s.reset);
+  const showToast = useToastStore((s) => s.showToast);
+  const advancedFilterEnabled = useModuleStore((s) => s.isEnabled('advanced-filter'));
+
+  useEffect(() => {
+    if (!advancedFilterEnabled) resetFilter();
+  }, [advancedFilterEnabled, resetFilter]);
+
   const roleFiltered = useMemo(
     () => filterByRole(entries, currentRoleId),
     [entries, currentRoleId],
   );
 
-  const filtered = useMemo(() => {
+  const displayEntries = useMemo(() => {
     let result = roleFiltered;
+    if (searchResults !== null) result = searchResults;
     if (typeFilter !== 'all') {
       result = result.filter((e) => e.entryType === typeFilter);
     }
-    if (tagFilter.size > 0) {
-      result = result.filter((e) => e.tags.some((t) => tagFilter.has(t)));
-    }
-    return result;
-  }, [roleFiltered, typeFilter, tagFilter]);
+    if (advancedFilterEnabled) result = applyAdvancedFilter(result, filterRoot);
+    const arr = [...result];
+    if (sortMode === 'newest') arr.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    else if (sortMode === 'oldest')
+      arr.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+    return arr;
+  }, [roleFiltered, searchResults, typeFilter, filterRoot, sortMode, advancedFilterEnabled]);
 
-  const groups = groupEntriesByDate(filtered);
+  const groups = groupEntriesByDate(displayEntries);
+  const [streamDirection, setStreamDirection] = useState<'bottom-up' | 'top-down'>('bottom-up');
+
+  useEffect(() => {
+    getSetting('stream-direction').then((v) => {
+      if (v === 'top-down' || v === 'bottom-up') setStreamDirection(v);
+    });
+  }, []);
+
+  useEffect(() => {
+    const onFocus = () => {
+      getSetting('stream-direction').then((v) => {
+        if (v === 'top-down' || v === 'bottom-up') setStreamDirection(v);
+      });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  const visibleGroups = useMemo(() => {
+    if (streamDirection === 'bottom-up') return groups;
+    return [...groups].reverse().map((g) => ({
+      ...g,
+      entries: [...g.entries].reverse(),
+    }));
+  }, [groups, streamDirection]);
+
+  const filterCondCount = countConditions(filterRoot);
+
+  const toggleDateGroup = useCallback((key: string) => {
+    setCollapsedDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const availableTags = useMemo(() => {
     const tags = new Set<string>();
@@ -813,14 +769,59 @@ export function StreamView() {
   }, [load]);
 
   useEffect(() => {
+    if (!filterPanelOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const el = filterToolbarRef.current;
+      if (el && !el.contains(e.target as Node)) setFilterPanelOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [filterPanelOpen]);
+
+  useEffect(() => {
     const timer = setTimeout(() => textareaRef.current?.focus(), 300);
     return () => clearTimeout(timer);
   }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on new entries
   useEffect(() => {
-    bottomAnchorRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [entries.length]);
+    if (streamDirection === 'bottom-up') {
+      bottomAnchorRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [entries.length, streamDirection]);
+
+  /** Bottom-up: ensure first paint scrolls to bottom reliably. */
+  const initialScrollDone = useRef(false);
+  useEffect(() => {
+    if (streamDirection !== 'bottom-up') return;
+    if (loading || groups.length === 0) return;
+    if (initialScrollDone.current) return;
+
+    const doScroll = () => {
+      if (bottomAnchorRef.current) {
+        bottomAnchorRef.current.scrollIntoView({ block: 'end', behavior: 'auto' });
+        initialScrollDone.current = true;
+      }
+    };
+
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const observer = new MutationObserver(() => {
+      doScroll();
+      observer.disconnect();
+    });
+    observer.observe(container, { childList: true, subtree: true });
+    doScroll();
+
+    return () => observer.disconnect();
+  }, [streamDirection, loading, groups.length]);
+
+  useEffect(() => {
+    initialScrollDone.current = false;
+  }, [streamDirection]);
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
@@ -928,7 +929,8 @@ export function StreamView() {
   };
 
   const handleSaveEdit = async (entryId: string, content: string) => {
-    const entry = entries.find((e) => e.id === entryId);
+    const entry =
+      entries.find((e) => e.id === entryId) ?? searchResults?.find((e) => e.id === entryId);
     if (!entry || !content.trim()) return;
     await updateEntry({ ...entry, content: content.trim() });
     setEditingEntryId(null);
@@ -936,9 +938,18 @@ export function StreamView() {
 
   const handleOpenDetail = async (entry: StreamEntry) => {
     let taskId = entry.extractedTaskId;
+    try {
+      if (!taskId) {
+        taskId = await enrichEntry(entry.id);
+        await loadTasks();
+      }
+    } catch {
+      showToast({ type: 'error', message: t('Open task failed') });
+      return;
+    }
     if (!taskId) {
-      taskId = await enrichEntry(entry.id);
-      await loadTasks();
+      showToast({ type: 'error', message: t('Open task failed') });
+      return;
     }
     selectTask(taskId);
   };
@@ -984,7 +995,7 @@ export function StreamView() {
 
   const handleBatchChangeRole = async (roleId: string | undefined) => {
     for (const id of selectedIds) {
-      const entry = entries.find((e) => e.id === id);
+      const entry = entries.find((e) => e.id === id) ?? searchResults?.find((e) => e.id === id);
       if (entry) {
         await updateEntry({ ...entry, roleId });
       }
@@ -1006,18 +1017,407 @@ export function StreamView() {
     setSelectedIds(new Set());
   };
 
-  return (
-    <div className="relative flex h-full flex-col" style={{ background: 'var(--color-bg)' }}>
-      {/* Filter bar */}
-      <div className="px-4 pt-3 pb-1">
-        <div className="mx-auto max-w-2xl">
-          <StreamFilterBar
-            typeFilter={typeFilter}
-            onTypeFilterChange={setTypeFilter}
-            tagFilter={tagFilter}
-            onTagFilterChange={setTagFilter}
-            availableTags={availableTags}
+  const handleFlipCapsule = async () => {
+    const entry = await pickTimeCapsuleEntry(30);
+    if (!entry) {
+      showToast({ type: 'info', message: t('No old sparks yet'), duration: 3200 });
+      return;
+    }
+    showToast({
+      type: 'info',
+      message: t('Time capsule hint', { preview: entry.content.slice(0, 160) }),
+      duration: 14000,
+    });
+  };
+
+  const composerInner = (
+    <div className="mx-auto max-w-2xl">
+      {/* Current role indicator */}
+      {currentRole && (
+        <div className="mb-2 flex items-center gap-1.5 ml-1">
+          <span
+            className="h-2 w-2 rounded-full shrink-0"
+            style={{ background: currentRole.color ?? 'var(--color-accent)' }}
           />
+          <span
+            className="text-[11px] font-medium"
+            style={{ color: currentRole.color ?? 'var(--color-text-tertiary)' }}
+          >
+            {t('Recording to: {{name}}', { name: currentRole.name })}
+          </span>
+        </div>
+      )}
+
+      <div
+        className="overflow-hidden rounded-2xl shadow-lg transition-colors"
+        style={{
+          background: 'color-mix(in srgb, var(--color-surface) 85%, transparent)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: isFocused ? '1px solid var(--color-accent)' : '1px solid var(--color-border)',
+        }}
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+      >
+        {/* Markdown toolbar (above input) */}
+        <MarkdownToolbar textareaRef={textareaRef} />
+
+        {isUploading && (
+          <div className="px-3.5 py-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+            {t('Uploading...')}
+          </div>
+        )}
+
+        <textarea
+          ref={textareaRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onPaste={handlePaste}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+              e.preventDefault();
+              handleSubmit();
+              return;
+            }
+            const ta = textareaRef.current;
+            if (!ta) return;
+            const nativeEvent = e.nativeEvent;
+            for (const binding of editorShortcuts) {
+              if (matchesShortcut(nativeEvent, binding.keys)) {
+                e.preventDefault();
+                const editorActions: Record<string, () => void> = {
+                  'editor.bold': () =>
+                    insertMarkdown(ta, {
+                      prefix: '**',
+                      suffix: '**',
+                      defaultContent: t('Bold'),
+                    }),
+                  'editor.italic': () =>
+                    insertMarkdown(ta, {
+                      prefix: '*',
+                      suffix: '*',
+                      defaultContent: t('Italic'),
+                    }),
+                  'editor.underline': () =>
+                    insertMarkdown(ta, {
+                      prefix: '<u>',
+                      suffix: '</u>',
+                      defaultContent: t('Underline'),
+                    }),
+                  'editor.strikethrough': () =>
+                    insertMarkdown(ta, {
+                      prefix: '~~',
+                      suffix: '~~',
+                      defaultContent: t('Strikethrough'),
+                    }),
+                  'editor.inlineCode': () =>
+                    insertMarkdown(ta, { prefix: '`', suffix: '`', defaultContent: 'code' }),
+                  'editor.codeBlock': () =>
+                    insertMarkdown(ta, { prefix: '```\n', suffix: '\n```' }),
+                  'editor.link': () => insertLink(ta),
+                  'editor.quote': () => insertMarkdown(ta, { prefix: '> ', blockLevel: true }),
+                  'editor.orderedList': () =>
+                    insertMarkdown(ta, { prefix: '1. ', blockLevel: true }),
+                  'editor.unorderedList': () =>
+                    insertMarkdown(ta, { prefix: '- ', blockLevel: true }),
+                  'editor.table': () => insertTable(ta),
+                  'editor.clearFormat': () => clearFormat(ta),
+                  'editor.heading1': () => setHeading(ta, 1),
+                  'editor.heading2': () => setHeading(ta, 2),
+                  'editor.heading3': () => setHeading(ta, 3),
+                  'editor.heading4': () => setHeading(ta, 4),
+                };
+                editorActions[binding.action]?.();
+                return;
+              }
+            }
+          }}
+          placeholder={t('Record an inspiration... (Ctrl+Enter to send)')}
+          className="block w-full resize-none bg-transparent px-3.5 pt-2.5 pb-1.5 text-[14px] leading-relaxed outline-none"
+          style={{ color: 'var(--color-text)', minHeight: '40px' }}
+          rows={1}
+        />
+
+        {/* Bottom action bar */}
+        <div className="flex items-center justify-between px-3 py-1.5">
+          <div className="flex items-center gap-3">
+            <span
+              className="shrink-0 text-[11px] tabular-nums"
+              style={{ color: 'var(--color-text-tertiary)' }}
+            >
+              {t('{{count}} characters', { count: input.length })}
+            </span>
+            <div
+              className="flex items-center gap-0.5 rounded-md p-0.5"
+              style={{ background: 'var(--color-bg)' }}
+            >
+              {ENTRY_TYPE_KEYS.map((k) => {
+                const meta = ENTRY_TYPE_META[k];
+                const TypeIcon = meta.icon;
+                const active = selectedEntryType === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setSelectedEntryType(k)}
+                    className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors"
+                    style={{
+                      background: active ? 'var(--color-accent-soft)' : 'transparent',
+                      color: active ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+                    }}
+                    title={t(meta.labelKey)}
+                  >
+                    <TypeIcon size={10} />
+                    {active && <span>{t(meta.labelKey)}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!input.trim()}
+            className="shrink-0 flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold text-white shadow-sm transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:hover:scale-100"
+            style={{ background: 'var(--color-accent)' }}
+          >
+            <Send size={11} />
+            {t('Record')}
+          </button>
+        </div>
+
+        {/* Collapsible task metadata panel */}
+        <AnimatePresence>
+          {selectedEntryType === 'task' && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="overflow-hidden"
+            >
+              <div
+                className="flex flex-wrap items-center gap-3 border-t px-3 py-2"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                <div className="flex items-center gap-1.5">
+                  <Clock size={13} className="text-[var(--color-text-tertiary)]" />
+                  <input
+                    type="datetime-local"
+                    value={metaDdlDate}
+                    onChange={(e) => setMetaDdlDate(e.target.value)}
+                    className="rounded border border-[var(--color-border)] bg-transparent px-2 py-0.5 text-[11px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+                  />
+                </div>
+
+                {metaDdlDate && (
+                  <div className="flex gap-1">
+                    {(['soft', 'commitment', 'hard'] as const).map((dt) => (
+                      <button
+                        key={dt}
+                        type="button"
+                        onClick={() => setMetaDdlType(dt)}
+                        className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                          metaDdlType === dt
+                            ? 'bg-[var(--color-accent)] text-white'
+                            : 'bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-border)]'
+                        }`}
+                      >
+                        {dt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-1.5">
+                  <Tag size={13} className="text-[var(--color-text-tertiary)]" />
+                  <input
+                    value={metaTags}
+                    onChange={(e) => setMetaTags(e.target.value)}
+                    placeholder={t('Tags (space separated)')}
+                    className="w-28 rounded border border-[var(--color-border)] bg-transparent px-2 py-0.5 text-[11px] text-[var(--color-text)] placeholder:text-[var(--color-text-tertiary)] outline-none focus:border-[var(--color-accent)]"
+                  />
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="relative flex h-full min-h-0 flex-col" style={{ background: 'var(--color-bg)' }}>
+      {/* Unified toolbar: sort + types + advanced filter + search */}
+      <div className="px-4 pt-3 pb-1">
+        <div className="mx-auto max-w-2xl space-y-2" ref={filterToolbarRef}>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as 'default' | 'newest' | 'oldest')}
+              className="rounded-lg border px-2 py-1.5 text-[11px] font-medium shrink-0 bg-[var(--color-bg)]"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              aria-label={t('Sort')}
+            >
+              <option value="default">{t('sort_default')}</option>
+              <option value="newest">{t('sort_newest')}</option>
+              <option value="oldest">{t('sort_oldest')}</option>
+            </select>
+
+            <div
+              className="flex items-center gap-1 rounded-lg p-0.5 shrink-0 flex-wrap"
+              style={{
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+              }}
+            >
+              {[
+                { key: 'all' as const, label: t('All'), icon: null },
+                ...ENTRY_TYPE_KEYS.map((k) => ({
+                  key: k,
+                  label: t(ENTRY_TYPE_META[k].labelKey),
+                  icon: ENTRY_TYPE_META[k].icon,
+                })),
+              ].map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setTypeFilter(key)}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition-colors"
+                  style={{
+                    background: typeFilter === key ? 'var(--color-accent-soft)' : 'transparent',
+                    color:
+                      typeFilter === key ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+                  }}
+                >
+                  {Icon && <Icon size={11} />}
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {advancedFilterEnabled && (
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setFilterPanelOpen((o) => !o)}
+                  className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-medium border"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    background:
+                      filterPanelOpen || filterCondCount > 0
+                        ? 'var(--color-accent-soft)'
+                        : 'var(--color-surface)',
+                    color: 'var(--color-text-secondary)',
+                  }}
+                  aria-expanded={filterPanelOpen}
+                >
+                  <Filter size={16} />
+                  {t('Filter active')}
+                  {filterCondCount > 0 && (
+                    <span
+                      className="min-w-[1.1rem] rounded-full px-1 text-center text-[10px] font-bold"
+                      style={{ background: 'var(--color-accent)', color: 'white' }}
+                    >
+                      {filterCondCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleFlipCapsule}
+              className="shrink-0 rounded-lg p-2 border"
+              style={{
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)',
+              }}
+              title={t('Flip old card')}
+              aria-label={t('Flip old card')}
+            >
+              <Dices size={16} />
+            </button>
+
+            <div
+              className="flex min-w-[120px] flex-1 items-center gap-2 rounded-xl px-2 py-1.5"
+              style={{
+                background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)',
+              }}
+            >
+              <Search
+                size={14}
+                className="shrink-0"
+                style={{ color: 'var(--color-text-tertiary)' }}
+              />
+              <input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    runSearch(searchInput);
+                  }
+                }}
+                placeholder={t('Search entire stream')}
+                aria-label={t('Search entire stream')}
+                className="min-w-0 flex-1 bg-transparent text-xs outline-none"
+                style={{ color: 'var(--color-text)' }}
+              />
+              <button
+                type="button"
+                onClick={() => runSearch(searchInput)}
+                className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold"
+                style={{ background: 'var(--color-accent-soft)', color: 'var(--color-accent)' }}
+              >
+                {t('Search')}
+              </button>
+              {searchResults !== null && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearSearch();
+                    setSearchInput('');
+                  }}
+                  className="shrink-0 text-[11px] font-medium"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
+                  {t('Clear search')}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {(typeFilter !== 'all' || (advancedFilterEnabled && filterCondCount > 0)) && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setTypeFilter('all');
+                  resetFilter();
+                }}
+                className="text-[10px] font-medium"
+                style={{ color: 'var(--color-text-tertiary)' }}
+              >
+                {t('Clear filters')}
+              </button>
+            </div>
+          )}
+
+          {filterPanelOpen && advancedFilterEnabled && (
+            <AdvancedFilterPanel
+              root={filterRoot}
+              onChange={setFilterRoot}
+              availableTags={availableTags}
+              roles={roles}
+              onClear={() => resetFilter()}
+              onClose={() => setFilterPanelOpen(false)}
+            />
+          )}
         </div>
       </div>
 
@@ -1034,14 +1434,43 @@ export function StreamView() {
         </div>
       </div>
 
-      {/* Stream entries */}
-      <DndReparentProvider>
-        <div
-          ref={scrollRef}
-          className="flex-1 min-h-0 overflow-y-auto px-4 py-2 pb-52 scroll-smooth"
-        >
+      {streamDirection === 'top-down' && (
+        <div className="relative z-10 shrink-0 border-b border-[var(--color-border)] bg-[var(--color-bg)]/95 px-4 pb-2 pt-1">
+          {composerInner}
+        </div>
+      )}
+
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* Stream entries */}
+        <DndReparentProvider>
+          <div
+            ref={scrollRef}
+            className={`min-h-0 flex-1 overflow-y-auto scroll-smooth px-4 py-2 ${
+              streamDirection === 'bottom-up'
+                ? 'pb-52'
+                : 'pb-4 pt-2'
+            }`}
+          >
           <div className="mx-auto max-w-2xl space-y-3">
-            {loading && filtered.length === 0 && (
+            {searchResults === null && visibleGroups.length > 0 && streamDirection === 'bottom-up' && (
+              <div className="flex justify-center py-4">
+                <button
+                  type="button"
+                  onClick={() => loadMore()}
+                  disabled={loading}
+                  className="rounded-full px-4 py-2 text-xs font-medium transition-opacity"
+                  style={{
+                    border: '1px solid var(--color-border)',
+                    color: 'var(--color-text-secondary)',
+                    opacity: loading ? 0.5 : 1,
+                  }}
+                >
+                  {t('Load more history', { days: daysLoaded })}
+                </button>
+              </div>
+            )}
+
+            {loading && groups.length === 0 && searchResults === null && (
               <div className="flex items-center justify-center py-32">
                 <span className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
                   {t('Loading...')}
@@ -1049,7 +1478,15 @@ export function StreamView() {
               </div>
             )}
 
-            {!loading && filtered.length === 0 && (
+            {!loading && searchResults !== null && searchResults.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-24 text-center">
+                <p className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('No matches')}
+                </p>
+              </div>
+            )}
+
+            {!loading && displayEntries.length === 0 && searchResults === null && (
               <div className="flex flex-col items-center justify-center py-32 text-center">
                 <Sparkles size={36} style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
                 <p
@@ -1064,11 +1501,16 @@ export function StreamView() {
               </div>
             )}
 
-            {groups.map((group) => (
-              <div key={group.dateKey}>
+            {visibleGroups.map((group) => (
+              <div
+                key={group.dateKey}
+                className="[content-visibility:auto] [contain-intrinsic-size:1px_400px]"
+              >
                 <div className="flex items-center justify-center pt-3 pb-1">
-                  <span
-                    className="rounded-full px-3 py-1 text-[11px] font-medium shadow-sm"
+                  <button
+                    type="button"
+                    onClick={() => toggleDateGroup(group.dateKey)}
+                    className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-medium shadow-sm transition-colors hover:bg-[var(--color-bg)]"
                     style={{
                       background: 'var(--color-surface)',
                       color: 'var(--color-text-tertiary)',
@@ -1076,312 +1518,127 @@ export function StreamView() {
                     }}
                   >
                     {group.label}
-                  </span>
+                    <ChevronDown
+                      size={12}
+                      className="transition-transform"
+                      style={{
+                        transform: collapsedDates.has(group.dateKey) ? 'rotate(-90deg)' : undefined,
+                      }}
+                    />
+                  </button>
                 </div>
 
                 <div className="space-y-2 mt-1">
-                  {group.entries.map((entry) => {
-                    const entryCard = (
-                      <EntryCard
-                        entry={entry}
-                        linkedTask={
-                          entry.extractedTaskId ? taskMap.get(entry.extractedTaskId) : undefined
-                        }
-                        batchMode={batchMode}
-                        selected={selectedIds.has(entry.id)}
-                        isEditing={editingEntryId === entry.id}
-                        onStartEdit={() => setEditingEntryId(entry.id)}
-                        onSaveEdit={(content) => handleSaveEdit(entry.id, content)}
-                        onCancelEdit={() => setEditingEntryId(null)}
-                        onOpenDetail={handleOpenDetail}
-                        onAddSubtask={(e) => setSubtaskEntryId(e.id)}
-                        onSetDdl={(e) => setDdlEntryId(e.id)}
-                        onChangeRole={handleChangeRole}
-                        onContextMenu={handleContextMenu}
-                        onToggleSelect={handleToggleSelect}
-                        onChangeType={(e, type) => handleChangeType(e.id, type)}
-                        onMarkComplete={
-                          entry.entryType === 'task' && entry.extractedTaskId
-                            ? (e) => {
-                                if (e.extractedTaskId) {
-                                  const t = taskMap.get(e.extractedTaskId);
-                                  updateStatus(
-                                    e.extractedTaskId,
-                                    t?.status === 'completed' ? 'active' : 'completed',
-                                  );
+                  {!collapsedDates.has(group.dateKey) &&
+                    group.entries.map((entry) => {
+                      const entryCard = (
+                        <EntryCard
+                          entry={entry}
+                          linkedTask={
+                            entry.extractedTaskId ? taskMap.get(entry.extractedTaskId) : undefined
+                          }
+                          batchMode={batchMode}
+                          selected={selectedIds.has(entry.id)}
+                          isEditing={editingEntryId === entry.id}
+                          onStartEdit={() => setEditingEntryId(entry.id)}
+                          onSaveEdit={(content) => handleSaveEdit(entry.id, content)}
+                          onCancelEdit={() => setEditingEntryId(null)}
+                          onOpenDetail={handleOpenDetail}
+                          onAddSubtask={(e) => setSubtaskEntryId(e.id)}
+                          onSetDdl={(e) => setDdlEntryId(e.id)}
+                          onChangeRole={handleChangeRole}
+                          onContextMenu={handleContextMenu}
+                          onToggleSelect={handleToggleSelect}
+                          onChangeType={(e, type) => handleChangeType(e.id, type)}
+                          onMarkComplete={
+                            entry.entryType === 'task' && entry.extractedTaskId
+                              ? (e) => {
+                                  if (e.extractedTaskId) {
+                                    const t = taskMap.get(e.extractedTaskId);
+                                    updateStatus(
+                                      e.extractedTaskId,
+                                      t?.status === 'completed' ? 'active' : 'completed',
+                                    );
+                                  }
                                 }
-                              }
-                            : undefined
-                        }
-                      />
-                    );
+                              : undefined
+                          }
+                        />
+                      );
 
-                    return (
-                      <div key={entry.id}>
-                        {entry.extractedTaskId ? (
-                          <DndTaskWrapper taskId={entry.extractedTaskId}>
-                            {entryCard}
-                          </DndTaskWrapper>
-                        ) : (
-                          entryCard
-                        )}
-                        {subtaskEntryId === entry.id && (
-                          <div className="ml-14 mt-1">
-                            <InlineSubtaskInput
-                              onAdd={(title) => handleAddSubtask(entry.id, title)}
-                              onCancel={() => setSubtaskEntryId(null)}
-                            />
-                          </div>
-                        )}
-                        {ddlEntryId === entry.id && (
-                          <div className="ml-14 mt-1">
-                            <InlineDdlInput
-                              onSet={(ddl) => handleSetDdl(entry.id, ddl)}
-                              onCancel={() => setDdlEntryId(null)}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      return (
+                        <div key={entry.id}>
+                          {entry.extractedTaskId ? (
+                            <DndTaskWrapper taskId={entry.extractedTaskId}>
+                              {entryCard}
+                            </DndTaskWrapper>
+                          ) : (
+                            entryCard
+                          )}
+                          {subtaskEntryId === entry.id && (
+                            <div className="ml-14 mt-1">
+                              <InlineSubtaskInput
+                                onAdd={(title) => handleAddSubtask(entry.id, title)}
+                                onCancel={() => setSubtaskEntryId(null)}
+                              />
+                            </div>
+                          )}
+                          {ddlEntryId === entry.id && (
+                            <div className="ml-14 mt-1">
+                              <InlineDdlInput
+                                onSet={(ddl) => handleSetDdl(entry.id, ddl)}
+                                onCancel={() => setDdlEntryId(null)}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                 </div>
               </div>
             ))}
+
+            {searchResults === null && visibleGroups.length > 0 && streamDirection === 'top-down' && (
+              <div className="flex justify-center py-6">
+                <button
+                  type="button"
+                  onClick={() => loadMore()}
+                  disabled={loading}
+                  className="rounded-full px-4 py-2 text-xs font-medium transition-opacity"
+                  style={{
+                    border: '1px solid var(--color-border)',
+                    color: 'var(--color-text-secondary)',
+                    opacity: loading ? 0.5 : 1,
+                  }}
+                >
+                  {t('Load more history', { days: daysLoaded })}
+                </button>
+              </div>
+            )}
 
             <div ref={bottomAnchorRef} />
           </div>
         </div>
       </DndReparentProvider>
 
-      {/* Gradient fade overlay */}
-      <div
-        className="pointer-events-none absolute bottom-0 left-0 right-0"
-        style={{
-          height: '160px',
-          background: 'linear-gradient(to bottom, transparent, var(--color-bg) 70%)',
-        }}
-      />
-
-      {/* Floating input area */}
-      <div
-        className="absolute bottom-0 left-0 right-0 z-10 px-4"
-        style={{ paddingBottom: 'calc(16px + var(--safe-area-bottom))' }}
-      >
-        <div className="mx-auto max-w-2xl">
-          {/* Current role indicator */}
-          {currentRole && (
-            <div className="mb-2 flex items-center gap-1.5 ml-1">
-              <span
-                className="h-2 w-2 rounded-full shrink-0"
-                style={{ background: currentRole.color ?? 'var(--color-accent)' }}
-              />
-              <span
-                className="text-[11px] font-medium"
-                style={{ color: currentRole.color ?? 'var(--color-text-tertiary)' }}
-              >
-                {t('Recording to: {{name}}', { name: currentRole.name })}
-              </span>
-            </div>
-          )}
-
+        {streamDirection === 'bottom-up' && (
           <div
-            className="overflow-hidden rounded-2xl shadow-lg transition-colors"
+            className="pointer-events-none absolute bottom-0 left-0 right-0"
             style={{
-              background: 'color-mix(in srgb, var(--color-surface) 85%, transparent)',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
-              border: isFocused ? '1px solid var(--color-accent)' : '1px solid var(--color-border)',
+              height: '160px',
+              background: 'linear-gradient(to bottom, transparent, var(--color-bg) 70%)',
             }}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
+          />
+        )}
+
+        {streamDirection === 'bottom-up' && (
+          <div
+            className="absolute bottom-0 left-0 right-0 z-10 px-4"
+            style={{ paddingBottom: 'calc(16px + var(--safe-area-bottom))' }}
           >
-            {/* Markdown toolbar (above input) */}
-            <MarkdownToolbar textareaRef={textareaRef} />
-
-            {isUploading && (
-              <div className="px-3.5 py-1 text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                {t('Uploading...')}
-              </div>
-            )}
-
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onPaste={handlePaste}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && e.ctrlKey) {
-                  e.preventDefault();
-                  handleSubmit();
-                  return;
-                }
-                const ta = textareaRef.current;
-                if (!ta) return;
-                const nativeEvent = e.nativeEvent;
-                for (const binding of editorShortcuts) {
-                  if (matchesShortcut(nativeEvent, binding.keys)) {
-                    e.preventDefault();
-                    const editorActions: Record<string, () => void> = {
-                      'editor.bold': () =>
-                        insertMarkdown(ta, {
-                          prefix: '**',
-                          suffix: '**',
-                          defaultContent: t('Bold'),
-                        }),
-                      'editor.italic': () =>
-                        insertMarkdown(ta, {
-                          prefix: '*',
-                          suffix: '*',
-                          defaultContent: t('Italic'),
-                        }),
-                      'editor.underline': () =>
-                        insertMarkdown(ta, {
-                          prefix: '<u>',
-                          suffix: '</u>',
-                          defaultContent: t('Underline'),
-                        }),
-                      'editor.strikethrough': () =>
-                        insertMarkdown(ta, {
-                          prefix: '~~',
-                          suffix: '~~',
-                          defaultContent: t('Strikethrough'),
-                        }),
-                      'editor.inlineCode': () =>
-                        insertMarkdown(ta, { prefix: '`', suffix: '`', defaultContent: 'code' }),
-                      'editor.codeBlock': () =>
-                        insertMarkdown(ta, { prefix: '```\n', suffix: '\n```' }),
-                      'editor.link': () => insertLink(ta),
-                      'editor.quote': () => insertMarkdown(ta, { prefix: '> ', blockLevel: true }),
-                      'editor.orderedList': () =>
-                        insertMarkdown(ta, { prefix: '1. ', blockLevel: true }),
-                      'editor.unorderedList': () =>
-                        insertMarkdown(ta, { prefix: '- ', blockLevel: true }),
-                      'editor.table': () => insertTable(ta),
-                      'editor.clearFormat': () => clearFormat(ta),
-                      'editor.heading1': () => setHeading(ta, 1),
-                      'editor.heading2': () => setHeading(ta, 2),
-                      'editor.heading3': () => setHeading(ta, 3),
-                      'editor.heading4': () => setHeading(ta, 4),
-                    };
-                    editorActions[binding.action]?.();
-                    return;
-                  }
-                }
-              }}
-              placeholder={t('Record an inspiration... (Ctrl+Enter to send)')}
-              className="block w-full resize-none bg-transparent px-3.5 pt-2.5 pb-1.5 text-[14px] leading-relaxed outline-none"
-              style={{ color: 'var(--color-text)', minHeight: '40px' }}
-              rows={1}
-            />
-
-            {/* Bottom action bar */}
-            <div className="flex items-center justify-between px-3 py-1.5">
-              <div className="flex items-center gap-3">
-                <span
-                  className="shrink-0 text-[11px] tabular-nums"
-                  style={{ color: 'var(--color-text-tertiary)' }}
-                >
-                  {t('{{count}} characters', { count: input.length })}
-                </span>
-                <div
-                  className="flex items-center gap-0.5 rounded-md p-0.5"
-                  style={{ background: 'var(--color-bg)' }}
-                >
-                  {ENTRY_TYPE_KEYS.map((k) => {
-                    const meta = ENTRY_TYPE_META[k];
-                    const TypeIcon = meta.icon;
-                    const active = selectedEntryType === k;
-                    return (
-                      <button
-                        key={k}
-                        type="button"
-                        onClick={() => setSelectedEntryType(k)}
-                        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors"
-                        style={{
-                          background: active ? 'var(--color-accent-soft)' : 'transparent',
-                          color: active ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
-                        }}
-                        title={t(meta.labelKey)}
-                      >
-                        <TypeIcon size={10} />
-                        {active && <span>{t(meta.labelKey)}</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleSubmit}
-                disabled={!input.trim()}
-                className="shrink-0 flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold text-white shadow-sm transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:hover:scale-100"
-                style={{ background: 'var(--color-accent)' }}
-              >
-                <Send size={11} />
-                {t('Record')}
-              </button>
-            </div>
-
-            {/* Collapsible task metadata panel */}
-            <AnimatePresence>
-              {selectedEntryType === 'task' && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.15 }}
-                  className="overflow-hidden"
-                >
-                  <div
-                    className="flex flex-wrap items-center gap-3 border-t px-3 py-2"
-                    style={{ borderColor: 'var(--color-border)' }}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <Clock size={13} className="text-[var(--color-text-tertiary)]" />
-                      <input
-                        type="datetime-local"
-                        value={metaDdlDate}
-                        onChange={(e) => setMetaDdlDate(e.target.value)}
-                        className="rounded border border-[var(--color-border)] bg-transparent px-2 py-0.5 text-[11px] text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
-                      />
-                    </div>
-
-                    {metaDdlDate && (
-                      <div className="flex gap-1">
-                        {(['soft', 'commitment', 'hard'] as const).map((dt) => (
-                          <button
-                            key={dt}
-                            type="button"
-                            onClick={() => setMetaDdlType(dt)}
-                            className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                              metaDdlType === dt
-                                ? 'bg-[var(--color-accent)] text-white'
-                                : 'bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-border)]'
-                            }`}
-                          >
-                            {dt}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-1.5">
-                      <Tag size={13} className="text-[var(--color-text-tertiary)]" />
-                      <input
-                        value={metaTags}
-                        onChange={(e) => setMetaTags(e.target.value)}
-                        placeholder={t('Tags (space separated)')}
-                        className="w-28 rounded border border-[var(--color-border)] bg-transparent px-2 py-0.5 text-[11px] text-[var(--color-text)] placeholder:text-[var(--color-text-tertiary)] outline-none focus:border-[var(--color-accent)]"
-                      />
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {composerInner}
           </div>
-        </div>
+        )}
       </div>
 
       {/* Context menu */}
@@ -1423,6 +1680,27 @@ export function StreamView() {
           onSetParent={
             contextMenu.entry.extractedTaskId
               ? () => setParentPickerTargetId(contextMenu.entry.extractedTaskId!)
+              : undefined
+          }
+          onDoItNow={
+            contextMenu.entry.extractedTaskId
+              ? () =>
+                  useNowOverrideStore.getState().requestDoItNow(contextMenu.entry.extractedTaskId!)
+              : undefined
+          }
+          onBoostPriority={
+            contextMenu.entry.extractedTaskId
+              ? () => {
+                  const tid = contextMenu.entry.extractedTaskId;
+                  if (!tid) return;
+                  const tk = taskMap.get(tid);
+                  if (!tk) return;
+                  updateTask({
+                    ...tk,
+                    priority: Math.min(10, (tk.priority ?? 5) + 1),
+                    status: tk.status === 'inbox' || tk.status === 'active' ? 'today' : tk.status,
+                  });
+                }
               : undefined
           }
         />

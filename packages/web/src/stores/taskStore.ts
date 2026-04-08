@@ -1,6 +1,7 @@
 import type { Task, TaskStatus } from '@my-little-todo/core';
 import {
   daysUntil,
+  displayTaskTitle,
   estimateTaskProgress,
   isNearFinishing,
   isSmallTask,
@@ -266,7 +267,7 @@ export function getActiveTasks(tasks: Task[]): Task[] {
   return tasks.filter(
     (t) =>
       t.id &&
-      t.title &&
+      displayTaskTitle(t).trim() &&
       (!t.parentId || t.promoted) &&
       (t.status === 'active' || t.status === 'today' || t.status === 'inbox'),
   );

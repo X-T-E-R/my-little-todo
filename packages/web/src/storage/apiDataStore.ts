@@ -1,10 +1,10 @@
 import {
+  type StreamEntryDbRow,
+  type TaskDbRow,
   streamEntryFromDbRow,
   streamEntryToDbRow,
   taskFromDbRow,
   taskToDbRow,
-  type StreamEntryDbRow,
-  type TaskDbRow,
 } from '@my-little-todo/core';
 import type { StreamEntry, Task } from '@my-little-todo/core';
 import { getAuthToken } from '../stores/authStore';
@@ -63,10 +63,9 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
     },
 
     async getStreamDay(dateKey: string): Promise<StreamEntry[]> {
-      const res = await fetch(
-        `${baseUrl}/api/stream?date=${encodeURIComponent(dateKey)}`,
-        { headers: authOnly() },
-      );
+      const res = await fetch(`${baseUrl}/api/stream?date=${encodeURIComponent(dateKey)}`, {
+        headers: authOnly(),
+      });
       if (!res.ok) return [];
       const rows = (await res.json()) as string[];
       return rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow));
@@ -86,6 +85,19 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
       const res = await fetch(`${baseUrl}/api/stream/dates`, { headers: authOnly() });
       if (!res.ok) return [];
       return (await res.json()) as string[];
+    },
+
+    async searchStreamEntries(query: string, limit = 200): Promise<StreamEntry[]> {
+      const q = query.trim();
+      if (!q) return [];
+      const lim = Math.min(Math.max(1, limit), 500);
+      const res = await fetch(
+        `${baseUrl}/api/stream/search?q=${encodeURIComponent(q)}&limit=${encodeURIComponent(String(lim))}`,
+        { headers: authOnly() },
+      );
+      if (!res.ok) return [];
+      const rows = (await res.json()) as string[];
+      return rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow));
     },
 
     async putStreamEntry(entry: StreamEntry): Promise<void> {

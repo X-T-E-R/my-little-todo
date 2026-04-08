@@ -57,6 +57,8 @@ export type KanbanColumn = 'ideas' | 'planned' | 'doing' | 'finishing' | 'done_r
 export interface Task {
   id: string;
   title: string;
+  /** When true, `title` is the user-facing name; when false/undefined, UI derives from `body` first line. */
+  titleCustomized?: boolean;
   description?: string;
   status: TaskStatus;
   createdAt: Date;
@@ -69,6 +71,8 @@ export interface Task {
   plannedAt?: Date;
 
   roleId?: string;
+  /** Multiple roles (e.g. student + developer). When absent, `roleId` is the only role. */
+  roleIds?: string[];
   tags: string[];
   /** AI-computed internal score, not directly shown to user. */
   priority?: number;

@@ -1,4 +1,5 @@
 import type { Task } from '@my-little-todo/core';
+import { displayTaskTitle } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Check, Search, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -37,7 +38,8 @@ export function ParentTaskPicker({ childId, onSelect, onClose }: ParentTaskPicke
     return tasks.filter((task) => {
       if (excluded.has(task.id)) return false;
       if (task.status === 'completed' || task.status === 'archived') return false;
-      if (q && !task.title.toLowerCase().includes(q)) return false;
+      const hay = `${displayTaskTitle(task)} ${task.body}`.toLowerCase();
+      if (q && !hay.includes(q)) return false;
       return true;
     });
   }, [tasks, excluded, query]);
@@ -115,7 +117,7 @@ export function ParentTaskPicker({ childId, onSelect, onClose }: ParentTaskPicke
                   style={{ color: 'var(--color-text)' }}
                 >
                   <Check size={14} className="shrink-0 opacity-0" />
-                  <span className="truncate">{task.title}</span>
+                  <span className="truncate">{displayTaskTitle(task)}</span>
                   {task.ddl && (
                     <span
                       className="ml-auto text-[10px] shrink-0"

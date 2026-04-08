@@ -2,9 +2,13 @@ import type { Task, TaskPhase, TaskReminder, TaskResource, TaskStatus } from '@m
 import {
   TASK_PHASE_ORDER,
   daysUntil,
+  deriveTitleFromBody,
+  displayTaskTitle,
   estimateTaskProgress,
   generateId,
   isOverdue,
+  taskRoleIds,
+  withTaskRoles,
 } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -19,19 +23,22 @@ import {
   FileText,
   Lightbulb,
   Link2,
-  PenLine,
+  Loader2,
+  Maximize2,
+  Minimize2,
+  Pencil,
   Plus,
+  Save,
   Trash2,
   X,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useStreamStore, useTaskStore } from '../stores';
 import { useIsMobile } from '../utils/useIsMobile';
-import { MarkdownPreview } from './MarkdownPreview';
-import { MarkdownToolbar } from './MarkdownToolbar';
+import { MilkdownBodyEditor } from './MilkdownBodyEditor';
 import { ProgressRing } from './ProgressRing';
-import { RolePill } from './RolePickerPopover';
+import { RolePillMulti } from './RolePickerPopover';
 import { SmartDatePicker } from './SmartDatePicker';
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
@@ -48,79 +55,7 @@ const DDL_TYPE_OPTIONS = [
   { value: 'soft', label: 'Flexible' },
 ] as const;
 
-function BodyEditor({ body, onChange }: { body: string; onChange: (body: string) => void }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const [preview, setPreview] = useState(false);
-  const { t } = useTranslation('task');
-
-  const resize = () => {
-    if (!ref.current) return;
-    ref.current.style.height = 'auto';
-    ref.current.style.height = `${Math.max(ref.current.scrollHeight, 80)}px`;
-  };
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: auto-resize on body change
-  useEffect(resize, [body]);
-
-  return (
-    <div
-      className="rounded-xl overflow-hidden"
-      style={{
-        background: 'var(--color-bg)',
-        border: '1px solid var(--color-border)',
-      }}
-    >
-      {/* Edit / Preview toggle */}
-      <div className="flex items-center gap-1 px-2 pt-1.5">
-        <button
-          type="button"
-          onClick={() => setPreview(false)}
-          className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors"
-          style={{
-            background: !preview ? 'var(--color-accent-soft)' : 'transparent',
-            color: !preview ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
-          }}
-        >
-          <PenLine size={11} />
-          {t('Edit')}
-        </button>
-        <button
-          type="button"
-          onClick={() => setPreview(true)}
-          className="flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition-colors"
-          style={{
-            background: preview ? 'var(--color-accent-soft)' : 'transparent',
-            color: preview ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
-          }}
-        >
-          <Eye size={11} />
-          {t('Preview')}
-        </button>
-      </div>
-
-      {preview ? (
-        <div className="px-3 py-2.5" style={{ minHeight: '80px' }}>
-          <MarkdownPreview content={body} className="text-[13px]" />
-        </div>
-      ) : (
-        <>
-          <MarkdownToolbar textareaRef={ref} />
-          <textarea
-            ref={ref}
-            value={body}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={t('Write notes, ideas, checklists... supports Markdown')}
-            className="w-full resize-none px-3 py-2.5 text-[13px] leading-relaxed outline-none bg-transparent"
-            style={{
-              color: 'var(--color-text)',
-              minHeight: '80px',
-            }}
-          />
-        </>
-      )}
-    </div>
-  );
-}
+type PanelLayoutMode = 'drawer' | 'expanded' | 'fullscreen';
 
 function subtaskDdlLabel(
   ddl: Date,
@@ -151,7 +86,7 @@ function SubtaskRow({
 }) {
   const { t } = useTranslation('task');
   const done = subtask.status === 'completed';
-  const isMultiLine = subtask.title.includes('\n');
+  const isMultiLine = displayTaskTitle(subtask).includes('\n');
   const ddlInfo = subtask.ddl && !done ? subtaskDdlLabel(subtask.ddl, t) : null;
   const isPromoted = !!subtask.promoted;
   const d = depth ?? 0;
@@ -200,7 +135,7 @@ function SubtaskRow({
           textDecoration: done ? 'line-through' : 'none',
         }}
       >
-        {subtask.title}
+        {displayTaskTitle(subtask)}
         {isPromoted && (
           <span
             className="ml-1 inline-flex items-center rounded-full px-1 py-0 text-[9px] font-medium"
@@ -604,6 +539,181 @@ function RemindersSection({
   );
 }
 
+/** Remounts with `key={task.id}` so local title state matches the open task. */
+function TaskTitleField({ task }: { task: Task }) {
+  const updateTask = useTaskStore((s) => s.updateTask);
+  const { t } = useTranslation('task');
+  const derived = deriveTitleFromBody(task.body);
+  const [localTitle, setLocalTitle] = useState(
+    () => task.titleCustomized && task.title.trim() ? task.title : derived,
+  );
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    setLocalTitle(task.titleCustomized && task.title.trim() ? task.title : deriveTitleFromBody(task.body));
+    setEditing(false);
+  }, [task.id, task.title, task.titleCustomized, task.body]);
+
+  const commitTitle = () => {
+    const trimmed = localTitle.trim();
+    const matchesDerived = trimmed === derived;
+    if (task.titleCustomized) {
+      if (!trimmed) {
+        updateTask({ ...task, title: '', titleCustomized: false });
+      } else if (trimmed !== task.title) {
+        updateTask({ ...task, title: trimmed });
+      }
+    } else {
+      if (matchesDerived || !trimmed) {
+        updateTask({ ...task, title: '', titleCustomized: false });
+      } else {
+        updateTask({ ...task, title: trimmed, titleCustomized: true });
+      }
+    }
+    setEditing(false);
+  };
+
+  if (!task.titleCustomized && !editing) {
+    return (
+      <div className="flex items-start gap-2">
+        <span
+          className="flex-1 text-xl font-bold leading-snug break-words"
+          style={{ color: 'var(--color-text)' }}
+        >
+          {displayTaskTitle(task)}
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            setEditing(true);
+            setLocalTitle(derived);
+          }}
+          className="shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--color-bg)]"
+          style={{ color: 'var(--color-text-tertiary)' }}
+          title={t('Edit title')}
+          aria-label={t('Edit title')}
+        >
+          <Pencil size={18} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <input
+      value={localTitle}
+      onChange={(e) => setLocalTitle(e.target.value)}
+      onBlur={commitTitle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      aria-label={t('Task title')}
+      className="w-full bg-transparent text-xl font-bold outline-none"
+      style={{ color: 'var(--color-text)' }}
+    />
+  );
+}
+
+export type TaskBodyEditorSectionHandle = {
+  flush: () => void;
+  manualSave: () => void;
+};
+
+/**
+ * Body editor + debounced persistence. Parent must set `key={task.id}` so Milkdown
+ * receives the correct initial markdown when switching tasks.
+ */
+const TaskBodyEditorSection = forwardRef<
+  TaskBodyEditorSectionHandle,
+  {
+    task: Task;
+    onBodySaveStatusChange?: (status: 'idle' | 'saving' | 'saved') => void;
+  }
+>(function TaskBodyEditorSection({ task, onBodySaveStatusChange }, ref) {
+  const updateTask = useTaskStore((s) => s.updateTask);
+  const [localBody, setLocalBody] = useState(task.body);
+  const bodyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTaskRef = useRef<{ id: string; body: string } | null>(null);
+  const localBodyRef = useRef(localBody);
+  localBodyRef.current = localBody;
+
+  const flushPending = useCallback(() => {
+    if (bodyTimerRef.current) {
+      clearTimeout(bodyTimerRef.current);
+      bodyTimerRef.current = null;
+    }
+    if (pendingTaskRef.current) {
+      const { id, body } = pendingTaskRef.current;
+      pendingTaskRef.current = null;
+      const t = useTaskStore.getState().tasks.find((x) => x.id === id);
+      if (t && t.body !== body) {
+        useTaskStore.getState().updateTask({ ...t, body });
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      flushPending();
+    };
+  }, [task.id, flushPending]);
+
+  const handleBodyChange = (body: string) => {
+    setLocalBody(body);
+    onBodySaveStatusChange?.('saving');
+    pendingTaskRef.current = { id: task.id, body };
+    if (bodyTimerRef.current) clearTimeout(bodyTimerRef.current);
+    bodyTimerRef.current = setTimeout(() => {
+      if (pendingTaskRef.current?.id === task.id) {
+        const current = useTaskStore.getState().tasks.find((x) => x.id === task.id);
+        if (current && current.body !== body) {
+          updateTask({ ...current, body });
+        }
+        pendingTaskRef.current = null;
+        onBodySaveStatusChange?.('saved');
+        if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+        savedTimerRef.current = setTimeout(() => onBodySaveStatusChange?.('idle'), 2000);
+      }
+    }, 500);
+  };
+
+  const manualSave = useCallback(() => {
+    flushPending();
+    const current = useTaskStore.getState().tasks.find((x) => x.id === task.id);
+    if (current && localBodyRef.current !== current.body) {
+      updateTask({ ...current, body: localBodyRef.current });
+    }
+    onBodySaveStatusChange?.('saved');
+    if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = setTimeout(() => onBodySaveStatusChange?.('idle'), 2000);
+  }, [task.id, flushPending, updateTask, onBodySaveStatusChange]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      flush: flushPending,
+      manualSave,
+    }),
+    [flushPending, manualSave],
+  );
+
+  useEffect(() => {
+    onBodySaveStatusChange?.('idle');
+  }, [task.id, onBodySaveStatusChange]);
+
+  return (
+    <MilkdownBodyEditor
+      taskId={task.id}
+      initialMarkdown={localBody}
+      onMarkdownChange={handleBodyChange}
+    />
+  );
+});
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: complex panel with many interaction states
 export function TaskDetailPanel() {
   const {
@@ -622,66 +732,40 @@ export function TaskDetailPanel() {
   const task = tasks.find((t) => t.id === selectedTaskId);
   const { t } = useTranslation('task');
 
-  const [localBody, setLocalBody] = useState('');
-  const [localTitle, setLocalTitle] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const bodyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingTaskRef = useRef<{ id: string; body: string } | null>(null);
+  const [bodySaveStatus, setBodySaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [panelMode, setPanelMode] = useState<PanelLayoutMode>('drawer');
+  const bodyEditorRef = useRef<TaskBodyEditorSectionHandle>(null);
   const streamEntries = useStreamStore((s) => s.entries);
-
-  const flushPendingBody = useRef(() => {
-    if (bodyTimerRef.current) {
-      clearTimeout(bodyTimerRef.current);
-      bodyTimerRef.current = null;
-    }
-    if (pendingTaskRef.current) {
-      const { id, body } = pendingTaskRef.current;
-      pendingTaskRef.current = null;
-      const t = useTaskStore.getState().tasks.find((x) => x.id === id);
-      if (t && t.body !== body) {
-        useTaskStore.getState().updateTask({ ...t, body });
-      }
-    }
-  });
 
   const taskId = task?.id;
 
   useEffect(() => {
-    flushPendingBody.current();
     if (!taskId) return;
-    const t = tasks.find((x) => x.id === taskId);
-    if (t) {
-      setLocalTitle(t.title);
-      setLocalBody(t.body);
-      setConfirmDelete(false);
-    }
+    setConfirmDelete(false);
   }, [taskId]);
 
+  useEffect(() => {
+    if (panelMode !== 'fullscreen') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPanelMode('expanded');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panelMode]);
+
   if (!task) return null;
+
+  const parentTask = task.parentId ? tasks.find((p) => p.id === task.parentId) : undefined;
+  const showParentSplit =
+    Boolean(parentTask) && (panelMode === 'expanded' || panelMode === 'fullscreen') && !isMobile;
 
   const subtasks = (task.subtaskIds ?? [])
     .map((id) => tasks.find((t) => t.id === id))
     .filter((t): t is Task => t !== undefined);
 
-  const handleBodyChange = (body: string) => {
-    setLocalBody(body);
-    pendingTaskRef.current = { id: task.id, body };
-    if (bodyTimerRef.current) clearTimeout(bodyTimerRef.current);
-    bodyTimerRef.current = setTimeout(() => {
-      if (pendingTaskRef.current?.id === task.id) {
-        const current = useTaskStore.getState().tasks.find((x) => x.id === task.id);
-        if (current && current.body !== body) {
-          updateTask({ ...current, body });
-        }
-        pendingTaskRef.current = null;
-      }
-    }, 500);
-  };
-
-  const handleTitleBlur = () => {
-    if (localTitle.trim() && localTitle !== task.title) {
-      updateTask({ ...task, title: localTitle.trim() });
-    }
+  const handleManualSave = () => {
+    bodyEditorRef.current?.manualSave();
   };
 
   const handleToggleSubtask = async (sub: Task) => {
@@ -730,8 +814,14 @@ export function TaskDetailPanel() {
             onDragEnd={(_e, info) => {
               if (isMobile && info.offset.y > 100) selectTask(null);
             }}
-            className={`fixed z-50 overflow-y-auto shadow-2xl ${
-              isMobile ? 'inset-x-0 bottom-0 top-[10%]' : 'right-0 top-0 bottom-0 w-full max-w-md'
+            className={`fixed flex flex-col overflow-hidden shadow-2xl ${
+              isMobile
+                ? 'inset-x-0 bottom-0 top-[10%] z-50'
+                : panelMode === 'fullscreen'
+                  ? 'inset-0 z-[55] max-w-none w-full'
+                  : panelMode === 'expanded'
+                    ? 'right-0 top-0 bottom-0 z-50 w-full max-w-4xl'
+                    : 'right-0 top-0 bottom-0 z-50 w-full max-w-md'
             }`}
             style={{
               background: 'var(--color-surface)',
@@ -758,347 +848,462 @@ export function TaskDetailPanel() {
                   />
                 </div>
               )}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span
-                  className="text-xs font-medium"
+                  className="text-xs font-medium truncate"
                   style={{ color: 'var(--color-text-tertiary)' }}
                 >
                   {t('Task Detail')}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => selectTask(null)}
-                  aria-label={t('Close')}
-                  className="rounded-lg p-1"
-                  style={{ color: 'var(--color-text-tertiary)' }}
-                >
-                  <X size={18} />
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  {bodySaveStatus === 'saving' && (
+                    <span
+                      className="flex items-center gap-1 text-[11px]"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      <Loader2 size={12} className="animate-spin" />
+                      {t('Saving...')}
+                    </span>
+                  )}
+                  {bodySaveStatus === 'saved' && (
+                    <span className="text-[11px]" style={{ color: 'var(--color-success)' }}>
+                      {t('Saved')}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleManualSave}
+                    className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium"
+                    style={{
+                      border: '1px solid var(--color-border)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                    title={t('Save')}
+                  >
+                    <Save size={12} />
+                    {t('Save')}
+                  </button>
+                  {!isMobile && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPanelMode((m) =>
+                            m === 'fullscreen'
+                              ? 'expanded'
+                              : m === 'expanded'
+                                ? 'drawer'
+                                : 'expanded',
+                          )
+                        }
+                        className="rounded-lg p-1"
+                        style={{ color: 'var(--color-text-tertiary)' }}
+                        title={t('Expand panel')}
+                        aria-label={t('Expand panel')}
+                      >
+                        {panelMode === 'drawer' ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPanelMode((m) => (m === 'fullscreen' ? 'expanded' : 'fullscreen'))
+                        }
+                        className="rounded-lg p-1"
+                        style={{ color: 'var(--color-text-tertiary)' }}
+                        title={t('Fullscreen editor')}
+                        aria-label={t('Fullscreen editor')}
+                      >
+                        {panelMode === 'fullscreen' ? (
+                          <Minimize2 size={16} />
+                        ) : (
+                          <Maximize2 size={16} />
+                        )}
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => selectTask(null)}
+                    aria-label={t('Close')}
+                    className="rounded-lg p-1"
+                    style={{ color: 'var(--color-text-tertiary)' }}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="px-5 py-4 space-y-5">
-              {/* Title */}
-              <input
-                value={localTitle}
-                onChange={(e) => setLocalTitle(e.target.value)}
-                onBlur={handleTitleBlur}
-                className="w-full bg-transparent text-xl font-bold outline-none"
-                style={{ color: 'var(--color-text)' }}
-              />
-
-              {/* Meta row */}
-              <div className="flex flex-wrap items-center gap-2">
-                <RolePill
-                  roleId={task.roleId}
-                  onChangeRole={(newRoleId) => updateTask({ ...task, roleId: newRoleId })}
-                  size="md"
-                />
-                <select
-                  value={task.status}
-                  onChange={(e) => updateStatus(task.id, e.target.value as TaskStatus)}
-                  className="rounded-lg px-2 py-1 text-xs font-medium outline-none"
-                  style={{
-                    background: 'var(--color-bg)',
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text-secondary)',
-                  }}
+            <div
+              className={
+                showParentSplit
+                  ? 'flex min-h-0 flex-1'
+                  : 'min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-5'
+              }
+              style={showParentSplit ? { maxHeight: 'calc(100vh - 56px)' } : undefined}
+            >
+              {showParentSplit && parentTask && (
+                <div
+                  className="w-52 shrink-0 overflow-y-auto border-r px-4 py-4"
+                  style={{ borderColor: 'var(--color-border)' }}
                 >
-                  {STATUS_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {t(opt.label)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Phase & progress (ADHD coaching) */}
-              <div
-                className="flex flex-wrap items-center gap-3 rounded-xl p-3"
-                style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
-              >
-                <ProgressRing progress={estimateTaskProgress(task, tasks)} size={40} stroke={3} />
-                <div className="flex-1 min-w-[140px]">
-                  <label
-                    className="text-[10px] font-semibold uppercase tracking-wide"
+                  <p
+                    className="text-[10px] font-semibold uppercase"
                     style={{ color: 'var(--color-text-tertiary)' }}
                   >
-                    {t('Phase')}
-                  </label>
+                    {t('Parent task')}
+                  </p>
+                  <p
+                    className="mt-1 text-sm font-medium line-clamp-3"
+                    style={{ color: 'var(--color-text)' }}
+                  >
+                    {displayTaskTitle(parentTask)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      bodyEditorRef.current?.flush();
+                      selectTask(parentTask.id);
+                    }}
+                    className="mt-2 text-xs font-medium"
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    {t('Open parent')}
+                  </button>
+                </div>
+              )}
+              <div
+                className={
+                  showParentSplit
+                    ? 'min-w-0 flex-1 overflow-y-auto px-5 py-4 space-y-5'
+                    : 'contents'
+                }
+              >
+                {/* Title — key remounts field when switching tasks */}
+                <TaskTitleField key={task.id} task={task} />
+
+                {/* Meta row */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <RolePillMulti
+                    roleIds={taskRoleIds(task)}
+                    onChangeRoleIds={(ids) =>
+                      updateTask({ ...task, ...withTaskRoles(task, ids) })
+                    }
+                    size="md"
+                  />
                   <select
-                    value={task.phase ?? 'understood'}
-                    onChange={(e) => updateTask({ ...task, phase: e.target.value as TaskPhase })}
-                    className="mt-1 w-full rounded-lg px-2 py-1.5 text-xs font-medium outline-none"
+                    value={task.status}
+                    onChange={(e) => updateStatus(task.id, e.target.value as TaskStatus)}
+                    className="rounded-lg px-2 py-1 text-xs font-medium outline-none"
                     style={{
-                      background: 'var(--color-surface)',
+                      background: 'var(--color-bg)',
                       border: '1px solid var(--color-border)',
-                      color: 'var(--color-text)',
+                      color: 'var(--color-text-secondary)',
                     }}
                   >
-                    {TASK_PHASE_ORDER.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
+                    {STATUS_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {t(opt.label)}
                       </option>
                     ))}
                   </select>
                 </div>
-              </div>
 
-              {/* Planned At */}
-              <SmartDatePicker
-                label={t('Planned time')}
-                value={task.plannedAt}
-                onChange={(d) => updateTask({ ...task, plannedAt: d })}
-                accent="var(--color-accent)"
-              />
+                {/* Phase & progress (ADHD coaching) */}
+                <div
+                  className="flex flex-wrap items-center gap-3 rounded-xl p-3"
+                  style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
+                >
+                  <ProgressRing progress={estimateTaskProgress(task, tasks)} size={40} stroke={3} />
+                  <div className="flex-1 min-w-[140px]">
+                    <label
+                      htmlFor="task-phase-select"
+                      className="text-[10px] font-semibold uppercase tracking-wide"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      {t('Phase')}
+                    </label>
+                    <select
+                      id="task-phase-select"
+                      value={task.phase ?? 'understood'}
+                      onChange={(e) => updateTask({ ...task, phase: e.target.value as TaskPhase })}
+                      className="mt-1 w-full rounded-lg px-2 py-1.5 text-xs font-medium outline-none"
+                      style={{
+                        background: 'var(--color-surface)',
+                        border: '1px solid var(--color-border)',
+                        color: 'var(--color-text)',
+                      }}
+                    >
+                      {TASK_PHASE_ORDER.map((p) => (
+                        <option key={p} value={p}>
+                          {t(`phase_${p}`)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
 
-              {/* DDL */}
-              <div className="space-y-2">
+                {/* Planned At */}
                 <SmartDatePicker
-                  label={t('Due date')}
-                  value={task.ddl}
-                  onChange={(d) => updateTask({ ...task, ddl: d })}
-                  accent="var(--color-warning, #ca8a04)"
+                  label={t('Planned time')}
+                  value={task.plannedAt}
+                  onChange={(d) => updateTask({ ...task, plannedAt: d })}
+                  accent="var(--color-accent)"
                 />
-                {task.ddl && (
-                  <div className="flex gap-1 ml-0.5">
-                    {DDL_TYPE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => updateTask({ ...task, ddlType: opt.value })}
-                        className="rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors"
+
+                {/* DDL */}
+                <div className="space-y-2">
+                  <SmartDatePicker
+                    label={t('Due date')}
+                    value={task.ddl}
+                    onChange={(d) => updateTask({ ...task, ddl: d })}
+                    accent="var(--color-warning, #ca8a04)"
+                  />
+                  {task.ddl && (
+                    <div className="flex gap-1 ml-0.5">
+                      {DDL_TYPE_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => updateTask({ ...task, ddlType: opt.value })}
+                          className="rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors"
+                          style={{
+                            background:
+                              task.ddlType === opt.value
+                                ? 'var(--color-accent-soft)'
+                                : 'var(--color-bg)',
+                            color:
+                              task.ddlType === opt.value
+                                ? 'var(--color-accent)'
+                                : 'var(--color-text-tertiary)',
+                            border: '1px solid var(--color-border)',
+                          }}
+                        >
+                          {t(opt.label)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Tags */}
+                {task.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {task.tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
                         style={{
-                          background:
-                            task.ddlType === opt.value
-                              ? 'var(--color-accent-soft)'
-                              : 'var(--color-bg)',
-                          color:
-                            task.ddlType === opt.value
-                              ? 'var(--color-accent)'
-                              : 'var(--color-text-tertiary)',
-                          border: '1px solid var(--color-border)',
+                          background: 'var(--color-accent-soft)',
+                          color: 'var(--color-accent)',
                         }}
                       >
-                        {t(opt.label)}
-                      </button>
+                        #{tag}
+                      </span>
                     ))}
                   </div>
                 )}
-              </div>
 
-              {/* Tags */}
-              {task.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {task.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
-                      style={{
-                        background: 'var(--color-accent-soft)',
-                        color: 'var(--color-accent)',
-                      }}
-                    >
-                      #{tag}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* Body */}
-              <div>
-                <p
-                  className="text-xs font-medium mb-2"
-                  style={{ color: 'var(--color-text-tertiary)' }}
-                >
-                  {t('Content')}
-                </p>
-                <BodyEditor body={localBody} onChange={handleBodyChange} />
-              </div>
-
-              {/* Subtasks */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <p
-                    className="text-xs font-medium"
-                    style={{ color: 'var(--color-text-tertiary)' }}
-                  >
-                    {t('Subtasks')}
-                    {subtasks.length > 0 && (
-                      <span className="ml-1">
-                        ({subtasks.filter((s) => s.status === 'completed').length}/{subtasks.length}
-                        )
-                      </span>
-                    )}
-                  </p>
-                </div>
-                <div
-                  className="rounded-xl overflow-hidden"
-                  style={{ border: '1px solid var(--color-border)' }}
-                >
-                  <SubtaskTree
-                    subtaskIds={task.subtaskIds ?? []}
-                    tasks={tasks}
-                    depth={0}
-                    maxDepth={2}
-                    onToggle={handleToggleSubtask}
-                    onExtract={handleExtractSubtask}
-                    onPromote={(id, promoted) => promoteSubtask(id, promoted)}
-                    onOpen={(id) => {
-                      flushPendingBody.current();
-                      selectTask(id);
-                    }}
-                  />
-                  <AddSubtaskInput onAdd={handleAddSubtask} />
-                </div>
-              </div>
-
-              {/* Resources */}
-              <ResourcesSection task={task} onUpdate={updateTask} />
-
-              {/* Reminders */}
-              <RemindersSection task={task} onUpdate={updateTask} />
-
-              {/* History */}
-              {(task.postponements.length > 0 ||
-                task.submissions.length > 0 ||
-                (task.statusHistory ?? []).length > 0) && (
+                {/* Body */}
                 <div>
                   <p
                     className="text-xs font-medium mb-2"
                     style={{ color: 'var(--color-text-tertiary)' }}
                   >
-                    {t('History')}
+                    {t('Content')}
                   </p>
-                  <div className="space-y-1.5">
-                    {(task.statusHistory ?? []).map((h, i) => (
-                      <div
-                        key={`sh-${h.timestamp.getTime()}-${i}`}
-                        className="flex items-start gap-2 text-[11px]"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                      >
-                        <ArrowRight
-                          size={12}
-                          className="shrink-0 mt-0.5"
-                          style={{ color: 'var(--color-accent)' }}
-                        />
-                        <span>
-                          {h.from} → {h.to}
-                          <span className="ml-1" style={{ color: 'var(--color-text-tertiary)' }}>
-                            {h.timestamp.toLocaleDateString()}{' '}
-                            {h.timestamp.toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
-                          </span>
-                        </span>
-                      </div>
-                    ))}
-                    {task.postponements.map((p, i) => (
-                      <div
-                        key={`post-${p.timestamp.getTime()}-${i}`}
-                        className="flex items-start gap-2 text-[11px]"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                      >
-                        <AlertCircle
-                          size={12}
-                          className="shrink-0 mt-0.5"
-                          style={{ color: 'var(--color-warning)' }}
-                        />
-                        <span>
-                          {t('Postponed')} {p.fromDate.getMonth() + 1}/{p.fromDate.getDate()} →{' '}
-                          {p.toDate.getMonth() + 1}/{p.toDate.getDate()}：{p.reason}
-                        </span>
-                      </div>
-                    ))}
-                    {task.submissions.map((s, i) => (
-                      <div
-                        key={`sub-${s.timestamp.getTime()}-${i}`}
-                        className="flex items-start gap-2 text-[11px]"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                      >
-                        <Check
-                          size={12}
-                          className="shrink-0 mt-0.5"
-                          style={{ color: 'var(--color-success)' }}
-                        />
-                        <span>
-                          {s.onTime
-                            ? t('On time')
-                            : t('Late {{days}} days', { days: s.daysLate ?? '?' })}{' '}
-                          · {s.note}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <TaskBodyEditorSection
+                    key={task.id}
+                    ref={bodyEditorRef}
+                    task={task}
+                    onBodySaveStatusChange={setBodySaveStatus}
+                  />
                 </div>
-              )}
 
-              {/* Source spark link */}
-              {task.sourceStreamId &&
-                (() => {
-                  const source = streamEntries.find((e) => e.id === task.sourceStreamId);
-                  return source ? (
-                    <div
-                      className="flex items-center gap-1.5 text-xs"
+                {/* Subtasks */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p
+                      className="text-xs font-medium"
                       style={{ color: 'var(--color-text-tertiary)' }}
                     >
-                      <Lightbulb size={12} />
-                      {t('From spark')}：
-                      <span
-                        className="truncate max-w-[200px]"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                      >
-                        {source.content.slice(0, 50)}
-                      </span>
+                      {t('Subtasks')}
+                      {subtasks.length > 0 && (
+                        <span className="ml-1">
+                          ({subtasks.filter((s) => s.status === 'completed').length}/
+                          {subtasks.length})
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div
+                    className="rounded-xl overflow-hidden"
+                    style={{ border: '1px solid var(--color-border)' }}
+                  >
+                    <SubtaskTree
+                      subtaskIds={task.subtaskIds ?? []}
+                      tasks={tasks}
+                      depth={0}
+                      maxDepth={2}
+                      onToggle={handleToggleSubtask}
+                      onExtract={handleExtractSubtask}
+                      onPromote={(id, promoted) => promoteSubtask(id, promoted)}
+                      onOpen={(id) => {
+                        bodyEditorRef.current?.flush();
+                        selectTask(id);
+                      }}
+                    />
+                    <AddSubtaskInput onAdd={handleAddSubtask} />
+                  </div>
+                </div>
+
+                {/* Resources */}
+                <ResourcesSection task={task} onUpdate={updateTask} />
+
+                {/* Reminders */}
+                <RemindersSection task={task} onUpdate={updateTask} />
+
+                {/* History */}
+                {(task.postponements.length > 0 ||
+                  task.submissions.length > 0 ||
+                  (task.statusHistory ?? []).length > 0) && (
+                  <div>
+                    <p
+                      className="text-xs font-medium mb-2"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      {t('History')}
+                    </p>
+                    <div className="space-y-1.5">
+                      {(task.statusHistory ?? []).map((h, i) => (
+                        <div
+                          key={`sh-${h.timestamp.getTime()}-${i}`}
+                          className="flex items-start gap-2 text-[11px]"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          <ArrowRight
+                            size={12}
+                            className="shrink-0 mt-0.5"
+                            style={{ color: 'var(--color-accent)' }}
+                          />
+                          <span>
+                            {h.from} → {h.to}
+                            <span className="ml-1" style={{ color: 'var(--color-text-tertiary)' }}>
+                              {h.timestamp.toLocaleDateString()}{' '}
+                              {h.timestamp.toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                      {task.postponements.map((p, i) => (
+                        <div
+                          key={`post-${p.timestamp.getTime()}-${i}`}
+                          className="flex items-start gap-2 text-[11px]"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          <AlertCircle
+                            size={12}
+                            className="shrink-0 mt-0.5"
+                            style={{ color: 'var(--color-warning)' }}
+                          />
+                          <span>
+                            {t('Postponed')} {p.fromDate.getMonth() + 1}/{p.fromDate.getDate()} →{' '}
+                            {p.toDate.getMonth() + 1}/{p.toDate.getDate()}：{p.reason}
+                          </span>
+                        </div>
+                      ))}
+                      {task.submissions.map((s, i) => (
+                        <div
+                          key={`sub-${s.timestamp.getTime()}-${i}`}
+                          className="flex items-start gap-2 text-[11px]"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          <Check
+                            size={12}
+                            className="shrink-0 mt-0.5"
+                            style={{ color: 'var(--color-success)' }}
+                          />
+                          <span>
+                            {s.onTime
+                              ? t('On time')
+                              : t('Late {{days}} days', { days: s.daysLate ?? '?' })}{' '}
+                            · {s.note}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ) : null;
-                })()}
+                  </div>
+                )}
 
-              {/* Parent link */}
-              {task.parentId && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    flushPendingBody.current();
-                    if (task.parentId) selectTask(task.parentId);
-                  }}
-                  className="flex items-center gap-1 text-xs font-medium"
-                  style={{ color: 'var(--color-accent)' }}
-                >
-                  <ChevronRight size={12} />
-                  {t('View parent task')}
-                </button>
-              )}
+                {/* Source spark link */}
+                {task.sourceStreamId &&
+                  (() => {
+                    const source = streamEntries.find((e) => e.id === task.sourceStreamId);
+                    return source ? (
+                      <div
+                        className="flex items-center gap-1.5 text-xs"
+                        style={{ color: 'var(--color-text-tertiary)' }}
+                      >
+                        <Lightbulb size={12} />
+                        {t('From spark')}：
+                        <span
+                          className="truncate max-w-[200px]"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          {source.content.slice(0, 50)}
+                        </span>
+                      </div>
+                    ) : null;
+                  })()}
 
-              {/* Actions */}
-              <div
-                className="pt-4 flex items-center gap-3"
-                style={{ borderTop: '1px solid var(--color-border)' }}
-              >
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
-                  style={{
-                    color: confirmDelete ? 'white' : 'var(--color-danger)',
-                    background: confirmDelete ? 'var(--color-danger)' : 'transparent',
-                    border: `1px solid ${confirmDelete ? 'var(--color-danger)' : 'var(--color-border)'}`,
-                  }}
-                >
-                  <Trash2 size={12} />
-                  {confirmDelete ? t('Confirm delete') : t('Delete')}
-                </button>
-                {confirmDelete && (
+                {/* Parent link */}
+                {task.parentId && (
                   <button
                     type="button"
-                    onClick={() => setConfirmDelete(false)}
-                    className="text-xs font-medium"
-                    style={{ color: 'var(--color-text-tertiary)' }}
+                    onClick={() => {
+                      bodyEditorRef.current?.flush();
+                      if (task.parentId) selectTask(task.parentId);
+                    }}
+                    className="flex items-center gap-1 text-xs font-medium"
+                    style={{ color: 'var(--color-accent)' }}
                   >
-                    {t('Cancel')}
+                    <ChevronRight size={12} />
+                    {t('View parent task')}
                   </button>
                 )}
+
+                {/* Actions */}
+                <div
+                  className="pt-4 flex items-center gap-3"
+                  style={{ borderTop: '1px solid var(--color-border)' }}
+                >
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                    style={{
+                      color: confirmDelete ? 'white' : 'var(--color-danger)',
+                      background: confirmDelete ? 'var(--color-danger)' : 'transparent',
+                      border: `1px solid ${confirmDelete ? 'var(--color-danger)' : 'var(--color-border)'}`,
+                    }}
+                  >
+                    <Trash2 size={12} />
+                    {confirmDelete ? t('Confirm delete') : t('Delete')}
+                  </button>
+                  {confirmDelete && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(false)}
+                      className="text-xs font-medium"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      {t('Cancel')}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </motion.div>

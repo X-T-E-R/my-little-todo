@@ -20,18 +20,19 @@ async fn upsert_task_json_tx(
 ) -> anyhow::Result<()> {
     let v: serde_json::Value = serde_json::from_str(json)?;
     let next_ver = bump_version_sqlite(&mut **tx).await?;
+    let updated_at = v["updated_at"].as_i64().unwrap_or(0);
     sqlx::query(
         r#"INSERT INTO tasks (
                 user_id, id, title, description, status, body, created_at, updated_at, completed_at,
-                ddl, ddl_type, planned_at, role_id, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+                ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
                 tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
                 version, deleted_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id, id) DO UPDATE SET
                 title=excluded.title, description=excluded.description, status=excluded.status, body=excluded.body,
                 created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
                 ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
-                role_id=excluded.role_id, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
+                role_id=excluded.role_id, role_ids=excluded.role_ids, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
                 priority=excluded.priority, promoted=excluded.promoted, phase=excluded.phase, kanban_column=excluded.kanban_column,
                 tags=excluded.tags, subtask_ids=excluded.subtask_ids, resources=excluded.resources,
                 reminders=excluded.reminders, submissions=excluded.submissions, postponements=excluded.postponements,
@@ -45,12 +46,13 @@ async fn upsert_task_json_tx(
     .bind(v["status"].as_str().unwrap_or("inbox"))
     .bind(v["body"].as_str().unwrap_or(""))
     .bind(v["created_at"].as_i64().unwrap_or(0))
-    .bind(v["updated_at"].as_i64().unwrap_or(0))
+    .bind(updated_at)
     .bind(v["completed_at"].as_i64())
     .bind(v["ddl"].as_i64())
     .bind(v["ddl_type"].as_str())
     .bind(v["planned_at"].as_i64())
     .bind(v["role_id"].as_str())
+    .bind(v["role_ids"].as_str())
     .bind(v["parent_id"].as_str())
     .bind(v["source_stream_id"].as_str())
     .bind(v["priority"].as_f64())
@@ -560,6 +562,51 @@ impl SqliteProvider {
                 .await?;
         }
 
+        // --- V7: tasks.role_ids (multi-role support) ---
+        if current_version < 7 {
+            let has_role_ids: bool = sqlx::query_as::<_, (i64,)>(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'role_ids'",
+            )
+            .fetch_one(&pool)
+            .await
+            .map(|r| r.0 > 0)
+            .unwrap_or(false);
+
+            if !has_role_ids {
+                sqlx::query("ALTER TABLE tasks ADD COLUMN role_ids TEXT")
+                    .execute(&pool)
+                    .await?;
+            }
+
+            sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (7)")
+                .execute(&pool)
+                .await?;
+        }
+
+        // --- V8: tasks.title_customized (derived title from body when 0) ---
+        if current_version < 8 {
+            let has_title_customized: bool = sqlx::query_as::<_, (i64,)>(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'title_customized'",
+            )
+            .fetch_one(&pool)
+            .await
+            .map(|r| r.0 > 0)
+            .unwrap_or(false);
+
+            if !has_title_customized {
+                sqlx::query("ALTER TABLE tasks ADD COLUMN title_customized INTEGER NOT NULL DEFAULT 0")
+                    .execute(&pool)
+                    .await?;
+                sqlx::query("UPDATE tasks SET title = '', title_customized = 0")
+                    .execute(&pool)
+                    .await?;
+            }
+
+            sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (8)")
+                .execute(&pool)
+                .await?;
+        }
+
         Ok(Self { pool })
     }
 }
@@ -571,10 +618,10 @@ impl DatabaseProvider for SqliteProvider {
     async fn list_tasks_json(&self, user_id: &str) -> anyhow::Result<Vec<String>> {
         let rows: Vec<(String,)> = sqlx::query_as(
             r#"SELECT json_object(
-                'id', id, 'title', title, 'description', description, 'status', status, 'body', body,
+                'id', id, 'title', title, 'title_customized', title_customized, 'description', description, 'status', status, 'body', body,
                 'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
                 'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
-                'role_id', role_id, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                 'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
                 'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                 'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
@@ -591,10 +638,10 @@ impl DatabaseProvider for SqliteProvider {
     async fn get_task_json(&self, user_id: &str, id: &str) -> anyhow::Result<Option<String>> {
         let row: Option<(String,)> = sqlx::query_as(
             r#"SELECT json_object(
-                'id', id, 'title', title, 'description', description, 'status', status, 'body', body,
+                'id', id, 'title', title, 'title_customized', title_customized, 'description', description, 'status', status, 'body', body,
                 'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
                 'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
-                'role_id', role_id, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                 'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
                 'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                 'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
@@ -612,18 +659,19 @@ impl DatabaseProvider for SqliteProvider {
     async fn upsert_task_json(&self, user_id: &str, json: &str) -> anyhow::Result<()> {
         let v: serde_json::Value = serde_json::from_str(json)?;
         let next_ver = bump_version_sqlite(&self.pool).await?;
+        let updated_at = v["updated_at"].as_i64().unwrap_or(0);
         sqlx::query(
             r#"INSERT INTO tasks (
-                user_id, id, title, description, status, body, created_at, updated_at, completed_at,
-                ddl, ddl_type, planned_at, role_id, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+                user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
+                ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
                 tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
                 version, deleted_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id, id) DO UPDATE SET
-                title=excluded.title, description=excluded.description, status=excluded.status, body=excluded.body,
+                title=excluded.title, title_customized=excluded.title_customized, description=excluded.description, status=excluded.status, body=excluded.body,
                 created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
                 ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
-                role_id=excluded.role_id, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
+                role_id=excluded.role_id, role_ids=excluded.role_ids, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
                 priority=excluded.priority, promoted=excluded.promoted, phase=excluded.phase, kanban_column=excluded.kanban_column,
                 tags=excluded.tags, subtask_ids=excluded.subtask_ids, resources=excluded.resources,
                 reminders=excluded.reminders, submissions=excluded.submissions, postponements=excluded.postponements,
@@ -633,16 +681,18 @@ impl DatabaseProvider for SqliteProvider {
         .bind(user_id)
         .bind(v["id"].as_str().unwrap_or(""))
         .bind(v["title"].as_str().unwrap_or(""))
+        .bind(v["title_customized"].as_i64().unwrap_or(0))
         .bind(v["description"].as_str())
         .bind(v["status"].as_str().unwrap_or("inbox"))
         .bind(v["body"].as_str().unwrap_or(""))
         .bind(v["created_at"].as_i64().unwrap_or(0))
-        .bind(v["updated_at"].as_i64().unwrap_or(0))
+        .bind(updated_at)
         .bind(v["completed_at"].as_i64())
         .bind(v["ddl"].as_i64())
         .bind(v["ddl_type"].as_str())
         .bind(v["planned_at"].as_i64())
         .bind(v["role_id"].as_str())
+        .bind(v["role_ids"].as_str())
         .bind(v["parent_id"].as_str())
         .bind(v["source_stream_id"].as_str())
         .bind(v["priority"].as_f64())
@@ -742,6 +792,30 @@ impl DatabaseProvider for SqliteProvider {
             ORDER BY date_key DESC, timestamp DESC"#,
         )
         .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    }
+
+    async fn search_stream_json(&self, user_id: &str, q: &str, limit: i64) -> anyhow::Result<Vec<String>> {
+        let needle = q.trim();
+        if needle.is_empty() {
+            return Ok(vec![]);
+        }
+        let lim = limit.clamp(1, 500);
+        let rows: Vec<(String,)> = sqlx::query_as(
+            r#"SELECT json_object(
+                'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
+                'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
+                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'updated_at', COALESCE(updated_at, timestamp)
+            ) FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL
+            AND instr(lower(content), lower(?)) > 0
+            ORDER BY timestamp DESC LIMIT ?"#,
+        )
+        .bind(user_id)
+        .bind(needle)
+        .bind(lim)
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.into_iter().map(|r| r.0).collect())
@@ -1046,10 +1120,10 @@ impl DatabaseProvider for SqliteProvider {
         let task_rows: Vec<(String, String, i64, i64, Option<String>)> = sqlx::query_as(
             r#"SELECT id,
                 json_object(
-                    'id', id, 'title', title, 'description', description, 'status', status, 'body', body,
+                    'id', id, 'title', title, 'title_customized', title_customized, 'description', description, 'status', status, 'body', body,
                     'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
                     'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
-                    'role_id', role_id, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                    'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                     'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
                     'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                     'reminders', reminders, 'submissions', submissions, 'postponements', postponements,

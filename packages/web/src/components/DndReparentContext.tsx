@@ -10,6 +10,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import type { Task } from '@my-little-todo/core';
+import { displayTaskTitle } from '@my-little-todo/core';
 import { motion } from 'framer-motion';
 import { Check, GripVertical } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
@@ -97,7 +98,7 @@ function DragPreview({ task }: { task: Task }) {
             textDecoration: done ? 'line-through' : 'none',
           }}
         >
-          {task.title}
+          {displayTaskTitle(task)}
         </span>
       </div>
     </motion.div>

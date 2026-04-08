@@ -29,7 +29,7 @@ export class ApiServerSyncTarget implements SyncTarget {
 
   constructor(opts: ApiSyncTargetOpts) {
     this.id = opts.id;
-    this.baseUrl = opts.baseUrl;
+    this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.displayName = opts.displayName || `API Server (${opts.baseUrl || 'local'})`;
     this.staticToken = opts.token;
     this.authMode = opts.authMode ?? (opts.token ? 'token' : 'credentials');
@@ -53,8 +53,10 @@ export class ApiServerSyncTarget implements SyncTarget {
   }
 
   private async login(): Promise<string | null> {
+    const url = `${this.baseUrl}/api/auth/login`;
     try {
-      const res = await fetch(`${this.baseUrl}/api/auth/login`, {
+      console.info(`[Sync] Logging in to ${this.baseUrl} as "${this.username}"...`);
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: this.username, password: this.password }),
@@ -66,12 +68,13 @@ export class ApiServerSyncTarget implements SyncTarget {
       }
       const data = await res.json();
       this.cachedJwt = data.token;
-      // JWT expires in ~7 days; refresh 1 hour early
       this.jwtExpiresAt = Date.now() + 6 * 24 * 3600 * 1000;
+      console.info('[Sync] Login successful, JWT cached');
       return data.token as string;
     } catch (err) {
       this.cachedJwt = null;
       this.jwtExpiresAt = 0;
+      console.error(`[Sync] Login failed for ${url}:`, err);
       throw err;
     }
   }
@@ -114,14 +117,25 @@ export class ApiServerSyncTarget implements SyncTarget {
     if (!res.ok) throw new Error(`Pull failed: HTTP ${res.status}`);
     const data = await res.json();
 
-    const changes: ChangeRecord[] = (data.changes || []).map((c: Record<string, unknown>) => ({
-      table: c.table as ChangeRecord['table'],
-      key: c.key as string,
-      data: (c.data as string) ?? null,
-      version: c.version as number,
-      updatedAt: c.updated_at as string,
-      deletedAt: (c.deleted_at as string) ?? null,
-    }));
+    const changes: ChangeRecord[] = (data.changes || []).map((c: Record<string, unknown>) => {
+      const rawUpdatedAt = c.updated_at;
+      let updatedAt: string;
+      if (typeof rawUpdatedAt === 'number') {
+        updatedAt = new Date(rawUpdatedAt).toISOString();
+      } else if (typeof rawUpdatedAt === 'string' && /^\d+$/.test(rawUpdatedAt)) {
+        updatedAt = new Date(Number(rawUpdatedAt)).toISOString();
+      } else {
+        updatedAt = String(rawUpdatedAt ?? new Date().toISOString());
+      }
+      return {
+        table: c.table as ChangeRecord['table'],
+        key: c.key as string,
+        data: (c.data as string) ?? null,
+        version: c.version as number,
+        updatedAt,
+        deletedAt: (c.deleted_at as string) ?? null,
+      };
+    });
 
     return {
       changes,

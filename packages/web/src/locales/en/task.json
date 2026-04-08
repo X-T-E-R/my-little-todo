@@ -1,1 +1,23 @@
-{}
+{
+  "Inbox": "Inbox",
+  "Active": "Active",
+  "Do Today": "Do today",
+  "Completed": "Completed",
+  "Archived": "Archived",
+  "phase_understood": "Understood",
+  "phase_exploring": "Exploring",
+  "phase_working": "Working",
+  "phase_core_done": "Core done",
+  "phase_wrapping_up": "Wrapping up",
+  "Do it now": "Do it now",
+  "Boost priority": "Boost priority",
+  "Saving...": "Saving...",
+  "Saved": "Saved",
+  "Save": "Save",
+  "Expand panel": "Widen panel",
+  "Fullscreen editor": "Fullscreen editor",
+  "Parent task": "Parent task",
+  "Open parent": "Open parent",
+  "Task title": "Task title",
+  "Edit title": "Edit title"
+}

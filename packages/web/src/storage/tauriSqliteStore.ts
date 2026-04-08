@@ -1,11 +1,11 @@
 import {
+  type StreamEntryDbRow,
+  type TaskDbRow,
   formatDateKey,
   streamEntryFromDbRow,
   streamEntryToDbRow,
   taskFromDbRow,
   taskToDbRow,
-  type StreamEntryDbRow,
-  type TaskDbRow,
 } from '@my-little-todo/core';
 import type { StreamEntry, Task } from '@my-little-todo/core';
 import { getSyncEngine } from '../sync/syncEngine';
@@ -40,9 +40,7 @@ async function ensureSchema(db: Database): Promise<void> {
     await db.execute(sql);
   }
 
-  await db.execute(
-    'INSERT OR IGNORE INTO version_seq (id, current_version) VALUES (1, 0)',
-  );
+  await db.execute('INSERT OR IGNORE INTO version_seq (id, current_version) VALUES (1, 0)');
 
   const rows = await db.select<{ version: number }[]>(
     'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
@@ -63,10 +61,39 @@ async function ensureSchema(db: Database): Promise<void> {
       } catch {
         /* column may already exist */
       }
-      await db.execute('INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES ($1, $2)', [
-        3,
-        Date.now(),
-      ]);
+      await db.execute(
+        'INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES ($1, $2)',
+        [3, Date.now()],
+      );
+    }
+    const verAfter = (
+      await db.select<{ version: number }[]>('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1')
+    )[0]?.version ?? 0;
+    if (verAfter < 4) {
+      try {
+        await db.execute('ALTER TABLE tasks ADD COLUMN role_ids TEXT');
+      } catch {
+        /* column may already exist */
+      }
+      await db.execute(
+        'INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES ($1, $2)',
+        [4, Date.now()],
+      );
+    }
+    const verAfter4 = (
+      await db.select<{ version: number }[]>('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1')
+    )[0]?.version ?? 0;
+    if (verAfter4 < 5) {
+      try {
+        await db.execute('ALTER TABLE tasks ADD COLUMN title_customized INTEGER NOT NULL DEFAULT 0');
+        await db.execute(`UPDATE tasks SET title = '', title_customized = 0`);
+      } catch {
+        /* column may already exist */
+      }
+      await db.execute(
+        'INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES ($1, $2)',
+        [SCHEMA_VERSION, Date.now()],
+      );
     }
   }
 }
@@ -84,6 +111,7 @@ function rowToTaskDbRow(r: Record<string, unknown>): TaskDbRow {
   return {
     id: String(r.id),
     title: String(r.title),
+    title_customized: r.title_customized != null ? Number(r.title_customized) : 0,
     description: r.description != null ? String(r.description) : null,
     status: String(r.status),
     body: String(r.body),
@@ -94,6 +122,7 @@ function rowToTaskDbRow(r: Record<string, unknown>): TaskDbRow {
     ddl_type: r.ddl_type != null ? String(r.ddl_type) : null,
     planned_at: r.planned_at != null ? Number(r.planned_at) : null,
     role_id: r.role_id != null ? String(r.role_id) : null,
+    role_ids: r.role_ids != null ? String(r.role_ids) : null,
     parent_id: r.parent_id != null ? String(r.parent_id) : null,
     source_stream_id: r.source_stream_id != null ? String(r.source_stream_id) : null,
     priority: r.priority != null ? Number(r.priority) : null,
@@ -159,16 +188,16 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const row = taskToDbRow(t, v, null);
       await db.execute(
         `INSERT INTO tasks (
-          id, title, description, status, body, created_at, updated_at, completed_at,
-          ddl, ddl_type, planned_at, role_id, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+          id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
+          ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
           tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
           version, deleted_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
         ON CONFLICT(id) DO UPDATE SET
-          title=excluded.title, description=excluded.description, status=excluded.status, body=excluded.body,
+          title=excluded.title, title_customized=excluded.title_customized, description=excluded.description, status=excluded.status, body=excluded.body,
           created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
           ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
-          role_id=excluded.role_id, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
+          role_id=excluded.role_id, role_ids=excluded.role_ids, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
           priority=excluded.priority, promoted=excluded.promoted, phase=excluded.phase, kanban_column=excluded.kanban_column,
           tags=excluded.tags, subtask_ids=excluded.subtask_ids, resources=excluded.resources,
           reminders=excluded.reminders, submissions=excluded.submissions, postponements=excluded.postponements,
@@ -177,6 +206,7 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
         [
           row.id,
           row.title,
+          row.title_customized,
           row.description,
           row.status,
           row.body,
@@ -187,6 +217,7 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
           row.ddl_type,
           row.planned_at,
           row.role_id,
+          row.role_ids,
           row.parent_id,
           row.source_stream_id,
           row.priority,
@@ -242,6 +273,17 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
         'SELECT DISTINCT date_key FROM stream_entries WHERE deleted_at IS NULL ORDER BY date_key DESC',
       );
       return rows.map((r) => r.date_key);
+    },
+
+    async searchStreamEntries(query: string, limit = 200): Promise<StreamEntry[]> {
+      const needle = query.trim();
+      if (!needle) return [];
+      const lim = Math.min(Math.max(1, limit), 500);
+      const rows = await db.select<Record<string, unknown>[]>(
+        'SELECT * FROM stream_entries WHERE deleted_at IS NULL AND instr(lower(content), lower($1)) > 0 ORDER BY timestamp DESC LIMIT $2',
+        [needle, lim],
+      );
+      return rows.map((r) => streamEntryFromDbRow(rowToStreamDbRow(r)));
     },
 
     async putStreamEntry(entry: StreamEntry): Promise<void> {
@@ -431,7 +473,16 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
         out.push({
           table: 'settings',
           key,
-          data: deletedAt != null ? null : JSON.stringify({ key, value: String(r.value), updated_at: updatedAt, version, deleted_at: deletedAt }),
+          data:
+            deletedAt != null
+              ? null
+              : JSON.stringify({
+                  key,
+                  value: String(r.value),
+                  updated_at: updatedAt,
+                  version,
+                  deleted_at: deletedAt,
+                }),
           version,
           updatedAt,
           deletedAt,

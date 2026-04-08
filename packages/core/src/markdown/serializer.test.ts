@@ -131,6 +131,18 @@ describe('serializeTaskFile', () => {
     expect(result).toContain('parent: t-0');
   });
 
+  it('serializes multiple roles as roles array in front matter', () => {
+    const task = makeTask({
+      roleId: 'a',
+      roleIds: ['a', 'b', 'c'],
+    });
+    const result = serializeTaskFile(task);
+    expect(result).toContain('roles:');
+    expect(result).toContain('"a"');
+    expect(result).toContain('"b"');
+    expect(result).toContain('"c"');
+  });
+
   it('omits optional fields when absent', () => {
     const result = serializeTaskFile(makeTask());
     expect(result).not.toContain('ddl:');

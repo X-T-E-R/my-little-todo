@@ -137,7 +137,7 @@ export function SyncConflictDialog() {
                     </span>
                     <br />
                     <span className="text-[var(--color-text-secondary)] break-all">
-                      {formatPreview(c.local.content)}
+                      {formatPreview(c.local.data)}
                     </span>
                   </button>
                   <button
@@ -160,7 +160,7 @@ export function SyncConflictDialog() {
                     </span>
                     <br />
                     <span className="text-[var(--color-text-secondary)] break-all">
-                      {formatPreview(c.remote.content)}
+                      {formatPreview(c.remote.data)}
                     </span>
                   </button>
                 </div>

@@ -1,6 +1,6 @@
 import i18n from '../locales';
 
-export type ShortcutScope = 'editor' | 'global';
+export type ShortcutScope = 'editor' | 'global' | 'plugin';
 
 export interface ShortcutBinding {
   id: string;
@@ -167,6 +167,15 @@ export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
     label: i18n.t('shortcuts.Heading 4', { ns: 'common' }),
     keys: 'Ctrl+4',
     scope: 'editor',
+  },
+
+  // Plugin shortcuts
+  {
+    id: 'plugin.brainDump',
+    action: 'plugin.brainDump',
+    label: i18n.t('shortcuts.Brain Dump', { ns: 'common' }),
+    keys: 'Ctrl+Shift+D',
+    scope: 'plugin',
   },
 ];
 

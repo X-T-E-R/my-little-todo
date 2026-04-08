@@ -20,18 +20,19 @@ async fn upsert_task_json_tx(
 ) -> anyhow::Result<()> {
     let v: serde_json::Value = serde_json::from_str(json)?;
     let next_ver = bump_version_pg(&mut **tx).await?;
+    let updated_at = v["updated_at"].as_i64().unwrap_or(0);
     sqlx::query(
         r#"INSERT INTO tasks (
-                user_id, id, title, description, status, body, created_at, updated_at, completed_at,
-                ddl, ddl_type, planned_at, role_id, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+                user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
+                ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
                 tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
                 version, deleted_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
             ON CONFLICT(user_id, id) DO UPDATE SET
-                title=EXCLUDED.title, description=EXCLUDED.description, status=EXCLUDED.status, body=EXCLUDED.body,
+                title=EXCLUDED.title, title_customized=EXCLUDED.title_customized, description=EXCLUDED.description, status=EXCLUDED.status, body=EXCLUDED.body,
                 created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at, completed_at=EXCLUDED.completed_at,
                 ddl=EXCLUDED.ddl, ddl_type=EXCLUDED.ddl_type, planned_at=EXCLUDED.planned_at,
-                role_id=EXCLUDED.role_id, parent_id=EXCLUDED.parent_id, source_stream_id=EXCLUDED.source_stream_id,
+                role_id=EXCLUDED.role_id, role_ids=EXCLUDED.role_ids, parent_id=EXCLUDED.parent_id, source_stream_id=EXCLUDED.source_stream_id,
                 priority=EXCLUDED.priority, promoted=EXCLUDED.promoted, phase=EXCLUDED.phase, kanban_column=EXCLUDED.kanban_column,
                 tags=EXCLUDED.tags, subtask_ids=EXCLUDED.subtask_ids, resources=EXCLUDED.resources,
                 reminders=EXCLUDED.reminders, submissions=EXCLUDED.submissions, postponements=EXCLUDED.postponements,
@@ -41,16 +42,18 @@ async fn upsert_task_json_tx(
     .bind(user_id)
     .bind(v["id"].as_str().unwrap_or(""))
     .bind(v["title"].as_str().unwrap_or(""))
+    .bind(v["title_customized"].as_i64().unwrap_or(0))
     .bind(v["description"].as_str())
     .bind(v["status"].as_str().unwrap_or("inbox"))
     .bind(v["body"].as_str().unwrap_or(""))
     .bind(v["created_at"].as_i64().unwrap_or(0))
-    .bind(v["updated_at"].as_i64().unwrap_or(0))
+    .bind(updated_at)
     .bind(v["completed_at"].as_i64())
     .bind(v["ddl"].as_i64())
     .bind(v["ddl_type"].as_str())
     .bind(v["planned_at"].as_i64())
     .bind(v["role_id"].as_str())
+    .bind(v["role_ids"].as_str())
     .bind(v["parent_id"].as_str())
     .bind(v["source_stream_id"].as_str())
     .bind(v["priority"].as_f64())
@@ -202,8 +205,8 @@ pub struct PostgresProvider {
     pool: PgPool,
 }
 
-/// Schema migrations: 1=initial, 2=blobs, 3=sync columns+version_seq, 4=tasks+stream_entries, 5=stream updated_at
-const CURRENT_SCHEMA_VERSION: i64 = 5;
+/// Schema migrations: 1=initial, 2=blobs, 3=sync columns+version_seq, 4=tasks+stream_entries, 5=stream updated_at, 6=align, 7=tasks.role_ids
+const CURRENT_SCHEMA_VERSION: i64 = 8;
 
 impl PostgresProvider {
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
@@ -434,6 +437,55 @@ impl PostgresProvider {
                 .await?;
         }
 
+        if current_version < 6 {
+            sqlx::query("INSERT INTO schema_version (version) VALUES (6) ON CONFLICT DO NOTHING")
+                .execute(&pool)
+                .await?;
+        }
+
+        if current_version < 7 {
+            let has_role_ids: bool = sqlx::query_as::<_, (i64,)>(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'tasks' AND column_name = 'role_ids'",
+            )
+            .fetch_one(&pool)
+            .await
+            .map(|r| r.0 > 0)
+            .unwrap_or(false);
+
+            if !has_role_ids {
+                sqlx::query("ALTER TABLE tasks ADD COLUMN role_ids TEXT")
+                    .execute(&pool)
+                    .await?;
+            }
+
+            sqlx::query("INSERT INTO schema_version (version) VALUES (7) ON CONFLICT DO NOTHING")
+                .execute(&pool)
+                .await?;
+        }
+
+        if current_version < 8 {
+            let has_title_customized: bool = sqlx::query_as::<_, (i64,)>(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'tasks' AND column_name = 'title_customized'",
+            )
+            .fetch_one(&pool)
+            .await
+            .map(|r| r.0 > 0)
+            .unwrap_or(false);
+
+            if !has_title_customized {
+                sqlx::query("ALTER TABLE tasks ADD COLUMN title_customized BIGINT NOT NULL DEFAULT 0")
+                    .execute(&pool)
+                    .await?;
+                sqlx::query("UPDATE tasks SET title = '', title_customized = 0")
+                    .execute(&pool)
+                    .await?;
+            }
+
+            sqlx::query("INSERT INTO schema_version (version) VALUES (8) ON CONFLICT DO NOTHING")
+                .execute(&pool)
+                .await?;
+        }
+
         let _ = CURRENT_SCHEMA_VERSION;
         Ok(Self { pool })
     }
@@ -444,10 +496,10 @@ impl DatabaseProvider for PostgresProvider {
     async fn list_tasks_json(&self, user_id: &str) -> anyhow::Result<Vec<String>> {
         let rows: Vec<(String,)> = sqlx::query_as(
             r#"SELECT json_build_object(
-                'id', id, 'title', title, 'description', description, 'status', status, 'body', body,
+                'id', id, 'title', title, 'title_customized', title_customized, 'description', description, 'status', status, 'body', body,
                 'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
                 'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
-                'role_id', role_id, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                 'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
                 'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                 'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
@@ -464,10 +516,10 @@ impl DatabaseProvider for PostgresProvider {
     async fn get_task_json(&self, user_id: &str, id: &str) -> anyhow::Result<Option<String>> {
         let row: Option<(String,)> = sqlx::query_as(
             r#"SELECT json_build_object(
-                'id', id, 'title', title, 'description', description, 'status', status, 'body', body,
+                'id', id, 'title', title, 'title_customized', title_customized, 'description', description, 'status', status, 'body', body,
                 'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
                 'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
-                'role_id', role_id, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                 'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
                 'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                 'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
@@ -485,18 +537,19 @@ impl DatabaseProvider for PostgresProvider {
     async fn upsert_task_json(&self, user_id: &str, json: &str) -> anyhow::Result<()> {
         let v: serde_json::Value = serde_json::from_str(json)?;
         let next_ver = bump_version_pg(&self.pool).await?;
+        let updated_at = v["updated_at"].as_i64().unwrap_or(0);
         sqlx::query(
             r#"INSERT INTO tasks (
-                user_id, id, title, description, status, body, created_at, updated_at, completed_at,
-                ddl, ddl_type, planned_at, role_id, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+                user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
+                ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
                 tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
                 version, deleted_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
             ON CONFLICT(user_id, id) DO UPDATE SET
-                title=EXCLUDED.title, description=EXCLUDED.description, status=EXCLUDED.status, body=EXCLUDED.body,
+                title=EXCLUDED.title, title_customized=EXCLUDED.title_customized, description=EXCLUDED.description, status=EXCLUDED.status, body=EXCLUDED.body,
                 created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at, completed_at=EXCLUDED.completed_at,
                 ddl=EXCLUDED.ddl, ddl_type=EXCLUDED.ddl_type, planned_at=EXCLUDED.planned_at,
-                role_id=EXCLUDED.role_id, parent_id=EXCLUDED.parent_id, source_stream_id=EXCLUDED.source_stream_id,
+                role_id=EXCLUDED.role_id, role_ids=EXCLUDED.role_ids, parent_id=EXCLUDED.parent_id, source_stream_id=EXCLUDED.source_stream_id,
                 priority=EXCLUDED.priority, promoted=EXCLUDED.promoted, phase=EXCLUDED.phase, kanban_column=EXCLUDED.kanban_column,
                 tags=EXCLUDED.tags, subtask_ids=EXCLUDED.subtask_ids, resources=EXCLUDED.resources,
                 reminders=EXCLUDED.reminders, submissions=EXCLUDED.submissions, postponements=EXCLUDED.postponements,
@@ -506,16 +559,18 @@ impl DatabaseProvider for PostgresProvider {
         .bind(user_id)
         .bind(v["id"].as_str().unwrap_or(""))
         .bind(v["title"].as_str().unwrap_or(""))
+        .bind(v["title_customized"].as_i64().unwrap_or(0))
         .bind(v["description"].as_str())
         .bind(v["status"].as_str().unwrap_or("inbox"))
         .bind(v["body"].as_str().unwrap_or(""))
         .bind(v["created_at"].as_i64().unwrap_or(0))
-        .bind(v["updated_at"].as_i64().unwrap_or(0))
+        .bind(updated_at)
         .bind(v["completed_at"].as_i64())
         .bind(v["ddl"].as_i64())
         .bind(v["ddl_type"].as_str())
         .bind(v["planned_at"].as_i64())
         .bind(v["role_id"].as_str())
+        .bind(v["role_ids"].as_str())
         .bind(v["parent_id"].as_str())
         .bind(v["source_stream_id"].as_str())
         .bind(v["priority"].as_f64())
@@ -611,6 +666,31 @@ impl DatabaseProvider for PostgresProvider {
             ORDER BY date_key DESC, "timestamp" DESC"#,
         )
         .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|r| r.0).collect())
+    }
+
+    async fn search_stream_json(&self, user_id: &str, q: &str, limit: i64) -> anyhow::Result<Vec<String>> {
+        let needle = q.trim();
+        if needle.is_empty() {
+            return Ok(vec![]);
+        }
+        let lim = limit.clamp(1, 500);
+        let rows: Vec<(String,)> = sqlx::query_as(
+            r#"SELECT json_build_object(
+                'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', "timestamp",
+                'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
+                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'updated_at', COALESCE(updated_at, "timestamp")
+            )::text FROM stream_entries WHERE user_id = $1 AND deleted_at IS NULL
+            AND position(lower($2) in lower(content)) > 0
+            ORDER BY "timestamp" DESC
+            LIMIT $3"#,
+        )
+        .bind(user_id)
+        .bind(needle)
+        .bind(lim)
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.into_iter().map(|r| r.0).collect())
@@ -907,10 +987,10 @@ impl DatabaseProvider for PostgresProvider {
         let task_rows: Vec<(String, String, i64, i64, Option<String>)> = sqlx::query_as(
             r#"SELECT id,
                 json_build_object(
-                    'id', id, 'title', title, 'description', description, 'status', status, 'body', body,
+                    'id', id, 'title', title, 'title_customized', title_customized, 'description', description, 'status', status, 'body', body,
                     'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
                     'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
-                    'role_id', role_id, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                    'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                     'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
                     'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                     'reminders', reminders, 'submissions', submissions, 'postponements', postponements,

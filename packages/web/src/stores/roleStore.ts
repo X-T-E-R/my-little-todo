@@ -1,4 +1,4 @@
-import type { Role } from '@my-little-todo/core';
+import { type Role, taskRoleIds } from '@my-little-todo/core';
 import { create } from 'zustand';
 import i18n from '../locales';
 import { generateRoleId, loadRolesData, saveRoles } from '../storage/roleRepo';
@@ -123,11 +123,13 @@ export const useRoleStore = create<RoleState>((set, get) => ({
 
 export const NO_ROLE_FILTER = '__none__';
 
-export function filterByRole<T extends { roleId?: string }>(
+export function filterByRole<T extends { roleId?: string; roleIds?: string[] }>(
   items: T[],
   roleId: string | null,
 ): T[] {
   if (!roleId) return items;
-  if (roleId === NO_ROLE_FILTER) return items.filter((item) => !item.roleId);
-  return items.filter((item) => item.roleId === roleId);
+  if (roleId === NO_ROLE_FILTER) {
+    return items.filter((item) => taskRoleIds(item).length === 0);
+  }
+  return items.filter((item) => taskRoleIds(item).includes(roleId));
 }

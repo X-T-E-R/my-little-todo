@@ -1,5 +1,5 @@
 import type { Task } from '@my-little-todo/core';
-import { daysUntil, isOverdue } from '@my-little-todo/core';
+import { daysUntil, displayTaskTitle, isOverdue, taskRoleIds, withTaskRoles } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertCircle,
@@ -11,6 +11,7 @@ import {
   LayoutGrid,
   List,
   ListPlus,
+  Maximize2,
   MoreHorizontal,
   X,
 } from 'lucide-react';
@@ -20,7 +21,7 @@ import { CalendarView } from '../components/CalendarView';
 import { DndReparentProvider, DndTaskWrapper } from '../components/DndReparentContext';
 import { KanbanBoard } from '../components/KanbanBoard';
 import { ParentTaskPicker } from '../components/ParentTaskPicker';
-import { RolePill } from '../components/RolePickerPopover';
+import { RolePillMulti } from '../components/RolePickerPopover';
 import { TaskContextMenu } from '../components/TaskContextMenu';
 import {
   filterByRole,
@@ -28,6 +29,7 @@ import {
   getCompletedTasks,
   getTasksWithDdl,
   getTasksWithoutDdl,
+  useNowOverrideStore,
   useRoleStore,
   useScheduleStore,
   useTaskStore,
@@ -152,7 +154,7 @@ function PostponeDialog({
         </div>
 
         <p className="text-xs mb-3" style={{ color: 'var(--color-text-tertiary)' }}>
-          {t('Task: {{title}}', { title: task.title })}
+          {t('Task: {{title}}', { title: displayTaskTitle(task) })}
         </p>
 
         {task.postponements.length > 0 && (
@@ -312,7 +314,7 @@ function SubmitDialog({
         </div>
 
         <p className="text-xs mb-1" style={{ color: 'var(--color-text-tertiary)' }}>
-          {t('Task: {{title}}', { title: task.title })}
+          {t('Task: {{title}}', { title: displayTaskTitle(task) })}
         </p>
         {task.ddl && (
           <p
@@ -447,7 +449,7 @@ function BoardSubtaskPreview({ task }: { task: Task }) {
                 textDecoration: done ? 'line-through' : 'none',
               }}
             >
-              {sub.title}
+              {displayTaskTitle(sub)}
             </span>
             {sub.ddl && !done && (
               <span
@@ -543,13 +545,13 @@ function TaskCard({
             className="text-lg font-semibold leading-tight"
             style={{ color: 'var(--color-text)' }}
           >
-            {task.title}
+            {displayTaskTitle(task)}
           </h3>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <RolePill
-              roleId={task.roleId}
-              onChangeRole={(newRoleId) => {
-                updateTask({ ...task, roleId: newRoleId });
+            <RolePillMulti
+              roleIds={taskRoleIds(task)}
+              onChangeRoleIds={(ids) => {
+                updateTask({ ...task, ...withTaskRoles(task, ids) });
               }}
             />
             {task.ddl && (
@@ -632,10 +634,10 @@ function TaskCard({
                 {urgentSubtasks.length === 1
                   ? overdueSubtasks.length > 0
                     ? t('Subtask "{{title}}" is overdue', {
-                        title: urgentSubtasks[0]?.title.slice(0, 15),
+                        title: displayTaskTitle(urgentSubtasks[0]!).slice(0, 15),
                       })
                     : t('Subtask "{{title}}" is due soon', {
-                        title: urgentSubtasks[0]?.title.slice(0, 15),
+                        title: displayTaskTitle(urgentSubtasks[0]!).slice(0, 15),
                       })
                   : overdueSubtasks.length > 0
                     ? t('{{count}} subtasks ({{overdueCount}} overdue)', {
@@ -714,6 +716,7 @@ export function BoardView() {
   const [showNoDdl, setShowNoDdl] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
+  const [kanbanFullscreen, setKanbanFullscreen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -726,6 +729,15 @@ export function BoardView() {
     load();
     loadSchedules();
   }, [load, loadSchedules]);
+
+  useEffect(() => {
+    if (!kanbanFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setKanbanFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [kanbanFullscreen]);
 
   const ddlTasks = getTasksWithDdl(filtered);
   const noDdlTasks = getTasksWithoutDdl(filtered);
@@ -871,10 +883,58 @@ export function BoardView() {
           </motion.div>
 
           {/* Kanban view */}
-          {viewMode === 'kanban' && (
+          {viewMode === 'kanban' && !kanbanFullscreen && (
             <section>
+              <div className="flex justify-end mb-2">
+                <button
+                  type="button"
+                  onClick={() => setKanbanFullscreen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--color-bg)]"
+                  style={{
+                    color: 'var(--color-text-secondary)',
+                    border: '1px solid var(--color-border)',
+                  }}
+                >
+                  <Maximize2 size={14} />
+                  {t('Fullscreen board')}
+                </button>
+              </div>
               <KanbanBoard tasks={filtered} />
             </section>
+          )}
+
+          {viewMode === 'kanban' && kanbanFullscreen && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.985 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 z-[200] flex flex-col"
+              style={{
+                background: 'var(--color-bg)',
+                paddingTop: 'env(safe-area-inset-top)',
+              }}
+            >
+              <div
+                className="flex shrink-0 items-center justify-between gap-3 px-4 py-2.5 border-b"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>
+                  {t('Kanban view')}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setKanbanFullscreen(false)}
+                  className="rounded-lg p-2 transition-colors hover:bg-[var(--color-surface)] shrink-0"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                  aria-label={t('Exit fullscreen')}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
+                <KanbanBoard tasks={filtered} />
+              </div>
+            </motion.div>
           )}
 
           {/* Calendar view */}
@@ -1037,7 +1097,7 @@ export function BoardView() {
                                       className="text-sm font-medium truncate"
                                       style={{ color: 'var(--color-text)' }}
                                     >
-                                      {task.title}
+                                      {displayTaskTitle(task)}
                                     </p>
                                     {task.parentId &&
                                       task.promoted &&
@@ -1048,17 +1108,17 @@ export function BoardView() {
                                             className="text-[10px] truncate mt-0.5"
                                             style={{ color: 'var(--color-text-tertiary)' }}
                                           >
-                                            ↳ {parent.title}
+                                            ↳ {displayTaskTitle(parent)}
                                           </p>
                                         ) : null;
                                       })()}
                                     <div className="mt-1 flex items-center gap-2">
-                                      <RolePill
-                                        roleId={task.roleId}
-                                        onChangeRole={(newRoleId) => {
+                                      <RolePillMulti
+                                        roleIds={taskRoleIds(task)}
+                                        onChangeRoleIds={(ids) => {
                                           useTaskStore
                                             .getState()
-                                            .updateTask({ ...task, roleId: newRoleId });
+                                            .updateTask({ ...task, ...withTaskRoles(task, ids) });
                                         }}
                                       />
                                       {(task.subtaskIds ?? []).length > 0 && (
@@ -1222,7 +1282,7 @@ export function BoardView() {
                                     'color-mix(in srgb, var(--color-text-tertiary) 50%, transparent)',
                                 }}
                               >
-                                {item.title}
+                                {displayTaskTitle(item)}
                               </p>
                               <div className="flex items-center gap-2 mt-0.5">
                                 {item.completedAt && (
@@ -1330,6 +1390,15 @@ export function BoardView() {
                 : undefined
             }
             onSetParent={() => setParentPickerTargetId(contextMenu.task.id)}
+            onDoItNow={() => useNowOverrideStore.getState().requestDoItNow(contextMenu.task.id)}
+            onBoostPriority={() => {
+              const tk = contextMenu.task;
+              updateTask({
+                ...tk,
+                priority: Math.min(10, (tk.priority ?? 5) + 1),
+                status: tk.status === 'inbox' || tk.status === 'active' ? 'today' : tk.status,
+              });
+            }}
           />
         )}
 

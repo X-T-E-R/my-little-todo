@@ -37,6 +37,8 @@ export interface DataStore {
   getRecentStream(days?: number): Promise<StreamEntry[]>;
   /** Distinct calendar day keys (YYYY-MM-DD), newest first. */
   listStreamDateKeys(): Promise<string[]>;
+  /** Case-insensitive substring search over stream entry bodies. */
+  searchStreamEntries(query: string, limit?: number): Promise<StreamEntry[]>;
   putStreamEntry(entry: StreamEntry): Promise<void>;
   deleteStreamEntry(id: string): Promise<void>;
 
@@ -63,8 +65,25 @@ export interface DataStore {
 
 let _store: DataStore | null = null;
 
+function pluginSettingKey(pluginId: string, key: string): string {
+  return `plugin:${pluginId}:${key}`;
+}
+
+/** Attach default plugin KV helpers when store omits them. */
+export function withPluginDataDefaults(store: DataStore): DataStore {
+  if (store.getPluginData && store.putPluginData && store.deletePluginData) return store;
+  return {
+    ...store,
+    getPluginData: async (pluginId, key) => store.getSetting(pluginSettingKey(pluginId, key)),
+    putPluginData: async (pluginId, key, value) =>
+      store.putSetting(pluginSettingKey(pluginId, key), value),
+    deletePluginData: async (pluginId, key) =>
+      store.deleteSetting(pluginSettingKey(pluginId, key)),
+  };
+}
+
 export function setDataStore(store: DataStore): void {
-  _store = store;
+  _store = withPluginDataDefaults(store);
 }
 
 export function getDataStore(): DataStore {

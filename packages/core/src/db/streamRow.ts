@@ -1,5 +1,5 @@
-import { formatDateKey } from '../utils/date.js';
 import type { Attachment, StreamEntry, StreamEntryType } from '../models/stream.js';
+import { formatDateKey } from '../utils/date.js';
 
 export interface StreamEntryDbRow {
   id: string;

@@ -1,5 +1,5 @@
 import type { Task, TaskStatus } from '@my-little-todo/core';
-import { taskId } from '@my-little-todo/core';
+import { taskId, taskRoleIds, withTaskRoles } from '@my-little-todo/core';
 import { getDataStore } from './dataStore';
 
 export async function loadAllTasks(): Promise<Task[]> {
@@ -24,14 +24,20 @@ export async function createTask(
     tags?: string[];
     sourceStreamId?: string;
     roleId?: string;
+    roleIds?: string[];
     body?: string;
     parentId?: string;
+    /** When set, overrides inference from non-empty `title`. */
+    titleCustomized?: boolean;
   },
 ): Promise<Task> {
   const now = new Date();
+  const trimmedTitle = title.trim();
+  const inferredCustom = trimmedTitle.length > 0;
   const task: Task = {
     id: taskId(),
-    title,
+    title: trimmedTitle,
+    titleCustomized: opts?.titleCustomized ?? inferredCustom,
     description: opts?.description,
     status: 'inbox',
     createdAt: now,
@@ -44,6 +50,7 @@ export async function createTask(
     parentId: opts?.parentId,
     sourceStreamId: opts?.sourceStreamId,
     roleId: opts?.roleId,
+    roleIds: opts?.roleIds,
     resources: [],
     reminders: [],
     submissions: [],
@@ -66,7 +73,7 @@ export async function addSubtask(parentId: string, title: string): Promise<Task 
 
   const child = await createTask(title, {
     parentId,
-    roleId: parent.roleId,
+    ...withTaskRoles(parent, taskRoleIds(parent)),
   });
 
   parent.subtaskIds.push(child.id);

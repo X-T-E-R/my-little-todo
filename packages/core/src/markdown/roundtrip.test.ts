@@ -109,6 +109,16 @@ describe('task roundtrip: serialize -> parse', () => {
     expect(parsed.resources[0].url).toBe(original.resources[0].url);
   });
 
+  it('preserves multiple roles', () => {
+    const original = makeFullTask();
+    original.roleId = 'a';
+    original.roleIds = ['a', 'b', 'c'];
+    const serialized = serializeTaskFile(original);
+    const parsed = parseTaskFile(serialized);
+    expect(parsed.roleId).toBe('a');
+    expect(parsed.roleIds).toEqual(['a', 'b', 'c']);
+  });
+
   it('handles minimal task roundtrip', () => {
     const minimal: Task = {
       id: 't-min',
