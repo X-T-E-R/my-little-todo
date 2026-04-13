@@ -58,4 +58,8 @@ export { useAuthStore, getAuthToken } from './authStore';
 export { useModuleStore } from '../modules/moduleStore';
 export { useWindowContextStore } from './windowContextStore';
 export { useThinkSessionStore } from './thinkSessionStore';
-export { getRecentStreamCandidates, useWorkThreadStore } from './workThreadStore';
+export {
+  getRecentStreamCandidates,
+  getRecommendedThread,
+  useWorkThreadStore,
+} from './workThreadStore';

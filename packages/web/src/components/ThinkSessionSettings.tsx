@@ -2,6 +2,7 @@ import type { ThinkSessionStartMode } from '@my-little-todo/core';
 import { NotebookPen } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getSetting, putSetting } from '../storage/settingsApi';
+import { WorkThreadSettingsSection } from './WorkThreadSettingsSection';
 
 export type TaskRefRenderMode = 'inline-chip' | 'mini-card' | 'highlight-only';
 export type ThinkSessionEditorDensity = 'balanced' | 'focused';
@@ -211,6 +212,8 @@ export function ThinkSessionSettings() {
           </div>
         </div>
       </section>
+
+      <WorkThreadSettingsSection />
     </div>
   );
 }

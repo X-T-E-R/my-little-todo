@@ -21,6 +21,7 @@ import {
   ensureFocusSessionHydrated,
   filterByRole,
   formatDdlLabel,
+  getRecommendedThread,
   getCurrentTimeContext,
   getTimeSlotSuggestion,
   isInScheduleBlock,
@@ -33,6 +34,7 @@ import {
   useRoleStore,
   useTaskStore,
   useTimeAwarenessStore,
+  useWorkThreadStore,
 } from '../stores';
 import type { EnergyLevel } from '../stores/execCoachStore';
 import { pickRecommendation } from '../stores/taskStore';
@@ -71,7 +73,7 @@ export function NowView({
   onNavigateToStream?: () => void;
   onBrainDump?: () => void;
   onOpenThinkSession?: () => void;
-  onOpenWorkThread?: () => void;
+  onOpenWorkThread?: (threadId?: string) => void;
 }) {
   const { t } = useTranslation('now');
   const { t: tCoach } = useTranslation('coach');
@@ -103,6 +105,9 @@ export function NowView({
     updateStatus,
     deleteTask,
   } = useTaskStore();
+  const loadThreads = useWorkThreadStore((s) => s.loadThreads);
+  const threadSchedulerPolicy = useWorkThreadStore((s) => s.schedulerPolicy);
+  const workThreads = useWorkThreadStore((s) => s.threads);
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const filtered = useMemo(() => filterByRole(tasks, currentRoleId), [tasks, currentRoleId]);
   const { recordEvent, load: loadBehavior } = useBehaviorStore();
@@ -134,7 +139,16 @@ export function NowView({
     loadBehavior();
     loadTimeAwareness();
     loadCoachActivity();
-  }, [load, loadBehavior, loadTimeAwareness, loadCoachActivity]);
+    void loadThreads();
+  }, [load, loadBehavior, loadTimeAwareness, loadCoachActivity, loadThreads]);
+
+  const threadRecommendation = useMemo(
+    () => getRecommendedThread(tasks),
+    [tasks, workThreads, threadSchedulerPolicy],
+  );
+
+  const primaryThreadRecommendation =
+    threadSchedulerPolicy === 'manual' ? null : threadRecommendation;
 
   useEffect(() => {
     if (!overrideTaskId || loading) return;
@@ -459,6 +473,169 @@ export function NowView({
               {t("I'm ready")}
             </motion.button>
           </motion.div>
+        </div>
+      </div>
+    );
+  }
+
+  if (primaryThreadRecommendation && onOpenWorkThread) {
+    const thread = primaryThreadRecommendation.thread;
+    const fallbackTask = currentTask;
+    return (
+      <div className="relative h-full overflow-y-auto px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto grid max-w-6xl gap-6 xl:grid-cols-[minmax(0,1.3fr)_340px]">
+          <section
+            className="overflow-hidden rounded-[var(--radius-panel)] border p-6 sm:p-8"
+            style={{
+              background: 'color-mix(in srgb, var(--color-surface) 96%, var(--color-bg))',
+              borderColor: 'var(--color-border)',
+            }}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className="rounded-full px-2.5 py-1 text-[11px] font-semibold"
+                style={{ background: 'var(--color-accent-soft)', color: 'var(--color-accent)' }}
+              >
+                {threadSchedulerPolicy === 'semi_auto'
+                  ? t('now_thread_mode_semi_auto')
+                  : t('now_thread_mode_coach')}
+              </span>
+              <span
+                className="rounded-full px-2.5 py-1 text-[11px]"
+                style={{ background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}
+              >
+                {t(`thread_status_${thread.status}`, { ns: 'think' })}
+              </span>
+              <span
+                className="rounded-full px-2.5 py-1 text-[11px]"
+                style={{ background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}
+              >
+                {thread.lane}
+              </span>
+            </div>
+
+            <h1
+              className="mt-5 text-[clamp(1.8rem,3vw,2.8rem)] font-black leading-[1.08] tracking-[-0.035em]"
+              style={{ color: 'var(--color-text)' }}
+            >
+              {thread.title}
+            </h1>
+
+            <p className="mt-3 max-w-[56ch] text-[15px] leading-7" style={{ color: 'var(--color-text-secondary)' }}>
+              {primaryThreadRecommendation.reason}
+            </p>
+
+            {thread.mission ? (
+              <p className="mt-4 max-w-[58ch] text-[14px] leading-7" style={{ color: 'var(--color-text-secondary)' }}>
+                {thread.mission}
+              </p>
+            ) : null}
+
+            <div className="mt-6 grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)' }}>
+                <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('thread_resume_summary_label', { ns: 'think' })}
+                </p>
+                <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
+                  {thread.resumeCard.summary || t('thread_resume_summary_empty', { ns: 'think' })}
+                </p>
+              </div>
+              <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)' }}>
+                <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('thread_resume_next_step_label', { ns: 'think' })}
+                </p>
+                <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
+                  {thread.resumeCard.nextStep || t('thread_resume_next_step_empty', { ns: 'think' })}
+                </p>
+              </div>
+              <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)' }}>
+                <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('thread_waiting_summary_label', { ns: 'think' })}
+                </p>
+                <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
+                  {thread.resumeCard.waitingSummary || t('thread_waiting_summary_empty', { ns: 'think' })}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => onOpenWorkThread(thread.id)}
+                className="min-h-11 flex-1 rounded-xl px-5 py-3.5 text-sm font-semibold text-white transition-colors"
+                style={{ background: 'var(--color-accent)' }}
+              >
+                {t('now_resume_thread')}
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenWorkThread()}
+                className="min-h-11 rounded-xl border px-4 py-3 text-sm font-medium transition-colors"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                {t('now_open_thread_board')}
+              </button>
+            </div>
+          </section>
+
+          <aside
+            className="overflow-hidden rounded-[var(--radius-panel)] border"
+            style={{
+              background: 'color-mix(in srgb, var(--color-surface) 95%, var(--color-bg))',
+              borderColor: 'var(--color-border)',
+            }}
+          >
+            <section className="px-4 py-4 sm:px-5 sm:py-5">
+              <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                {t('now_thread_sidecar_title')}
+              </p>
+              <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
+                {t('now_thread_sidecar_hint')}
+              </p>
+            </section>
+            {fallbackTask ? (
+              <section
+                className="border-t px-4 py-4 sm:px-5 sm:py-5"
+                style={{ borderColor: 'color-mix(in srgb, var(--color-border) 85%, transparent)' }}
+              >
+                <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('now_task_fallback_title')}
+                </p>
+                <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
+                  {displayTaskTitle(fallbackTask)}
+                </p>
+              </section>
+            ) : null}
+            <section
+              className="border-t px-4 py-4 sm:px-5 sm:py-5"
+              style={{ borderColor: 'color-mix(in srgb, var(--color-border) 85%, transparent)' }}
+            >
+              <div className="space-y-3">
+                {onOpenThinkSession && (
+                  <button
+                    type="button"
+                    onClick={onOpenThinkSession}
+                    className="flex w-full items-center justify-between text-left text-sm font-medium"
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    <span>{t('Think it through first')}</span>
+                    <NotebookPen size={15} />
+                  </button>
+                )}
+                {onNavigateToStream && (
+                  <button
+                    type="button"
+                    onClick={onNavigateToStream}
+                    className="flex w-full items-center justify-between text-left text-sm font-medium"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    <span>{t('Record an inspiration')}</span>
+                    <Wind size={15} />
+                  </button>
+                )}
+              </div>
+            </section>
+          </aside>
         </div>
       </div>
     );
@@ -990,11 +1167,13 @@ export function NowView({
                 {onOpenWorkThread && (
                   <button
                     type="button"
-                    onClick={onOpenWorkThread}
+                    onClick={() => onOpenWorkThread(threadRecommendation?.thread.id)}
                     className="flex w-full items-center justify-between py-3 text-left text-sm font-medium transition-colors"
                     style={{ color: 'var(--color-accent)' }}
                   >
-                    <span>{t('Open a thread')}</span>
+                    <span>
+                      {threadRecommendation ? t('now_continue_thread_entry') : t('Open a thread')}
+                    </span>
                     <NotebookPen size={15} />
                   </button>
                 )}

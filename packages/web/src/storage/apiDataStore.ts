@@ -18,6 +18,7 @@ import { getAuthToken } from '../stores/authStore';
 import type { AttachmentConfig, UploadResult } from './blobApi';
 import type { DataStore } from './dataStore';
 import { getPrimaryRoleId, hydrateTaskWithEntry } from './taskEntryBridge';
+import { deserializeWorkThread, deserializeWorkThreadEvent } from './workThreadStorage';
 
 const THINK_SESSIONS_KV = 'think-sessions:v1';
 const WORK_THREADS_KV = 'work-threads:v1';
@@ -371,11 +372,12 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
       try {
         const raw = await this.getSetting(WORK_THREADS_KV);
         if (!raw) return [];
-        const arr = JSON.parse(raw) as WorkThread[];
+        const arr = JSON.parse(raw) as unknown[];
         if (!Array.isArray(arr)) return [];
-        arr.sort((a, b) => b.updatedAt - a.updatedAt);
+        const normalized = arr.map((item) => deserializeWorkThread(item));
+        normalized.sort((a, b) => b.updatedAt - a.updatedAt);
         const lim = Math.min(Math.max(1, limit), 500);
-        return arr.slice(0, lim);
+        return normalized.slice(0, lim);
       } catch {
         return [];
       }
@@ -413,9 +415,10 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
       try {
         const raw = await this.getSetting(WORK_THREAD_EVENTS_KV);
         if (!raw) return [];
-        const arr = JSON.parse(raw) as WorkThreadEvent[];
+        const arr = JSON.parse(raw) as unknown[];
         if (!Array.isArray(arr)) return [];
         const filtered = arr
+          .map((event) => deserializeWorkThreadEvent(event))
           .filter((event) => event.threadId === threadId)
           .sort((a, b) => b.createdAt - a.createdAt);
         const lim = Math.min(Math.max(1, limit), 1000);

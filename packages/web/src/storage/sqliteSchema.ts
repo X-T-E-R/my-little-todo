@@ -3,7 +3,7 @@
  * Tasks and stream entries are first-class tables (not virtual files).
  */
 
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export const CREATE_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -98,11 +98,18 @@ export const CREATE_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS work_threads (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'active',
+    mission TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'ready',
+    lane TEXT NOT NULL DEFAULT 'general',
     role_id TEXT,
     doc_markdown TEXT NOT NULL DEFAULT '',
     context_items TEXT NOT NULL DEFAULT '[]',
     next_actions TEXT NOT NULL DEFAULT '[]',
+    resume_card TEXT NOT NULL DEFAULT '{}',
+    working_set TEXT NOT NULL DEFAULT '[]',
+    waiting_for TEXT NOT NULL DEFAULT '[]',
+    interrupts TEXT NOT NULL DEFAULT '[]',
+    scheduler_meta TEXT NOT NULL DEFAULT '{}',
     suggestions TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL

@@ -12,6 +12,7 @@
 - **角色驱动** — 生活就是一场巨大的角色扮演，快快进入你的状态
 - **DDL 驱动** — 截止日期分三级硬度（硬性/承诺/弹性），延期需要写理由
 - **专注此刻** — 打开应用只看到一件事 + 两个按钮（"开始做" / "不想做"）
+- **Work Thread 运行时** — 用可恢复的上下文工作区，把 mission、resume card、working set、waiting 条件和 Now 调度串起来
 - **学习而非惩罚** — 你的每一次拒绝、拖延、不按计划执行都是训练数据，不是错误
 - **稳定的本地优先核心** — 桌面端和 Android 使用本地 SQLite；正式稳定同步目标为 API 服务器和 WebDAV
 - **多平台** — Tauri 桌面端（Windows/macOS/Linux）、Android 应用和 Web 部署共享同一套核心 Todo 模型
@@ -38,7 +39,7 @@
 - S3 同步
 - 服务端备份恢复
 - 窗口上下文与桌面小组件
-- Think Session / Work Thread
+- Think Session / Work Thread 运行时
 - 第三方插件
 
 发布或升级前，请先阅读[发布检查清单](docs/release/release-checklist.zh-CN.md)。

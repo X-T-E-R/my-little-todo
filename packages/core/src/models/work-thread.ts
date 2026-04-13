@@ -1,4 +1,18 @@
-export type WorkThreadStatus = 'active' | 'paused' | 'done';
+export type WorkThreadStatus =
+  | 'running'
+  | 'ready'
+  | 'waiting'
+  | 'blocked'
+  | 'sleeping'
+  | 'done'
+  | 'archived';
+
+export type WorkThreadLane =
+  | 'general'
+  | 'execution'
+  | 'research'
+  | 'infrastructure'
+  | 'meta';
 
 export type WorkThreadContextKind = 'stream' | 'task' | 'link' | 'note';
 
@@ -18,6 +32,54 @@ export interface WorkThreadNextAction {
   source: 'user' | 'ai';
   linkedTaskId?: string;
   createdAt: number;
+}
+
+export interface WorkThreadResumeCard {
+  summary: string;
+  nextStep: string;
+  guardrails: string[];
+  waitingSummary?: string;
+  updatedAt: number;
+}
+
+export interface WorkThreadWorkingSetItem {
+  id: string;
+  contextItemId: string;
+  title: string;
+  summary?: string;
+  pinned?: boolean;
+  createdAt: number;
+}
+
+export type WorkThreadWaitingKind = 'person' | 'tool' | 'file' | 'time' | 'external';
+
+export interface WorkThreadWaitingCondition {
+  id: string;
+  kind: WorkThreadWaitingKind;
+  title: string;
+  detail?: string;
+  dueAt?: number;
+  satisfied: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type WorkThreadInterruptSource = 'stream' | 'task' | 'manual' | 'system';
+
+export interface WorkThreadInterrupt {
+  id: string;
+  source: WorkThreadInterruptSource;
+  title: string;
+  content?: string;
+  capturedAt: number;
+  resolved: boolean;
+}
+
+export interface WorkThreadSchedulerMeta {
+  lastActivatedAt?: number;
+  lastCheckpointAt?: number;
+  wakeReason?: string;
+  snoozedUntil?: number;
 }
 
 export type WorkThreadSuggestionKind =
@@ -45,7 +107,13 @@ export type WorkThreadEventType =
   | 'ai_applied'
   | 'task_created'
   | 'task_linked'
-  | 'status_changed';
+  | 'status_changed'
+  | 'resume_card_updated'
+  | 'working_set_updated'
+  | 'interrupt_captured'
+  | 'waiting_updated'
+  | 'thread_dispatched'
+  | 'thread_resumed';
 
 export interface WorkThreadEvent {
   id: string;
@@ -61,12 +129,21 @@ export interface WorkThreadEvent {
 export interface WorkThread {
   id: string;
   title: string;
+  mission: string;
   status: WorkThreadStatus;
+  lane: WorkThreadLane;
   roleId?: string;
   docMarkdown: string;
   contextItems: WorkThreadContextItem[];
   nextActions: WorkThreadNextAction[];
+  resumeCard: WorkThreadResumeCard;
+  workingSet: WorkThreadWorkingSetItem[];
+  waitingFor: WorkThreadWaitingCondition[];
+  interrupts: WorkThreadInterrupt[];
+  schedulerMeta: WorkThreadSchedulerMeta;
   suggestions?: WorkThreadSuggestion[];
   createdAt: number;
   updatedAt: number;
 }
+
+export type WorkThreadSchedulerPolicy = 'manual' | 'coach' | 'semi_auto';

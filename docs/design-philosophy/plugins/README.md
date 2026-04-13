@@ -11,6 +11,7 @@
 | [通用约定](./README.md#通用约定)（本节） | 所有模块共享的开关、设置键、侧栏约定 |
 | [MCP 集成](./mcp-integration.md) | 对外 API、权限、端点与用户控制 |
 | [核心功能模块](./core-feature-modules.md) | Kanban、时间胶囊、AI Coach、能量指示、Brain dump、高级筛选 |
+| [工作线程运行时](./work-thread-runtime.md) | Work Thread 2.0 的产品定位、状态机、调度器与 AI 边界 |
 | [窗口上下文](./window-context.md) | 前台窗口匹配与角色联动（桌面） |
 | [桌面小部件](./desktop-widget-design.md) | 小部件交互、视觉与性能铁律 |
 
@@ -55,6 +56,7 @@
 | `kanban` / `time-capsule` / `ai-coach` / `energy-indicator` / `brain-dump` / `advanced-filter` | [core-feature-modules.md](./core-feature-modules.md) |
 | `desktop-widget` | [desktop-widget-design.md](./desktop-widget-design.md) |
 | `window-context` | [window-context.md](./window-context.md) |
+| `think-session` / `work-thread` | [think-session.md](./think-session.md)、[work-thread-runtime.md](./work-thread-runtime.md) |
 
 ---
 

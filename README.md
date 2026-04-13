@@ -12,6 +12,7 @@ Traditional todo apps are "ledgers" that faithfully record your debts. My Little
 - **Role-Driven** — Life is one big RPG — switch roles, switch context
 - **DDL-Driven** — Deadlines have 3 hardness levels (hard / commitment / soft); delays require a reason
 - **Focus on Now** — Open the app and see only one thing + two buttons ("Start" / "Skip")
+- **Work Thread Runtime** — A resumable context workspace that keeps mission, resume card, working set, waiting conditions, and Now scheduling aligned
 - **Learn, Not Punish** — Every rejection, procrastination, and deviation is training data, not a mistake
 - **Stable Local-First Core** — Desktop and Android store data in local SQLite; stable sync targets are API server and WebDAV
 - **Multi-Platform** — Tauri desktop (Windows/macOS/Linux), Android app, and web deployment share the same core Todo model
@@ -38,7 +39,7 @@ Beta / limited scope:
 - S3 sync
 - Server-side backup and restore
 - Window context and desktop widget
-- Think session / work thread
+- Think session / work thread runtime
 - Third-party plugins
 
 Before publishing or upgrading, follow the [release checklist](docs/release/release-checklist.md).

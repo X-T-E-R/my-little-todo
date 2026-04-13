@@ -327,8 +327,12 @@ function openThinkSession(handleViewChange: (view: View) => void) {
   handleViewChange('stream');
 }
 
-function openWorkThread(handleViewChange: (view: View) => void) {
-  void useWorkThreadStore.getState().showThreadList();
+function openWorkThread(handleViewChange: (view: View) => void, threadId?: string) {
+  if (threadId) {
+    void useWorkThreadStore.getState().dispatchThread(threadId, 'now');
+  } else {
+    void useWorkThreadStore.getState().showThreadList();
+  }
   useThinkSessionStore.getState().setWorkspaceMode('thread');
   useThinkSessionStore.getState().setStreamMode('think');
   handleViewChange('stream');
@@ -377,7 +381,7 @@ function AppViewContent({
               thinkSessionEnabled ? () => openThinkSession(handleViewChange) : undefined
             }
             onOpenWorkThread={
-              thinkSessionEnabled ? () => openWorkThread(handleViewChange) : undefined
+              thinkSessionEnabled ? (threadId?: string) => openWorkThread(handleViewChange, threadId) : undefined
             }
           />
         )}

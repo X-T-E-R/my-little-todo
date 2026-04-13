@@ -24,6 +24,11 @@ import {
   normalizeTaskRoleIds,
   shouldProjectStreamRoleToTask,
 } from './taskEntryBridge';
+import {
+  deserializeWorkThread,
+  deserializeWorkThreadEvent,
+  serializeWorkThread,
+} from './workThreadStorage';
 
 type CapDB = {
   execute(statement: string, values?: unknown[]): Promise<{ changes?: { changes?: number } }>;
@@ -187,11 +192,18 @@ async function ensureSchema(db: CapDB): Promise<void> {
       await db.execute(`CREATE TABLE IF NOT EXISTS work_threads (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'active',
+        mission TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'ready',
+        lane TEXT NOT NULL DEFAULT 'general',
         role_id TEXT,
         doc_markdown TEXT NOT NULL DEFAULT '',
         context_items TEXT NOT NULL DEFAULT '[]',
         next_actions TEXT NOT NULL DEFAULT '[]',
+        resume_card TEXT NOT NULL DEFAULT '{}',
+        working_set TEXT NOT NULL DEFAULT '[]',
+        waiting_for TEXT NOT NULL DEFAULT '[]',
+        interrupts TEXT NOT NULL DEFAULT '[]',
+        scheduler_meta TEXT NOT NULL DEFAULT '{}',
         suggestions TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
@@ -220,6 +232,38 @@ async function ensureSchema(db: CapDB): Promise<void> {
         `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (11, ${Date.now()})`,
       );
     }
+    const rowsV11 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
+    const verBefore12 =
+      rowsV11.values?.[0]?.version != null ? Number(rowsV11.values[0].version) : 0;
+    if (verBefore12 < 12) {
+      const alterColumns = [
+        "ALTER TABLE work_threads ADD COLUMN mission TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE work_threads ADD COLUMN lane TEXT NOT NULL DEFAULT 'general'",
+        "ALTER TABLE work_threads ADD COLUMN resume_card TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE work_threads ADD COLUMN working_set TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE work_threads ADD COLUMN waiting_for TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE work_threads ADD COLUMN interrupts TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE work_threads ADD COLUMN scheduler_meta TEXT NOT NULL DEFAULT '{}'",
+      ];
+      for (const sql of alterColumns) {
+        try {
+          await db.execute(sql);
+        } catch {
+          /* column may already exist */
+        }
+      }
+      await db.execute(
+        "UPDATE work_threads SET mission = CASE WHEN trim(mission) = '' THEN title ELSE mission END",
+      );
+      await db.execute(
+        "UPDATE work_threads SET status = CASE WHEN status = 'active' THEN 'ready' WHEN status = 'paused' THEN 'sleeping' ELSE status END",
+      );
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (12, ${Date.now()})`,
+      );
+    }
   }
 }
 
@@ -244,48 +288,11 @@ function thinkSessionFromRow(r: Record<string, unknown>): ThinkSession {
 }
 
 function workThreadFromRow(r: Record<string, unknown>): WorkThread {
-  const parseValue = <T>(value: unknown, fallback: T): T => {
-    if (value == null || String(value).trim() === '') return fallback;
-    try {
-      return JSON.parse(String(value)) as T;
-    } catch {
-      return fallback;
-    }
-  };
-
-  return {
-    id: String(r.id),
-    title: String(r.title ?? ''),
-    status: (String(r.status) as WorkThread['status']) || 'active',
-    roleId: r.role_id != null ? String(r.role_id) : undefined,
-    docMarkdown: String(r.doc_markdown ?? ''),
-    contextItems: parseValue<WorkThread['contextItems']>(r.context_items, []),
-    nextActions: parseValue<WorkThread['nextActions']>(r.next_actions, []),
-    suggestions: parseValue<WorkThread['suggestions']>(r.suggestions, undefined),
-    createdAt: Number(r.created_at),
-    updatedAt: Number(r.updated_at),
-  };
+  return deserializeWorkThread(r);
 }
 
 function workThreadEventFromRow(r: Record<string, unknown>): WorkThreadEvent {
-  let payload: WorkThreadEvent['payload'];
-  if (r.payload != null && String(r.payload).trim() !== '') {
-    try {
-      payload = JSON.parse(String(r.payload)) as WorkThreadEvent['payload'];
-    } catch {
-      payload = undefined;
-    }
-  }
-  return {
-    id: String(r.id),
-    threadId: String(r.thread_id),
-    type: String(r.type) as WorkThreadEvent['type'],
-    actor: String(r.actor) as WorkThreadEvent['actor'],
-    title: String(r.title ?? ''),
-    detailMarkdown: r.detail_markdown != null ? String(r.detail_markdown) : undefined,
-    payload,
-    createdAt: Number(r.created_at),
-  };
+  return deserializeWorkThreadEvent(r);
 }
 
 async function bumpVersion(db: CapDB): Promise<number> {
@@ -817,30 +824,46 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
     },
 
     async saveWorkThread(thread: WorkThread): Promise<void> {
+      const row = serializeWorkThread(thread);
       await db.execute(
         `INSERT INTO work_threads (
-          id, title, status, role_id, doc_markdown, context_items, next_actions, suggestions, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, title, mission, status, lane, role_id, doc_markdown, context_items, next_actions,
+          resume_card, working_set, waiting_for, interrupts, scheduler_meta, suggestions, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title=excluded.title,
+          mission=excluded.mission,
           status=excluded.status,
+          lane=excluded.lane,
           role_id=excluded.role_id,
           doc_markdown=excluded.doc_markdown,
           context_items=excluded.context_items,
           next_actions=excluded.next_actions,
+          resume_card=excluded.resume_card,
+          working_set=excluded.working_set,
+          waiting_for=excluded.waiting_for,
+          interrupts=excluded.interrupts,
+          scheduler_meta=excluded.scheduler_meta,
           suggestions=excluded.suggestions,
           updated_at=excluded.updated_at`,
         [
-          thread.id,
-          thread.title,
-          thread.status,
-          thread.roleId ?? null,
-          thread.docMarkdown,
-          JSON.stringify(thread.contextItems),
-          JSON.stringify(thread.nextActions),
-          thread.suggestions != null ? JSON.stringify(thread.suggestions) : null,
-          thread.createdAt,
-          thread.updatedAt,
+          row.id,
+          row.title,
+          row.mission,
+          row.status,
+          row.lane,
+          row.role_id,
+          row.doc_markdown,
+          row.context_items,
+          row.next_actions,
+          row.resume_card,
+          row.working_set,
+          row.waiting_for,
+          row.interrupts,
+          row.scheduler_meta,
+          row.suggestions,
+          row.created_at,
+          row.updated_at,
         ],
       );
     },

@@ -81,7 +81,7 @@ export interface DataStore {
   listThinkSessions(limit?: number): Promise<ThinkSession[]>;
   deleteThinkSession(id: string): Promise<void>;
 
-  // Work threads (agent-like process workspace)
+  // Work threads (runtime workspace for resumable context)
 
   saveWorkThread(thread: WorkThread): Promise<void>;
   getWorkThread(id: string): Promise<WorkThread | null>;
