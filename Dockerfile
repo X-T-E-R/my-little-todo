@@ -5,6 +5,7 @@ RUN corepack enable && corepack prepare pnpm@10.32.1 --activate
 
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches patches
 COPY packages/core/package.json packages/core/
 COPY packages/web/package.json packages/web/
 
