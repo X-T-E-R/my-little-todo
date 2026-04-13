@@ -1,4 +1,5 @@
 pub mod admin;
+pub mod ai_proxy;
 pub mod auth;
 pub mod backup;
 pub mod blobs;

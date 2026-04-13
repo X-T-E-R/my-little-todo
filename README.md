@@ -13,9 +13,35 @@ Traditional todo apps are "ledgers" that faithfully record your debts. My Little
 - **DDL-Driven** — Deadlines have 3 hardness levels (hard / commitment / soft); delays require a reason
 - **Focus on Now** — Open the app and see only one thing + two buttons ("Start" / "Skip")
 - **Learn, Not Punish** — Every rejection, procrastination, and deviation is training data, not a mistake
-- **Local-First** — Desktop and mobile apps store data in local SQLite; optionally sync via API server, WebDAV, or S3
-- **Multi-Platform** — Tauri desktop (Windows/macOS/Linux), Android app, web PWA — all sharing the same UI
-- **Native AI Support** — Built-in AI magic button, native MCP support for agent integration
+- **Stable Local-First Core** — Desktop and Android store data in local SQLite; stable sync targets are API server and WebDAV
+- **Multi-Platform** — Tauri desktop (Windows/macOS/Linux), Android app, and web deployment share the same core Todo model
+- **Beta Extensions** — AI, S3, server-side backup/restore, window context, desktop widget, think/work thread, and plugins remain outside the stable SLA
+
+## Release Boundary
+
+Stable release scope:
+
+- Task CRUD
+- Stream entry CRUD and search
+- Authentication and multi-user isolation
+- Basic attachments
+- JSON import and export
+- Local SQLite
+- API sync
+- WebDAV sync
+- Upgrade migrations
+- Core settings
+
+Beta / limited scope:
+
+- AI assistant and agent flows
+- S3 sync
+- Server-side backup and restore
+- Window context and desktop widget
+- Think session / work thread
+- Third-party plugins
+
+Before publishing or upgrading, follow the [release checklist](docs/release/release-checklist.md).
 
 <!-- TODO: Add screenshots here -->
 
@@ -31,7 +57,9 @@ A local-first app that works out of the box — no server required.
 4. Optionally configure a sync method in Settings → Sync to sync across devices:
    - **API Server** — sync with a My Little Todo server (supports username/password or API token auth)
    - **WebDAV** — sync via any WebDAV-compatible server
-   - **S3** — sync to S3-compatible object storage (AWS/MinIO/R2)
+   - **S3 (Beta)** — kept as a limited path only; not part of the current stable SLA
+
+Before upgrading the desktop app, create a full JSON export from `Settings -> Data`.
 
 ### Docker Deploy — For Servers
 
@@ -64,6 +92,8 @@ docker compose up -d
 **First-time setup**: Visit `http://localhost:3001/admin` to create the first admin account. Once done, users can access the web app at `http://localhost:3001`. Admin tasks (user management, stats) are managed at the `/admin` page.
 
 Data is stored in `./data/` on the host — easy to backup and inspect.
+
+For release recovery expectations, backup guidance, and stable/Beta boundaries, see [docs/release/release-checklist.md](docs/release/release-checklist.md).
 
 #### Update to Latest Version
 
@@ -131,6 +161,7 @@ For standalone binary deployment without Docker, see [docs/deployment/binary.md]
 1. **Desktop / Android users**: Launch the app — the onboarding wizard will guide you through role setup and preferences. All data is stored locally.
 2. **Server (web) users**: Visit `http://your-host:3001/admin` to create the first admin account, then open `http://your-host:3001` to start using.
 3. Open the **Stream** view, type whatever's on your mind, and the system helps you organize it into tasks
+4. Before upgrades, migrations, or sync target changes, create a JSON backup from `Settings -> Data`.
 
 ## MCP Integration
 
@@ -160,14 +191,79 @@ Add to your MCP client configuration:
 | Tool | Description |
 |------|-------------|
 | `get_overview` | Dashboard: task counts, urgent DDLs, roles, schedule blocks, today's stream count |
-| `list_tasks` | List tasks (filter by status/role, includes role_name, excludes body) |
-| `get_task` | Get full task details (body, submissions, postponements) |
-| `create_task` | Create a task (title + optional DDL/role/tags/parent) |
-| `update_task` | Update task properties or status (complete/cancel/postpone with note) |
-| `delete_task` | Delete a task |
-| `add_stream` | Add a stream entry (idea/note/progress) |
-| `list_stream` | List recent stream entries |
+| `list_tasks` | List normalized task views filtered by status, `primary_role`, or `role_ids`; body is omitted from list output |
+| `get_task` | Get one normalized task view, including canonical body plus parent/subtask summaries |
+| `create_task` | Create a canonical task: a stream entry primary record plus a same-id task facet |
+| `update_task` | Update task fields; `body` writes through to `stream_entries.content`, `role_ids` is the authority |
+| `delete_task` | Delete the canonical task, including the underlying stream entry |
+| `add_stream` | Add a stream entry primary record using `role_id` as the stream's primary role |
+| `list_stream` | List normalized stream entry views; task-backed entries expose `task_id` |
 | `search` | Full-text search across tasks and stream (with scope filter) |
+
+### Task / Stream Model
+
+- `stream_entries` is the single primary record for content, timestamps, attachments, tags, entry type, and primary role.
+- `tasks` is only a task facet layered on top of a stream entry.
+- `Task.id === StreamEntry.id`.
+- `task.body` always comes from `stream_entries.content`.
+- `tasks.role_ids` is the authoritative task role set.
+- `primary_role` is computed as `role_ids[0] ?? stream_entries.role_id ?? null`.
+- Deleting a task deletes the underlying stream entry too.
+
+### Public Schema
+
+Task fields exposed by REST and MCP:
+
+```json
+{
+  "id": "se-...",
+  "title": "string",
+  "title_customized": 0,
+  "description": null,
+  "status": "inbox",
+  "body": "string",
+  "created_at": 1776000000000,
+  "updated_at": 1776000001000,
+  "completed_at": null,
+  "ddl": null,
+  "ddl_type": null,
+  "planned_at": null,
+  "role_ids": ["role-a", "role-b"],
+  "primary_role": "role-a",
+  "tags": ["mlt"],
+  "parent_id": null,
+  "subtask_ids": [],
+  "task_type": "task"
+}
+```
+
+Stream entry fields exposed by REST and MCP:
+
+```json
+{
+  "id": "se-...",
+  "content": "string",
+  "entry_type": "spark",
+  "timestamp": 1776000000000,
+  "date_key": "2026-04-13",
+  "role_id": "role-a",
+  "tags": ["mlt"],
+  "attachments": [],
+  "task_id": "se-..."
+}
+```
+
+Removed public fields:
+
+- Task: `role`, `role_id`, `source_stream_id`
+- Stream: `extracted_task_id`
+
+### REST Notes
+
+- `GET /api/tasks` and `GET /api/tasks/:id` now return normalized task objects instead of raw provider rows.
+- `PUT /api/tasks/:id` accepts the normalized task schema. Legacy fields are rejected.
+- `GET /api/stream*` returns normalized stream entry views.
+- `PUT /api/stream/:id` accepts `role_id` for the stream primary role and never exposes `extracted_task_id`.
 
 ## Support
 

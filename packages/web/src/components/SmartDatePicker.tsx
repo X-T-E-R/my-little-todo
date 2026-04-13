@@ -104,7 +104,7 @@ function formatSmartDate(
     return t('Tomorrow {{time}}', { time: timeStr });
   }
   if (diffD > 1 && diffD <= 7) {
-    return `${t(FULL_WEEKDAY_KEYS[date.getDay()]!)} ${timeStr}`;
+    return `${t(FULL_WEEKDAY_KEYS[date.getDay()] ?? FULL_WEEKDAY_KEYS[0])} ${timeStr}`;
   }
   return `${date.getMonth() + 1}/${date.getDate()} ${timeStr}`;
 }

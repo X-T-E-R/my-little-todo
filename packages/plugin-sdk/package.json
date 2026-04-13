@@ -1,0 +1,41 @@
+{
+  "name": "@my-little-todo/plugin-sdk",
+  "version": "0.5.3",
+  "type": "module",
+  "description": "Types and build tooling for My Little Todo (.mltp) plugins",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./vite-plugin": {
+      "types": "./dist/vite-plugin-mltp.d.ts",
+      "import": "./dist/vite-plugin-mltp.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "vite": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.14",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.1"
+  }
+}

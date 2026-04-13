@@ -10,6 +10,15 @@ pub struct ErrorBody {
 
 type BackupResult<T> = Result<Json<T>, (axum::http::StatusCode, Json<ErrorBody>)>;
 
+fn forbidden(msg: &str) -> (axum::http::StatusCode, Json<ErrorBody>) {
+    (
+        axum::http::StatusCode::FORBIDDEN,
+        Json(ErrorBody {
+            error: msg.to_string(),
+        }),
+    )
+}
+
 fn internal(msg: &str) -> (axum::http::StatusCode, Json<ErrorBody>) {
     (
         axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -19,6 +28,22 @@ fn internal(msg: &str) -> (axum::http::StatusCode, Json<ErrorBody>) {
     )
 }
 
+async fn require_admin(
+    state: &AppState,
+    user_id: &str,
+) -> Result<(), (axum::http::StatusCode, Json<ErrorBody>)> {
+    let user = state
+        .db
+        .get_user_by_id(user_id)
+        .await
+        .map_err(|e| internal(&e.to_string()))?
+        .ok_or_else(|| forbidden("User not found"))?;
+    if !user.is_admin {
+        return Err(forbidden("Admin access required"));
+    }
+    Ok(())
+}
+
 #[derive(Serialize)]
 pub struct BackupConfigResponse {
     pub provider: Option<String>,
@@ -26,10 +51,11 @@ pub struct BackupConfigResponse {
 }
 
 pub async fn get_config(
-    State(_state): State<AppState>,
-    axum::Extension(_user_id): axum::Extension<String>,
+    State(state): State<AppState>,
+    axum::Extension(user_id): axum::Extension<String>,
 ) -> BackupResult<BackupConfigResponse> {
-    // Backup provider is not yet wired into AppState
+    require_admin(&state, &user_id).await?;
+    crate::routes::admin::log_admin_action(&user_id, "backup_get_config", "read");
     Ok(Json(BackupConfigResponse {
         provider: None,
         configured: false,
@@ -49,10 +75,12 @@ pub struct BackupConfigRequest {
 }
 
 pub async fn update_config(
-    State(_state): State<AppState>,
-    axum::Extension(_user_id): axum::Extension<String>,
+    State(state): State<AppState>,
+    axum::Extension(user_id): axum::Extension<String>,
     Json(_body): Json<BackupConfigRequest>,
 ) -> BackupResult<serde_json::Value> {
+    require_admin(&state, &user_id).await?;
+    crate::routes::admin::log_admin_action(&user_id, "backup_update_config", "not_implemented");
     Err((
         axum::http::StatusCode::NOT_IMPLEMENTED,
         Json(ErrorBody {
@@ -62,9 +90,11 @@ pub async fn update_config(
 }
 
 pub async fn run_backup(
-    State(_state): State<AppState>,
-    axum::Extension(_user_id): axum::Extension<String>,
+    State(state): State<AppState>,
+    axum::Extension(user_id): axum::Extension<String>,
 ) -> BackupResult<serde_json::Value> {
+    require_admin(&state, &user_id).await?;
+    crate::routes::admin::log_admin_action(&user_id, "backup_run", "not_configured");
     Err(internal("Backup provider not configured"))
 }
 
@@ -74,15 +104,19 @@ pub struct BackupListResponse {
 }
 
 pub async fn list_backups(
-    State(_state): State<AppState>,
-    axum::Extension(_user_id): axum::Extension<String>,
+    State(state): State<AppState>,
+    axum::Extension(user_id): axum::Extension<String>,
 ) -> BackupResult<BackupListResponse> {
+    require_admin(&state, &user_id).await?;
+    crate::routes::admin::log_admin_action(&user_id, "backup_list", "not_configured");
     Ok(Json(BackupListResponse { backups: vec![] }))
 }
 
 pub async fn restore_backup(
-    State(_state): State<AppState>,
-    axum::Extension(_user_id): axum::Extension<String>,
+    State(state): State<AppState>,
+    axum::Extension(user_id): axum::Extension<String>,
 ) -> BackupResult<serde_json::Value> {
+    require_admin(&state, &user_id).await?;
+    crate::routes::admin::log_admin_action(&user_id, "backup_restore", "not_configured");
     Err(internal("Backup provider not configured"))
 }

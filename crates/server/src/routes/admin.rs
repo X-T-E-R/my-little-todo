@@ -38,7 +38,10 @@ fn not_found(msg: &str) -> (axum::http::StatusCode, Json<ErrorBody>) {
     )
 }
 
-async fn require_admin(state: &AppState, user_id: &str) -> Result<(), (axum::http::StatusCode, Json<ErrorBody>)> {
+pub(crate) async fn require_admin(
+    state: &AppState,
+    user_id: &str,
+) -> Result<(), (axum::http::StatusCode, Json<ErrorBody>)> {
     let user = state
         .db
         .get_user_by_id(user_id)
@@ -50,6 +53,13 @@ async fn require_admin(state: &AppState, user_id: &str) -> Result<(), (axum::htt
         return Err(forbidden("Admin access required"));
     }
     Ok(())
+}
+
+pub(crate) fn log_admin_action(user_id: &str, action: &str, detail: &str) {
+    println!(
+        "[AdminAudit] user_id={} action={} detail={}",
+        user_id, action, detail
+    );
 }
 
 #[derive(Serialize)]
@@ -92,6 +102,7 @@ pub async fn delete_user(
     axum::extract::Path(target_id): axum::extract::Path<String>,
 ) -> AdminResult<serde_json::Value> {
     require_admin(&state, &user_id).await?;
+    log_admin_action(&user_id, "delete_user", &target_id);
 
     if target_id == user_id {
         return Err(forbidden("Cannot delete yourself"));
@@ -126,7 +137,11 @@ pub async fn get_stats(
 ) -> AdminResult<StatsResponse> {
     require_admin(&state, &user_id).await?;
 
-    let total_users = state.db.count_users().await.map_err(|e| internal(&e.to_string()))?;
+    let total_users = state
+        .db
+        .count_users()
+        .await
+        .map_err(|e| internal(&e.to_string()))?;
 
     Ok(Json(StatsResponse {
         total_users,
@@ -154,9 +169,7 @@ pub async fn get_shared_ai_config(
     let admin_id = match admin {
         Some(u) => u.id,
         None => {
-            return Ok(Json(
-                serde_json::json!({ "available": false }),
-            ));
+            return Ok(Json(serde_json::json!({ "available": false })));
         }
     };
 
@@ -206,6 +219,7 @@ pub async fn reset_user_password(
     Json(body): Json<ResetPasswordRequest>,
 ) -> AdminResult<serde_json::Value> {
     require_admin(&state, &user_id).await?;
+    log_admin_action(&user_id, "reset_user_password", &target_id);
 
     state
         .db

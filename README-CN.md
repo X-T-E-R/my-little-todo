@@ -13,9 +13,35 @@
 - **DDL 驱动** — 截止日期分三级硬度（硬性/承诺/弹性），延期需要写理由
 - **专注此刻** — 打开应用只看到一件事 + 两个按钮（"开始做" / "不想做"）
 - **学习而非惩罚** — 你的每一次拒绝、拖延、不按计划执行都是训练数据，不是错误
-- **本地优先** — 桌面端和移动端数据存储在本地 SQLite 中，可选通过 API 服务器、WebDAV 或 S3 同步
-- **多平台** — Tauri 桌面端（Windows/macOS/Linux）、Android 应用、Web PWA，共享同一套 UI
-- **原生 AI 支持** — 内置 AI 魔法按钮，原生支持 MCP、方便 Agent 调用和编辑
+- **稳定的本地优先核心** — 桌面端和 Android 使用本地 SQLite；正式稳定同步目标为 API 服务器和 WebDAV
+- **多平台** — Tauri 桌面端（Windows/macOS/Linux）、Android 应用和 Web 部署共享同一套核心 Todo 模型
+- **Beta 扩展能力** — AI、S3、服务端备份恢复、窗口上下文、桌面小组件、think/work thread、插件生态暂不纳入稳定 SLA
+
+## 发布边界
+
+当前 Stable 能力：
+
+- 任务 CRUD
+- 流记录 CRUD 与搜索
+- 认证与多用户隔离
+- 基础附件
+- JSON 导入导出
+- 本地 SQLite
+- API 同步
+- WebDAV 同步
+- 升级迁移
+- 基础设置
+
+当前 Beta / 受限能力：
+
+- AI 助手与 Agent 流程
+- S3 同步
+- 服务端备份恢复
+- 窗口上下文与桌面小组件
+- Think Session / Work Thread
+- 第三方插件
+
+发布或升级前，请先阅读[发布检查清单](docs/release/release-checklist.zh-CN.md)。
 
 <!-- TODO: 添加截图 -->
 
@@ -31,7 +57,9 @@
 4. 可在设置 → 云同步中配置同步方式实现多端同步：
    - **API 服务器** — 与 My Little Todo 服务器同步（支持用户名密码或 API Token 认证）
    - **WebDAV** — 通过任意 WebDAV 兼容服务器同步
-   - **S3** — 同步到 S3 兼容对象存储（AWS/MinIO/R2）
+   - **S3（Beta）** — 仅保留为受限路径，不属于当前稳定 SLA
+
+升级桌面端前，请先在 `设置 -> 数据` 中做一次完整 JSON 导出。
 
 ### Docker 部署 — 适合服务器
 
@@ -64,6 +92,8 @@ docker compose up -d
 **首次使用**：访问 `http://localhost:3001/admin` 创建第一个管理员账户。管理员创建完成后，用户即可通过 `http://localhost:3001` 访问 Web 端登录使用。管理功能（用户管理、统计）在 `/admin` 页面管理。
 
 数据存储在主机的 `./data/` 目录中，方便备份和查看。
+
+关于发布恢复预期、备份建议和 Stable/Beta 边界，请查看 [docs/release/release-checklist.zh-CN.md](docs/release/release-checklist.zh-CN.md)。
 
 #### 更新到最新版本
 
@@ -131,6 +161,7 @@ docker compose pull && docker compose up -d
 1. **桌面端 / Android 用户**：启动应用后，引导向导会带你设置角色和偏好。所有数据存储在本地。
 2. **服务器（网页）用户**：访问 `http://your-host:3001/admin` 创建管理员账户，然后打开 `http://your-host:3001` 开始使用。
 3. 打开**流**视图，随手输入你脑中的想法，系统会帮你整理成任务
+4. 升级、迁移或切换同步目标前，请先从 `设置 -> 数据` 导出 JSON 备份。
 
 ## MCP 集成
 
@@ -159,15 +190,80 @@ My Little Todo 内置原生 [MCP (Model Context Protocol)](https://modelcontextp
 
 | 工具 | 说明 |
 |------|------|
-| `get_overview` | 全局概览：任务计数、紧急DDL、角色列表、日程时段、今日流记录数 |
-| `list_tasks` | 列出任务（可按状态/角色筛选，内联角色名，不含正文） |
-| `get_task` | 获取单个任务完整详情（含正文、提交/延期记录） |
-| `create_task` | 创建任务（标题 + 可选 DDL/角色/标签/父任务） |
-| `update_task` | 更新任务属性或状态（含完成/取消/延期，可附备注） |
-| `delete_task` | 删除任务 |
-| `add_stream` | 添加一条流记录（想法/笔记/进展） |
-| `list_stream` | 列出最近的流记录 |
+| `get_overview` | 全局概览：任务计数、紧急 DDL、角色列表、日程时段、今日流记录数 |
+| `list_tasks` | 列出标准化 task 视图，可按状态、`primary_role`、`role_ids` 过滤；列表结果不含 `body` |
+| `get_task` | 获取单个标准化 task 视图，包含 canonical `body` 以及父任务/子任务摘要 |
+| `create_task` | 创建 canonical task：先建 stream 主记录，再建同 ID 的 task facet |
+| `update_task` | 更新任务字段；`body` 会回写到底层 `stream_entries.content`，`role_ids` 是唯一权威角色输入 |
+| `delete_task` | 删除 canonical task，同时删除底层 stream entry |
+| `add_stream` | 创建 stream 主记录，使用 `role_id` 作为流条目的主角色 |
+| `list_stream` | 列出标准化 stream 视图；若条目同时是 task，会返回 `task_id` |
 | `search` | 全文搜索任务和流记录（可限定搜索范围） |
+
+### Task / Stream 新语义
+
+- `stream_entries` 是唯一主记录，保存内容、时间、附件、标签、条目类型和主角色。
+- `tasks` 只是任务扩展 facet，不再持久化正文副本。
+- `Task.id === StreamEntry.id`。
+- `task.body` 永远来自 `stream_entries.content`。
+- `tasks.role_ids` 是任务角色集合的唯一权威字段。
+- `primary_role` 是计算字段，规则为 `role_ids[0] ?? stream_entries.role_id ?? null`。
+- 删除 task 会删除底层 stream entry。
+
+### 对外 Schema
+
+Task 在 REST / MCP 中暴露的字段：
+
+```json
+{
+  "id": "se-...",
+  "title": "string",
+  "title_customized": 0,
+  "description": null,
+  "status": "inbox",
+  "body": "string",
+  "created_at": 1776000000000,
+  "updated_at": 1776000001000,
+  "completed_at": null,
+  "ddl": null,
+  "ddl_type": null,
+  "planned_at": null,
+  "role_ids": ["role-a", "role-b"],
+  "primary_role": "role-a",
+  "tags": ["mlt"],
+  "parent_id": null,
+  "subtask_ids": [],
+  "task_type": "task"
+}
+```
+
+Stream 在 REST / MCP 中暴露的字段：
+
+```json
+{
+  "id": "se-...",
+  "content": "string",
+  "entry_type": "spark",
+  "timestamp": 1776000000000,
+  "date_key": "2026-04-13",
+  "role_id": "role-a",
+  "tags": ["mlt"],
+  "attachments": [],
+  "task_id": "se-..."
+}
+```
+
+已移除的公开字段：
+
+- task: `role`, `role_id`, `source_stream_id`
+- stream: `extracted_task_id`
+
+### REST 说明
+
+- `GET /api/tasks` 与 `GET /api/tasks/:id` 现在返回标准化 task 对象，而不是 provider 原始行。
+- `PUT /api/tasks/:id` 必须使用新 task schema；旧字段会被拒绝。
+- `GET /api/stream*` 返回标准化 stream 主记录视图。
+- `PUT /api/stream/:id` 使用 `role_id` 作为 stream 主角色字段，且不再暴露 `extracted_task_id`。
 
 ## 赞助
 

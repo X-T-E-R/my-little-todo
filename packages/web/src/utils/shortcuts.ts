@@ -177,6 +177,13 @@ export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
     keys: 'Ctrl+Shift+D',
     scope: 'plugin',
   },
+  {
+    id: 'plugin.thinkSession',
+    action: 'plugin.thinkSession',
+    label: i18n.t('shortcuts.Think Session', { ns: 'common' }),
+    keys: 'Ctrl+Shift+T',
+    scope: 'plugin',
+  },
 ];
 
 /**

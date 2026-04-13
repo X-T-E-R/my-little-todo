@@ -1,4 +1,4 @@
-import type { StreamEntry, StreamEntryType } from '@my-little-todo/core';
+import type { Attachment, StreamEntry, StreamEntryType } from '@my-little-todo/core';
 import { formatDateKey, formatTimeStorage } from '@my-little-todo/core';
 import { getDataStore } from './dataStore';
 
@@ -25,6 +25,7 @@ export async function addStreamEntry(
   content: string,
   roleId?: string,
   entryType: StreamEntryType = 'spark',
+  attachments: Attachment[] = [],
 ): Promise<StreamEntry> {
   const now = new Date();
   const dateKey = formatDateKey(now);
@@ -37,13 +38,22 @@ export async function addStreamEntry(
     content,
     timestamp: now,
     tags: extractTags(content),
-    attachments: [],
+    attachments,
     roleId: roleId || undefined,
     entryType,
   };
 
   await getDataStore().putStreamEntry(entry);
   return entry;
+}
+
+export async function putCanonicalStreamEntry(entry: StreamEntry): Promise<StreamEntry> {
+  const canonical: StreamEntry = {
+    ...entry,
+    tags: extractTags(entry.content),
+  };
+  await getDataStore().putStreamEntry(canonical);
+  return canonical;
 }
 
 export async function updateStreamEntry(entry: StreamEntry): Promise<void> {
@@ -57,14 +67,12 @@ export async function deleteStreamEntry(id: string): Promise<void> {
 
 export async function linkEntryToTask(
   entryId: string,
-  dateKey: string,
+  _dateKey: string,
   taskId: string,
 ): Promise<void> {
-  const existing = await loadStreamDay(dateKey);
-  const entry = existing.find((e) => e.id === entryId);
-  if (!entry) return;
-  entry.extractedTaskId = taskId;
-  await getDataStore().putStreamEntry(entry);
+  if (entryId !== taskId) {
+    throw new Error(`Canonical task-entry id mismatch: ${entryId} !== ${taskId}`);
+  }
 }
 
 function extractTags(text: string): string[] {
@@ -84,9 +92,7 @@ export async function searchStreamEntries(query: string, limit = 200) {
 export async function pickTimeCapsuleEntry(minAgeDays: number) {
   const entries = await loadRecentDays(Math.max(minAgeDays + 1, 120));
   const cutoff = Date.now() - minAgeDays * 86400000;
-  const sparks = entries.filter(
-    (e) => e.entryType === 'spark' && e.timestamp.getTime() < cutoff,
-  );
+  const sparks = entries.filter((e) => e.entryType === 'spark' && e.timestamp.getTime() < cutoff);
   if (sparks.length === 0) return null;
   return sparks[Math.floor(Math.random() * sparks.length)] ?? null;
 }

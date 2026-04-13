@@ -50,14 +50,27 @@ pub trait DatabaseProvider: Send + Sync {
     async fn delete_task_row(&self, user_id: &str, id: &str) -> anyhow::Result<()>;
 
     // --- Stream entries (JSON rows, snake_case keys matching TS StreamEntryDbRow) ---
-    async fn list_stream_day_json(&self, user_id: &str, date_key: &str) -> anyhow::Result<Vec<String>>;
-    async fn list_stream_recent_json(&self, user_id: &str, days: i32) -> anyhow::Result<Vec<String>>;
+    async fn list_stream_day_json(
+        &self,
+        user_id: &str,
+        date_key: &str,
+    ) -> anyhow::Result<Vec<String>>;
+    async fn list_stream_recent_json(
+        &self,
+        user_id: &str,
+        days: i32,
+    ) -> anyhow::Result<Vec<String>>;
     /// Distinct `date_key` values (newest first) for calendar navigation.
     async fn list_stream_date_keys(&self, user_id: &str) -> anyhow::Result<Vec<String>>;
     /// All stream entries for export / search (non-deleted).
     async fn list_all_stream_json(&self, user_id: &str) -> anyhow::Result<Vec<String>>;
     /// Full-text-ish search over `content` (case-insensitive substring).
-    async fn search_stream_json(&self, user_id: &str, q: &str, limit: i64) -> anyhow::Result<Vec<String>>;
+    async fn search_stream_json(
+        &self,
+        user_id: &str,
+        q: &str,
+        limit: i64,
+    ) -> anyhow::Result<Vec<String>>;
     async fn upsert_stream_entry_json(&self, user_id: &str, json: &str) -> anyhow::Result<()>;
     async fn delete_stream_entry_row(&self, user_id: &str, id: &str) -> anyhow::Result<()>;
 
@@ -90,13 +103,22 @@ pub trait DatabaseProvider: Send + Sync {
     async fn list_blob_metas(&self, owner: &str) -> anyhow::Result<Vec<BlobMeta>>;
 
     // --- Sync (scoped to user_id for row data) ---
-    async fn get_changes_since(&self, user_id: &str, since_version: i64) -> anyhow::Result<Vec<ChangeRecord>>;
+    async fn get_changes_since(
+        &self,
+        user_id: &str,
+        since_version: i64,
+    ) -> anyhow::Result<Vec<ChangeRecord>>;
     async fn get_max_version(&self) -> anyhow::Result<i64>;
     /// Max `version` across this user's synced rows (tasks, stream, settings, blobs). Used in multi-tenant sync status.
     async fn get_max_version_for_user(&self, user_id: &str) -> anyhow::Result<i64>;
-    async fn apply_remote_change(&self, user_id: &str, change: &ChangeRecord) -> anyhow::Result<()>;
+    async fn apply_remote_change(&self, user_id: &str, change: &ChangeRecord)
+        -> anyhow::Result<()>;
     /// Apply all changes in one DB transaction (push is all-or-nothing).
-    async fn apply_remote_changes_batch(&self, user_id: &str, changes: &[ChangeRecord]) -> anyhow::Result<()>;
+    async fn apply_remote_changes_batch(
+        &self,
+        user_id: &str,
+        changes: &[ChangeRecord],
+    ) -> anyhow::Result<()>;
 
     async fn close(&self) -> anyhow::Result<()>;
 }

@@ -15,13 +15,14 @@ export function deriveTitleFromBody(body: string): string {
   if (!line) return 'Untitled';
   const plain = line.replace(/\*\*|__|`/g, '').trim();
   const base = plain || line;
-  return base.length > DERIVE_TITLE_MAX_LEN
-    ? `${base.slice(0, DERIVE_TITLE_MAX_LEN - 1)}…`
-    : base;
+  return base.length > DERIVE_TITLE_MAX_LEN ? `${base.slice(0, DERIVE_TITLE_MAX_LEN - 1)}…` : base;
 }
 
 /** Title shown in UI: custom title when `titleCustomized`, otherwise derived from body. */
 export function displayTaskTitle(task: Pick<Task, 'title' | 'body' | 'titleCustomized'>): string {
   if (task.titleCustomized && task.title.trim()) return task.title.trim();
-  return deriveTitleFromBody(task.body);
+  const fromBody = deriveTitleFromBody(task.body);
+  // If body is empty but title still has text (e.g. legacy subtasks after bad migration), show title.
+  if (fromBody !== 'Untitled' || !task.title.trim()) return fromBody;
+  return task.title.trim();
 }

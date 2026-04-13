@@ -1,3 +1,4 @@
+import { createHttpClient, type HttpClient } from '../utils/httpClient';
 import type { ChangeRecord, PushResult, SyncTarget } from './types';
 
 /**
@@ -11,6 +12,7 @@ export class WebDavSyncTarget implements SyncTarget {
   private baseUrl: string;
   private username: string;
   private password: string;
+  private httpClient: HttpClient;
 
   constructor(opts: {
     id: string;
@@ -18,16 +20,18 @@ export class WebDavSyncTarget implements SyncTarget {
     username: string;
     password: string;
     displayName?: string;
+    httpClient?: HttpClient;
   }) {
     this.id = opts.id;
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
     this.username = opts.username;
     this.password = opts.password;
     this.displayName = opts.displayName || `WebDAV (${this.baseUrl})`;
+    this.httpClient = opts.httpClient ?? createHttpClient();
   }
 
-  private authHeaders(): HeadersInit {
-    const creds = btoa(`${this.username}:${this.password}`);
+  private authHeaders(): Record<string, string> {
+    const creds = encodeBasicAuth(`${this.username}:${this.password}`);
     return {
       Authorization: `Basic ${creds}`,
     };
@@ -39,17 +43,19 @@ export class WebDavSyncTarget implements SyncTarget {
 
   async testConnection(): Promise<boolean> {
     try {
-      const res = await fetch(this.syncRoot(), {
+      const res = await this.httpClient.request({
+        url: this.syncRoot(),
         method: 'PROPFIND',
         headers: {
           ...this.authHeaders(),
           Depth: '0',
         },
-        signal: AbortSignal.timeout(10000),
+        timeoutMs: 10000,
       });
       if (res.status === 207) return true;
       if (res.status === 404) {
-        const mkRes = await fetch(`${this.syncRoot()}/`, {
+        const mkRes = await this.httpClient.request({
+          url: `${this.syncRoot()}/`,
           method: 'MKCOL',
           headers: this.authHeaders(),
         });
@@ -132,7 +138,8 @@ export class WebDavSyncTarget implements SyncTarget {
 
   private async readJson<T>(path: string): Promise<T | null> {
     try {
-      const res = await fetch(`${this.syncRoot()}/${path}`, {
+      const res = await this.httpClient.request({
+        url: `${this.syncRoot()}/${path}`,
         headers: this.authHeaders(),
       });
       if (!res.ok) return null;
@@ -143,13 +150,14 @@ export class WebDavSyncTarget implements SyncTarget {
   }
 
   private async writeJson(path: string, data: unknown): Promise<void> {
-    const res = await fetch(`${this.syncRoot()}/${path}`, {
+    const res = await this.httpClient.request({
+      url: `${this.syncRoot()}/${path}`,
       method: 'PUT',
       headers: {
         ...this.authHeaders(),
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(data),
+      bodyText: JSON.stringify(data),
     });
     if (!res.ok) {
       throw new Error(`WebDAV PUT failed: ${res.status} ${path}`);
@@ -163,7 +171,8 @@ export class WebDavSyncTarget implements SyncTarget {
     for (const seg of segments) {
       acc = acc ? `${acc}/${seg}` : seg;
       try {
-        const res = await fetch(`${this.syncRoot()}/${acc}/`, {
+        const res = await this.httpClient.request({
+          url: `${this.syncRoot()}/${acc}/`,
           method: 'MKCOL',
           headers: this.authHeaders(),
         });
@@ -178,14 +187,16 @@ export class WebDavSyncTarget implements SyncTarget {
 
   private async listDir(name: string): Promise<string[]> {
     try {
-      const res = await fetch(`${this.syncRoot()}/${name}/`, {
+      const res = await this.httpClient.request({
+        url: `${this.syncRoot()}/${name}/`,
         method: 'PROPFIND',
         headers: {
           ...this.authHeaders(),
           Depth: '1',
           'Content-Type': 'application/xml',
         },
-        body: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>`,
+        bodyText:
+          '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:displayname/></d:prop></d:propfind>',
       });
       if (!res.ok) return [];
 
@@ -198,4 +209,9 @@ export class WebDavSyncTarget implements SyncTarget {
       return [];
     }
   }
+}
+
+function encodeBasicAuth(value: string): string {
+  if (typeof btoa === 'function') return btoa(value);
+  return Buffer.from(value, 'utf8').toString('base64');
 }

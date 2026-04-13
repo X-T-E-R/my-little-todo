@@ -4,9 +4,7 @@
 pub fn validate_path(path: &str) -> anyhow::Result<String> {
     let normalized = path.replace('\\', "/");
 
-    if normalized.starts_with('/')
-        || (normalized.len() > 1 && normalized.as_bytes()[1] == b':')
-    {
+    if normalized.starts_with('/') || (normalized.len() > 1 && normalized.as_bytes()[1] == b':') {
         anyhow::bail!("Absolute paths not allowed");
     }
 
@@ -29,9 +27,8 @@ pub fn validate_path(path: &str) -> anyhow::Result<String> {
 
 fn validate_filename_component(name: &str) -> anyhow::Result<()> {
     const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
 
     let upper = name.to_uppercase();

@@ -39,6 +39,8 @@ interface ContextMenuProps {
   onCopy: () => void;
   onDelete: () => void;
   onBatchSelect: () => void;
+  onAddToThread?: () => void;
+  onCreateThread?: () => void;
   onChangeType?: (type: StreamEntryType) => void;
   onMarkComplete?: () => void;
   isCompleted?: boolean;
@@ -143,6 +145,8 @@ export function ContextMenu({
   onCopy,
   onDelete,
   onBatchSelect,
+  onAddToThread,
+  onCreateThread,
   onChangeType,
   onMarkComplete,
   isCompleted,
@@ -299,6 +303,16 @@ export function ContextMenu({
 
         <MenuItem icon={ClipboardCopy} label={t('Copy content')} onClick={onCopy} />
         <MenuItem icon={CheckSquare} label={t('Batch select')} onClick={onBatchSelect} />
+        {onAddToThread && (
+          <MenuItem icon={ListPlus} label={tStream('Add to thread')} onClick={onAddToThread} />
+        )}
+        {onCreateThread && (
+          <MenuItem
+            icon={ListPlus}
+            label={tStream('New thread from this')}
+            onClick={onCreateThread}
+          />
+        )}
 
         <div className="my-1 mx-2" style={{ borderTop: '1px solid var(--color-border)' }} />
 

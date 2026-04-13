@@ -3,6 +3,8 @@
   "kanban_group_status": "Status",
   "kanban_group_priority": "Priority",
   "kanban_group_role": "Role",
+  "kanban_group_project": "Project",
+  "kanban_group_project_none": "No project",
   "kanban_pri_low": "Low priority",
   "kanban_pri_mid": "Medium",
   "kanban_pri_high": "High",
@@ -25,5 +27,7 @@
   "Exit fullscreen": "Exit fullscreen",
   "Collapse column": "Collapse column",
   "Expand column": "Expand column",
-  "wip_badge": "WIP {{current}}/{{limit}}"
+  "wip_badge": "WIP {{current}}/{{limit}}",
+  "Failed to load tasks": "Failed to load tasks",
+  "Retry": "Retry"
 }

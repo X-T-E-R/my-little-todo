@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@milkdown/crepe@7.20.0':
+    hash: 60e3d138ee5ff65182db94f116889f9086e66293daefcaee366ad96205a53d0a
+    path: patches/@milkdown__crepe@7.20.0.patch
+
 importers:
 
   .:
@@ -20,6 +25,34 @@ importers:
       typescript:
         specifier: ^5.8.0
         version: 5.9.3
+
+  examples/plugins/hello-world:
+    dependencies:
+      '@my-little-todo/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../../packages/plugin-sdk
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.2.4
+        version: 19.2.4(react@19.2.4)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.14)
+      '@vitejs/plugin-react':
+        specifier: ^6.0.1
+        version: 6.0.1(vite@8.0.1(@types/node@22.19.15)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.46.1)(tsx@4.21.0))
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^8.0.1
+        version: 8.0.1(@types/node@22.19.15)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.46.1)(tsx@4.21.0)
 
   packages/admin:
     dependencies:
@@ -128,8 +161,33 @@ importers:
         specifier: ^8.0.0
         version: 8.0.1(@types/node@22.19.15)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.46.1)(tsx@4.21.0)
 
+  packages/plugin-sdk:
+    dependencies:
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
+      react:
+        specifier: '>=18'
+        version: 19.2.4
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.19.15
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.14
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+      vite:
+        specifier: ^8.0.1
+        version: 8.0.1(@types/node@22.19.15)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.46.1)(tsx@4.21.0)
+
   packages/web:
     dependencies:
+      '@ai-sdk/openai':
+        specifier: ^3.0.52
+        version: 3.0.52(zod@3.25.76)
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -141,7 +199,7 @@ importers:
         version: 7.20.0
       '@milkdown/crepe':
         specifier: ^7.20.0
-        version: 7.20.0(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(typescript@5.9.3)
+        version: 7.20.0(patch_hash=60e3d138ee5ff65182db94f116889f9086e66293daefcaee366ad96205a53d0a)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(typescript@5.9.3)
       '@milkdown/ctx':
         specifier: ^7.20.0
         version: 7.20.0
@@ -154,6 +212,9 @@ importers:
       '@milkdown/preset-gfm':
         specifier: ^7.20.0
         version: 7.20.0
+      '@milkdown/prose':
+        specifier: ^7.20.0
+        version: 7.20.0
       '@milkdown/react':
         specifier: ^7.20.0
         version: 7.20.0(@codemirror/language@6.12.3)(@codemirror/state@6.6.0)(@codemirror/view@6.41.0)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
@@ -163,6 +224,9 @@ importers:
       '@my-little-todo/core':
         specifier: workspace:*
         version: link:../core
+      '@my-little-todo/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
       '@tauri-apps/api':
         specifier: ^2
         version: 2.10.1
@@ -178,6 +242,9 @@ importers:
       '@tauri-apps/plugin-updater':
         specifier: ^2.10.0
         version: 2.10.0
+      ai:
+        specifier: ^6.0.157
+        version: 6.0.157(zod@3.25.76)
       framer-motion:
         specifier: ^12.0.0
         version: 12.38.0(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -205,6 +272,9 @@ importers:
       react-router:
         specifier: ^7.0.0
         version: 7.13.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
       zustand:
         specifier: ^5.0.0
         version: 5.0.12(@types/react@19.2.14)(react@19.2.4)
@@ -242,8 +312,33 @@ importers:
       vite-plugin-pwa:
         specifier: ^1.2.0
         version: 1.2.0(vite@8.0.1(@types/node@22.19.15)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.46.1)(tsx@4.21.0))(workbox-build@7.4.0(@types/babel__core@7.20.5))(workbox-window@7.4.0)
+      vitest:
+        specifier: ^3.1.0
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.21.0)
 
 packages:
+
+  '@ai-sdk/gateway@3.0.95':
+    resolution: {integrity: sha512-ZmUNNbZl3V42xwQzPaNUi+s8eqR2lnrxf0bvB6YbLXpLjHYv0k2Y78t12cNOfY0bxGeuVVTLyk856uLuQIuXEQ==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/openai@3.0.52':
+    resolution: {integrity: sha512-4Rr8NCGmfWTz6DCUvixn9UmyZcMatiHn0zWoMzI3JCUe9R1P/vsPOpCBALKoSzVYOjyJnhtnVIbfUKujcS39uw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@4.0.23':
+    resolution: {integrity: sha512-z8GlDaCmRSDlqkMF2f4/RFgWxdarvIbyuk+m6WXT1LYgsnGiXRJGTD2Z1+SDl3LqtFuRtGX1aghYvQLoHL/9pg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider@3.0.8':
+    resolution: {integrity: sha512-oGMAgGoQdBXbZqNG0Ze56CHjDZ1IDYOwGYxYjO5KLSlz5HiNQ9udIXsPZ61VWaHGZ5XW/jyjmr6t2xz2jGVwbQ==}
+    engines: {node: '>=18'}
 
   '@ampproject/remapping@2.3.0':
     resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
@@ -1325,6 +1420,10 @@ packages:
   '@ocavue/utils@1.6.0':
     resolution: {integrity: sha512-8W3q1hxx9qFdrYgPtbElllG/tqYkO/dMhlRUiqasO0SuDFTj78azSQjhIrBTFWxlBPPsSZN6zXYHmb3RwN2Jtg==}
 
+  '@opentelemetry/api@1.9.0':
+    resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
+    engines: {node: '>=8.0.0'}
+
   '@oxc-project/types@0.120.0':
     resolution: {integrity: sha512-k1YNu55DuvAip/MGE1FTsIuU3FUCn6v/ujG9V7Nq5Df/kX2CWb13hhwD0lmJGMGqE+bE1MXvv9SZVnMzEXlWcg==}
 
@@ -1667,6 +1766,9 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@standard-schema/spec@1.1.0':
+    resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+
   '@stencil/core@4.43.3':
     resolution: {integrity: sha512-w41W6txhGULvvEfa5AEgwfNGAbK3YGowQYMTWuRvXSIbnkiyRDGLogsYSYtHDlz1JJe645JJIK9Lvh5uquFiSw==}
     engines: {node: '>=16.0.0', npm: '>=7.10.0'}
@@ -1964,6 +2066,10 @@ packages:
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
 
+  '@vercel/oidc@3.1.0':
+    resolution: {integrity: sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w==}
+    engines: {node: '>= 20'}
+
   '@vitejs/plugin-react@4.7.0':
     resolution: {integrity: sha512-gUu9hwfWvvEDBBmgtAowQCojwZmJ5mcLn3aufeCsitijs3+f2NsrPtlAWIR6OPiqljl96GVCUbLe0HyqIpVaoA==}
     engines: {node: ^14.18.0 || >=16.0.0}
@@ -2058,6 +2164,12 @@ packages:
     resolution: {integrity: sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw==}
     engines: {node: '>=0.4.0'}
     hasBin: true
+
+  ai@6.0.157:
+    resolution: {integrity: sha512-NvGOPIkaMGlaHhu7xXjCdDtILeNN0Yws6JiZLYaq4cGBf8JUFfGcOPCt4LdV5z5qwEbvp1jiH3yzgoqFl0BeSQ==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   ajv@8.18.0:
     resolution: {integrity: sha512-PlXPeEWMXMZ7sPYOHqmDyCJzcfNrUr3fGNKtezX14ykXOEIvyK81d+qydx89KY5O71FKMPaQ2vBfBFI5NHR63A==}
@@ -2434,6 +2546,10 @@ packages:
   esutils@2.0.3:
     resolution: {integrity: sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g==}
     engines: {node: '>=0.10.0'}
+
+  eventsource-parser@3.0.6:
+    resolution: {integrity: sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg==}
+    engines: {node: '>=18.0.0'}
 
   expect-type@1.3.0:
     resolution: {integrity: sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==}
@@ -4099,6 +4215,9 @@ packages:
   yauzl@2.10.0:
     resolution: {integrity: sha512-p4a9I6X6nu6IhoGmBqAcbJy1mlC4j27vEPZX9F4L4/vZT3Lyq1VkFHw/V/PUcB9Buo+DG3iHkT0x3Qya58zc3g==}
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
   zustand@5.0.12:
     resolution: {integrity: sha512-i77ae3aZq4dhMlRhJVCYgMLKuSiZAaUPAct2AksxQ+gOtimhGMdXljRT21P5BNpeT4kXlLIckvkPM029OljD7g==}
     engines: {node: '>=12.20.0'}
@@ -4121,6 +4240,30 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@ai-sdk/gateway@3.0.95(zod@3.25.76)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.8
+      '@ai-sdk/provider-utils': 4.0.23(zod@3.25.76)
+      '@vercel/oidc': 3.1.0
+      zod: 3.25.76
+
+  '@ai-sdk/openai@3.0.52(zod@3.25.76)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.8
+      '@ai-sdk/provider-utils': 4.0.23(zod@3.25.76)
+      zod: 3.25.76
+
+  '@ai-sdk/provider-utils@4.0.23(zod@3.25.76)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.8
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.0.6
+      zod: 3.25.76
+
+  '@ai-sdk/provider@3.0.8':
+    dependencies:
+      json-schema: 0.4.0
 
   '@ampproject/remapping@2.3.0':
     dependencies:
@@ -5498,7 +5641,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@milkdown/crepe@7.20.0(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(typescript@5.9.3)':
+  '@milkdown/crepe@7.20.0(patch_hash=60e3d138ee5ff65182db94f116889f9086e66293daefcaee366ad96205a53d0a)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(typescript@5.9.3)':
     dependencies:
       '@codemirror/commands': 6.10.3
       '@codemirror/language': 6.12.3
@@ -5700,7 +5843,7 @@ snapshots:
 
   '@milkdown/react@7.20.0(@codemirror/language@6.12.3)(@codemirror/state@6.6.0)(@codemirror/view@6.41.0)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)':
     dependencies:
-      '@milkdown/crepe': 7.20.0(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(typescript@5.9.3)
+      '@milkdown/crepe': 7.20.0(patch_hash=60e3d138ee5ff65182db94f116889f9086e66293daefcaee366ad96205a53d0a)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-view@1.41.8)(typescript@5.9.3)
       '@milkdown/kit': 7.20.0(@codemirror/language@6.12.3)(@codemirror/state@6.6.0)(@codemirror/view@6.41.0)(typescript@5.9.3)
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
@@ -5742,6 +5885,8 @@ snapshots:
     optional: true
 
   '@ocavue/utils@1.6.0': {}
+
+  '@opentelemetry/api@1.9.0': {}
 
   '@oxc-project/types@0.120.0': {}
 
@@ -5949,6 +6094,8 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.59.0':
     optional: true
+
+  '@standard-schema/spec@1.1.0': {}
 
   '@stencil/core@4.43.3':
     optionalDependencies:
@@ -6202,6 +6349,8 @@ snapshots:
 
   '@types/unist@3.0.3': {}
 
+  '@vercel/oidc@3.1.0': {}
+
   '@vitejs/plugin-react@4.7.0(vite@8.0.1(@types/node@22.19.15)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.46.1)(tsx@4.21.0))':
     dependencies:
       '@babel/core': 7.29.0
@@ -6337,6 +6486,14 @@ snapshots:
   '@xmldom/xmldom@0.8.11': {}
 
   acorn@8.16.0: {}
+
+  ai@6.0.157(zod@3.25.76):
+    dependencies:
+      '@ai-sdk/gateway': 3.0.95(zod@3.25.76)
+      '@ai-sdk/provider': 3.0.8
+      '@ai-sdk/provider-utils': 4.0.23(zod@3.25.76)
+      '@opentelemetry/api': 1.9.0
+      zod: 3.25.76
 
   ajv@8.18.0:
     dependencies:
@@ -6775,6 +6932,8 @@ snapshots:
       '@types/estree': 1.0.8
 
   esutils@2.0.3: {}
+
+  eventsource-parser@3.0.6: {}
 
   expect-type@1.3.0: {}
 
@@ -8819,6 +8978,8 @@ snapshots:
     dependencies:
       buffer-crc32: 0.2.13
       fd-slicer: 1.1.0
+
+  zod@3.25.76: {}
 
   zustand@5.0.12(@types/react@19.2.14)(react@19.2.4):
     optionalDependencies:

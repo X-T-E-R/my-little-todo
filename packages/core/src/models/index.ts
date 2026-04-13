@@ -4,3 +4,6 @@ export * from './behavior.js';
 export * from './role.js';
 export * from './ai-operation.js';
 export * from './schedule.js';
+export * from './window-context.js';
+export * from './think-session.js';
+export * from './work-thread.js';

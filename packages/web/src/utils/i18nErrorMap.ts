@@ -20,8 +20,7 @@ const ERROR_KEYS: Set<string> = new Set([
 
 export function mapApiError(error: string): string {
   if (ERROR_KEYS.has(error)) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (i18n as any).t(error, { ns: 'errors' }) as string;
+    return i18n.t(error, { ns: 'errors' });
   }
   return error;
 }

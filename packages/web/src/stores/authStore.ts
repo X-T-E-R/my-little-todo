@@ -144,6 +144,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const res = await fetch(`${getApiBase()}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(8000),
       });
       if (!res.ok) {
         get().logout();
@@ -154,6 +155,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ user });
       return true;
     } catch {
+      get().logout();
       return false;
     }
   },

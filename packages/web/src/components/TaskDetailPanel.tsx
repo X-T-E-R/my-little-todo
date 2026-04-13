@@ -1,12 +1,21 @@
-import type { Task, TaskPhase, TaskReminder, TaskResource, TaskStatus } from '@my-little-todo/core';
+import type {
+  StreamEntry,
+  Task,
+  TaskPhase,
+  TaskReminder,
+  TaskResource,
+  TaskStatus,
+} from '@my-little-todo/core';
 import {
   TASK_PHASE_ORDER,
+  collectProjectSubtree,
   daysUntil,
   deriveTitleFromBody,
   displayTaskTitle,
   estimateTaskProgress,
   generateId,
   isOverdue,
+  projectDescendantProgress,
   taskRoleIds,
   withTaskRoles,
 } from '@my-little-todo/core';
@@ -17,29 +26,45 @@ import {
   Bell,
   Calendar,
   Check,
+  ChevronDown,
   ChevronRight,
   ExternalLink,
   Eye,
   FileText,
+  FolderKanban,
   Lightbulb,
   Link2,
   Loader2,
   Maximize2,
   Minimize2,
+  NotebookPen,
+  Paperclip,
   Pencil,
   Plus,
   Save,
   Trash2,
+  Wind,
   X,
 } from 'lucide-react';
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
-import { useStreamStore, useTaskStore } from '../stores';
+import { useFileHostUpload } from '../fileHost/useFileHostUpload';
+import { useStreamStore, useTaskStore, useThinkSessionStore, useWorkThreadStore } from '../stores';
+import { useToastStore } from '../stores/toastStore';
 import { useIsMobile } from '../utils/useIsMobile';
 import { MilkdownBodyEditor } from './MilkdownBodyEditor';
 import { ProgressRing } from './ProgressRing';
 import { RolePillMulti } from './RolePickerPopover';
 import { SmartDatePicker } from './SmartDatePicker';
+import type { RichMarkdownEditorHandle } from './RichMarkdownEditor';
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
   { value: 'inbox', label: 'Inbox' },
@@ -172,6 +197,7 @@ function SubtaskRow({
             type="button"
             onClick={onPromote}
             title={isPromoted ? t('Demote to subtask') : t('Mark as independent task')}
+            aria-label={isPromoted ? t('Demote to subtask') : t('Mark as independent task')}
             className="opacity-0 group-hover:opacity-100 rounded p-0.5 transition-opacity mt-0.5"
             style={{ color: isPromoted ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }}
           >
@@ -181,6 +207,7 @@ function SubtaskRow({
             type="button"
             onClick={onExtract}
             title={t('Extract as independent task')}
+            aria-label={t('Extract as independent task')}
             className="opacity-0 group-hover:opacity-100 rounded p-0.5 transition-opacity mt-0.5"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
@@ -544,13 +571,15 @@ function TaskTitleField({ task }: { task: Task }) {
   const updateTask = useTaskStore((s) => s.updateTask);
   const { t } = useTranslation('task');
   const derived = deriveTitleFromBody(task.body);
-  const [localTitle, setLocalTitle] = useState(
-    () => task.titleCustomized && task.title.trim() ? task.title : derived,
+  const [localTitle, setLocalTitle] = useState(() =>
+    task.titleCustomized && task.title.trim() ? task.title : derived,
   );
   const [editing, setEditing] = useState(false);
 
   useEffect(() => {
-    setLocalTitle(task.titleCustomized && task.title.trim() ? task.title : deriveTitleFromBody(task.body));
+    setLocalTitle(
+      task.titleCustomized && task.title.trim() ? task.title : deriveTitleFromBody(task.body),
+    );
     setEditing(false);
   }, [task.id, task.title, task.titleCustomized, task.body]);
 
@@ -620,7 +649,21 @@ function TaskTitleField({ task }: { task: Task }) {
 export type TaskBodyEditorSectionHandle = {
   flush: () => void;
   manualSave: () => void;
+  openFilePicker: () => void;
 };
+
+function buildTaskStreamEntry(task: Task, attachments: StreamEntry['attachments']): StreamEntry {
+  return {
+    id: task.sourceStreamId ?? task.id,
+    content: task.body,
+    timestamp: task.createdAt,
+    tags: task.tags,
+    attachments,
+    extractedTaskId: task.id,
+    roleId: taskRoleIds(task)[0],
+    entryType: 'task',
+  };
+}
 
 /**
  * Body editor + debounced persistence. Parent must set `key={task.id}` so Milkdown
@@ -633,13 +676,42 @@ const TaskBodyEditorSection = forwardRef<
     onBodySaveStatusChange?: (status: 'idle' | 'saving' | 'saved') => void;
   }
 >(function TaskBodyEditorSection({ task, onBodySaveStatusChange }, ref) {
+  const { t } = useTranslation('task');
   const updateTask = useTaskStore((s) => s.updateTask);
+  const streamEntries = useStreamStore((s) => s.entries);
+  const updateEntry = useStreamStore((s) => s.updateEntry);
+  const showToast = useToastStore((s) => s.showToast);
   const [localBody, setLocalBody] = useState(task.body);
   const bodyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingTaskRef = useRef<{ id: string; body: string } | null>(null);
   const localBodyRef = useRef(localBody);
   localBodyRef.current = localBody;
+  const editorRef = useRef<RichMarkdownEditorHandle>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const backingEntryId = task.sourceStreamId ?? task.id;
+  const backingEntry = streamEntries.find((entry) => entry.id === backingEntryId);
+
+  const {
+    isUploading,
+    handlePaste,
+    handleFileInputChange,
+  } = useFileHostUpload({
+    getAttachments: () => backingEntry?.attachments ?? [],
+    onAttachmentsChange: async (attachments) => {
+      const base = backingEntry
+        ? { ...backingEntry, attachments }
+        : buildTaskStreamEntry(task, attachments);
+      await updateEntry(base);
+    },
+    onInsertMarkdown: (markdown) => {
+      editorRef.current?.insertText(markdown);
+    },
+    onUploadError: (message) => {
+      showToast({ type: 'error', message });
+    },
+  });
 
   const flushPending = useCallback(() => {
     if (bodyTimerRef.current) {
@@ -697,6 +769,7 @@ const TaskBodyEditorSection = forwardRef<
     () => ({
       flush: flushPending,
       manualSave,
+      openFilePicker: () => fileInputRef.current?.click(),
     }),
     [flushPending, manualSave],
   );
@@ -706,13 +779,34 @@ const TaskBodyEditorSection = forwardRef<
   }, [task.id, onBodySaveStatusChange]);
 
   return (
-    <MilkdownBodyEditor
-      taskId={task.id}
-      initialMarkdown={localBody}
-      onMarkdownChange={handleBodyChange}
-    />
+    <>
+      {isUploading && (
+        <p className="mb-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+          {t('Uploading...')}
+        </p>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFileInputChange}
+      />
+      <MilkdownBodyEditor
+        ref={editorRef}
+        taskId={task.id}
+        initialMarkdown={localBody}
+        onMarkdownChange={handleBodyChange}
+        onPasteCapture={handlePaste}
+      />
+    </>
   );
 });
+
+function summarizeStreamPreview(content: string, maxLen: number): string {
+  const t = content.replace(/\s+/g, ' ').trim();
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, maxLen)}...`;
+}
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: complex panel with many interaction states
 export function TaskDetailPanel() {
@@ -737,12 +831,34 @@ export function TaskDetailPanel() {
   const [panelMode, setPanelMode] = useState<PanelLayoutMode>('drawer');
   const bodyEditorRef = useRef<TaskBodyEditorSectionHandle>(null);
   const streamEntries = useStreamStore((s) => s.entries);
+  const addTaskToThread = useWorkThreadStore((s) => s.addTaskToThread);
+  const setThinkStreamMode = useThinkSessionStore((s) => s.setStreamMode);
+  const setThinkWorkspaceMode = useThinkSessionStore((s) => s.setWorkspaceMode);
+
+  const projectRelatedStreamEntries = useMemo((): StreamEntry[] => {
+    if (!task || task.taskType !== 'project') return [];
+    const subtree = collectProjectSubtree(task, tasks);
+    const ids = new Set(subtree.map((t) => t.id));
+    return streamEntries
+      .filter((e) => e.extractedTaskId && ids.has(e.extractedTaskId))
+      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  }, [task, tasks, streamEntries]);
+
+  const [projectStreamOpen, setProjectStreamOpen] = useState(false);
+  const [projectStreamShowAll, setProjectStreamShowAll] = useState(false);
+
+  const openStreamEntryFromProject = useCallback((entryId: string) => {
+    sessionStorage.setItem('mlt-stream-scroll-to', entryId);
+    window.dispatchEvent(new CustomEvent('mlt-open-stream-entry'));
+  }, []);
 
   const taskId = task?.id;
 
   useEffect(() => {
     if (!taskId) return;
     setConfirmDelete(false);
+    setProjectStreamOpen(false);
+    setProjectStreamShowAll(false);
   }, [taskId]);
 
   useEffect(() => {
@@ -753,6 +869,12 @@ export function TaskDetailPanel() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [panelMode]);
+
+  const openThreadWorkspace = useCallback(() => {
+    setThinkWorkspaceMode('thread');
+    setThinkStreamMode('think');
+    window.dispatchEvent(new CustomEvent('mlt-navigate', { detail: { view: 'stream' } }));
+  }, [setThinkStreamMode, setThinkWorkspaceMode]);
 
   if (!task) return null;
 
@@ -814,7 +936,7 @@ export function TaskDetailPanel() {
             onDragEnd={(_e, info) => {
               if (isMobile && info.offset.y > 100) selectTask(null);
             }}
-            className={`fixed flex flex-col overflow-hidden shadow-2xl ${
+            className={`fixed flex flex-col min-h-0 overflow-x-hidden shadow-2xl ${
               isMobile
                 ? 'inset-x-0 bottom-0 top-[10%] z-50'
                 : panelMode === 'fullscreen'
@@ -872,6 +994,18 @@ export function TaskDetailPanel() {
                   )}
                   <button
                     type="button"
+                    onClick={() => bodyEditorRef.current?.openFilePicker()}
+                    className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] transition-colors hover:bg-[var(--color-bg)]"
+                    style={{
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                  >
+                    <Paperclip size={12} />
+                    {t('Attach file')}
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleManualSave}
                     className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium"
                     style={{
@@ -884,42 +1018,36 @@ export function TaskDetailPanel() {
                     {t('Save')}
                   </button>
                   {!isMobile && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPanelMode((m) =>
-                            m === 'fullscreen'
-                              ? 'expanded'
-                              : m === 'expanded'
-                                ? 'drawer'
-                                : 'expanded',
-                          )
-                        }
-                        className="rounded-lg p-1"
-                        style={{ color: 'var(--color-text-tertiary)' }}
-                        title={t('Expand panel')}
-                        aria-label={t('Expand panel')}
-                      >
-                        {panelMode === 'drawer' ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPanelMode((m) => (m === 'fullscreen' ? 'expanded' : 'fullscreen'))
-                        }
-                        className="rounded-lg p-1"
-                        style={{ color: 'var(--color-text-tertiary)' }}
-                        title={t('Fullscreen editor')}
-                        aria-label={t('Fullscreen editor')}
-                      >
-                        {panelMode === 'fullscreen' ? (
-                          <Minimize2 size={16} />
-                        ) : (
-                          <Maximize2 size={16} />
-                        )}
-                      </button>
-                    </>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPanelMode((m) =>
+                          m === 'drawer' ? 'expanded' : m === 'expanded' ? 'fullscreen' : 'drawer',
+                        )
+                      }
+                      className="rounded-lg p-1"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                      title={
+                        panelMode === 'drawer'
+                          ? t('Expand panel')
+                          : panelMode === 'expanded'
+                            ? t('Fullscreen editor')
+                            : t('Exit fullscreen')
+                      }
+                      aria-label={
+                        panelMode === 'drawer'
+                          ? t('Expand panel')
+                          : panelMode === 'expanded'
+                            ? t('Fullscreen editor')
+                            : t('Exit fullscreen')
+                      }
+                    >
+                      {panelMode === 'fullscreen' ? (
+                        <Minimize2 size={16} />
+                      ) : (
+                        <Maximize2 size={16} />
+                      )}
+                    </button>
                   )}
                   <button
                     type="button"
@@ -938,7 +1066,7 @@ export function TaskDetailPanel() {
               className={
                 showParentSplit
                   ? 'flex min-h-0 flex-1'
-                  : 'min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-5'
+                  : 'min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-4 space-y-5 [overflow-anchor:none]'
               }
               style={showParentSplit ? { maxHeight: 'calc(100vh - 56px)' } : undefined}
             >
@@ -986,9 +1114,10 @@ export function TaskDetailPanel() {
                 <div className="flex flex-wrap items-center gap-2">
                   <RolePillMulti
                     roleIds={taskRoleIds(task)}
-                    onChangeRoleIds={(ids) =>
-                      updateTask({ ...task, ...withTaskRoles(task, ids) })
-                    }
+                    onChangeRoleIds={async (ids) => {
+                      await updateTask({ ...task, ...withTaskRoles(task, ids) });
+                      await useStreamStore.getState().syncStreamEntryRoleForTask(task.id, ids[0]);
+                    }}
                     size="md"
                   />
                   <select
@@ -1042,6 +1171,151 @@ export function TaskDetailPanel() {
                     </select>
                   </div>
                 </div>
+
+                {/* Project container */}
+                <div
+                  className="flex flex-col gap-2 rounded-xl p-3"
+                  style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
+                >
+                  <div className="flex items-center gap-2">
+                    <FolderKanban size={16} style={{ color: 'var(--color-accent)' }} />
+                    <span
+                      className="text-[11px] font-semibold"
+                      style={{ color: 'var(--color-text-secondary)' }}
+                    >
+                      {t('Project')}
+                    </span>
+                  </div>
+                  {task.taskType === 'project' ? (
+                    <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {(() => {
+                        const { total, completed } = projectDescendantProgress(task, tasks);
+                        return t('Project subtree progress', { done: completed, total });
+                      })()}
+                    </p>
+                  ) : (
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {t('Project hint')}
+                    </p>
+                  )}
+                  {task.taskType !== 'project' ? (
+                    <button
+                      type="button"
+                      onClick={() => updateTask({ ...task, taskType: 'project' })}
+                      className="self-start rounded-lg px-3 py-1.5 text-[11px] font-medium transition-colors"
+                      style={{
+                        border: '1px solid var(--color-accent)',
+                        color: 'var(--color-accent)',
+                        background: 'var(--color-accent-soft)',
+                      }}
+                    >
+                      {t('Promote to project')}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => updateTask({ ...task, taskType: undefined })}
+                      className="self-start rounded-lg px-3 py-1.5 text-[11px] font-medium transition-colors"
+                      style={{
+                        border: '1px solid var(--color-border)',
+                        color: 'var(--color-text-secondary)',
+                        background: 'var(--color-surface)',
+                      }}
+                    >
+                      {t('Demote to regular task')}
+                    </button>
+                  )}
+                </div>
+
+                {task.taskType === 'project' && (
+                  <div
+                    className="rounded-xl overflow-hidden"
+                    style={{ border: '1px solid var(--color-border)' }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setProjectStreamOpen((o) => !o)}
+                      className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left"
+                      style={{ background: 'var(--color-bg)' }}
+                    >
+                      <span
+                        className="flex items-center gap-2 text-xs font-medium"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                      >
+                        <Wind size={14} style={{ color: 'var(--color-accent)' }} />
+                        {t('Project related stream')}
+                        {projectRelatedStreamEntries.length > 0 && (
+                          <span
+                            className="text-[10px] font-normal"
+                            style={{ color: 'var(--color-text-tertiary)' }}
+                          >
+                            ({projectRelatedStreamEntries.length})
+                          </span>
+                        )}
+                      </span>
+                      <ChevronDown
+                        size={16}
+                        className="shrink-0 transition-transform"
+                        style={{
+                          transform: projectStreamOpen ? 'rotate(180deg)' : undefined,
+                          color: 'var(--color-text-tertiary)',
+                        }}
+                      />
+                    </button>
+                    {projectStreamOpen && (
+                      <div
+                        className="px-3 pb-3 pt-0 space-y-1"
+                        style={{ borderTop: '1px solid var(--color-border)' }}
+                      >
+                        {projectRelatedStreamEntries.length === 0 ? (
+                          <p
+                            className="text-[11px] py-2"
+                            style={{ color: 'var(--color-text-tertiary)' }}
+                          >
+                            {t('Project related stream empty')}
+                          </p>
+                        ) : (
+                          <>
+                            {(projectStreamShowAll
+                              ? projectRelatedStreamEntries
+                              : projectRelatedStreamEntries.slice(0, 10)
+                            ).map((e) => (
+                              <button
+                                key={e.id}
+                                type="button"
+                                onClick={() => openStreamEntryFromProject(e.id)}
+                                className="flex w-full flex-col gap-0.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-surface)]"
+                              >
+                                <span
+                                  className="text-[10px] tabular-nums"
+                                  style={{ color: 'var(--color-text-tertiary)' }}
+                                >
+                                  {e.timestamp.toLocaleString()}
+                                </span>
+                                <span
+                                  className="text-[12px] leading-snug line-clamp-2"
+                                  style={{ color: 'var(--color-text)' }}
+                                >
+                                  {summarizeStreamPreview(e.content, 80)}
+                                </span>
+                              </button>
+                            ))}
+                            {projectRelatedStreamEntries.length > 10 && !projectStreamShowAll && (
+                              <button
+                                type="button"
+                                onClick={() => setProjectStreamShowAll(true)}
+                                className="w-full pt-1 text-[11px] font-medium"
+                                style={{ color: 'var(--color-accent)' }}
+                              >
+                                {t('Show more related stream')}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Planned At */}
                 <SmartDatePicker
@@ -1239,9 +1513,10 @@ export function TaskDetailPanel() {
                 )}
 
                 {/* Source spark link */}
-                {task.sourceStreamId &&
+                {(task.sourceStreamId ?? task.id) &&
                   (() => {
-                    const source = streamEntries.find((e) => e.id === task.sourceStreamId);
+                    const sourceEntryId = task.sourceStreamId ?? task.id;
+                    const source = streamEntries.find((e) => e.id === sourceEntryId);
                     return source ? (
                       <div
                         className="flex items-center gap-1.5 text-xs"
@@ -1280,6 +1555,37 @@ export function TaskDetailPanel() {
                   className="pt-4 flex items-center gap-3"
                   style={{ borderTop: '1px solid var(--color-border)' }}
                 >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void addTaskToThread(task, 'current');
+                      openThreadWorkspace();
+                    }}
+                    className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                    style={{
+                      color: 'var(--color-text-secondary)',
+                      border: '1px solid var(--color-border)',
+                    }}
+                  >
+                    <NotebookPen size={12} />
+                    {t('Add to thread')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void addTaskToThread(task, 'new');
+                      openThreadWorkspace();
+                    }}
+                    className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                    style={{
+                      color: 'var(--color-accent)',
+                      border: '1px solid var(--color-accent)',
+                      background: 'var(--color-accent-soft)',
+                    }}
+                  >
+                    <NotebookPen size={12} />
+                    {t('New thread from task')}
+                  </button>
                   <button
                     type="button"
                     onClick={handleDelete}

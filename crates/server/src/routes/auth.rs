@@ -75,7 +75,11 @@ fn internal(msg: &str) -> (axum::http::StatusCode, Json<ErrorBody>) {
 }
 
 pub async fn get_mode(State(state): State<AppState>) -> AuthResult<AuthModeResponse> {
-    let count = state.db.count_users().await.map_err(|e| internal(&e.to_string()))?;
+    let count = state
+        .db
+        .count_users()
+        .await
+        .map_err(|e| internal(&e.to_string()))?;
     let mode = match state.config.auth_mode {
         AuthMode::None => "none",
         AuthMode::Single => "single",
@@ -108,13 +112,21 @@ pub async fn register(
     }
 
     if state.config.auth_mode == AuthMode::Single {
-        let count = state.db.count_users().await.map_err(|e| internal(&e.to_string()))?;
+        let count = state
+            .db
+            .count_users()
+            .await
+            .map_err(|e| internal(&e.to_string()))?;
         if count > 0 {
             return Err(bad_request("Single-user mode: registration disabled"));
         }
     }
 
-    let count = state.db.count_users().await.map_err(|e| internal(&e.to_string()))?;
+    let count = state
+        .db
+        .count_users()
+        .await
+        .map_err(|e| internal(&e.to_string()))?;
     let is_admin = count == 0;
 
     let password_hash =
@@ -130,9 +142,13 @@ pub async fn register(
         .await
         .map_err(|e| internal(&e.to_string()))?;
 
-    let token =
-        jwt::sign_token(&user.id, &user.username, user.is_admin, &state.config.jwt_secret)
-            .map_err(|e| internal(&e.to_string()))?;
+    let token = jwt::sign_token(
+        &user.id,
+        &user.username,
+        user.is_admin,
+        &state.config.jwt_secret,
+    )
+    .map_err(|e| internal(&e.to_string()))?;
 
     Ok(Json(TokenResponse {
         token,
@@ -161,9 +177,13 @@ pub async fn login(
         return Err(unauthorized("Invalid username or password"));
     }
 
-    let token =
-        jwt::sign_token(&user.id, &user.username, user.is_admin, &state.config.jwt_secret)
-            .map_err(|e| internal(&e.to_string()))?;
+    let token = jwt::sign_token(
+        &user.id,
+        &user.username,
+        user.is_admin,
+        &state.config.jwt_secret,
+    )
+    .map_err(|e| internal(&e.to_string()))?;
 
     Ok(Json(TokenResponse {
         token,

@@ -1,10 +1,12 @@
 use async_trait::async_trait;
-use sqlx::Sqlite;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use sqlx::Sqlite;
 
 use super::traits::{BlobMeta, ChangeRecord, DatabaseProvider, NewUser, User};
 
-async fn bump_version_sqlite<'e, E: sqlx::Executor<'e, Database = Sqlite>>(e: E) -> anyhow::Result<i64> {
+async fn bump_version_sqlite<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
+    e: E,
+) -> anyhow::Result<i64> {
     let row: (i64,) = sqlx::query_as(
         "UPDATE version_seq SET current_version = current_version + 1 WHERE id = 1 RETURNING current_version",
     )
@@ -23,17 +25,19 @@ async fn upsert_task_json_tx(
     let updated_at = v["updated_at"].as_i64().unwrap_or(0);
     sqlx::query(
         r#"INSERT INTO tasks (
-                user_id, id, title, description, status, body, created_at, updated_at, completed_at,
+                user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
                 ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+                task_type,
                 tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
                 version, deleted_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id, id) DO UPDATE SET
-                title=excluded.title, description=excluded.description, status=excluded.status, body=excluded.body,
+                title=excluded.title, title_customized=excluded.title_customized, description=excluded.description, status=excluded.status, body=excluded.body,
                 created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
                 ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
                 role_id=excluded.role_id, role_ids=excluded.role_ids, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
                 priority=excluded.priority, promoted=excluded.promoted, phase=excluded.phase, kanban_column=excluded.kanban_column,
+                task_type=excluded.task_type,
                 tags=excluded.tags, subtask_ids=excluded.subtask_ids, resources=excluded.resources,
                 reminders=excluded.reminders, submissions=excluded.submissions, postponements=excluded.postponements,
                 status_history=excluded.status_history, progress_logs=excluded.progress_logs,
@@ -42,6 +46,7 @@ async fn upsert_task_json_tx(
     .bind(user_id)
     .bind(v["id"].as_str().unwrap_or(""))
     .bind(v["title"].as_str().unwrap_or(""))
+    .bind(v["title_customized"].as_i64().unwrap_or(0))
     .bind(v["description"].as_str())
     .bind(v["status"].as_str().unwrap_or("inbox"))
     .bind(v["body"].as_str().unwrap_or(""))
@@ -59,6 +64,7 @@ async fn upsert_task_json_tx(
     .bind(v["promoted"].as_i64())
     .bind(v["phase"].as_str())
     .bind(v["kanban_column"].as_str())
+    .bind(v["task_type"].as_str())
     .bind(v["tags"].as_str().unwrap_or("[]"))
     .bind(v["subtask_ids"].as_str().unwrap_or("[]"))
     .bind(v["resources"].as_str().unwrap_or("[]"))
@@ -195,7 +201,20 @@ async fn apply_remote_change_tx(
                 .await?;
             }
         }
-        "blobs" => {}
+        "blobs" => {
+            if change.deleted_at.is_some() {
+                let next_ver = bump_version_sqlite(&mut **tx).await?;
+                sqlx::query(
+                    "UPDATE blobs SET deleted_at = datetime('now'), version = ?
+                     WHERE owner = ? AND id = ? AND deleted_at IS NULL",
+                )
+                .bind(next_ver)
+                .bind(user_id)
+                .bind(&change.key)
+                .execute(&mut **tx)
+                .await?;
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -222,13 +241,12 @@ impl SqliteProvider {
         .execute(&pool)
         .await?;
 
-        let current_version: i64 = sqlx::query_as::<_, (i64,)>(
-            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-        )
-        .fetch_one(&pool)
-        .await
-        .map(|r| r.0)
-        .unwrap_or(0);
+        let current_version: i64 =
+            sqlx::query_as::<_, (i64,)>("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+                .fetch_one(&pool)
+                .await
+                .map(|r| r.0)
+                .unwrap_or(0);
 
         // --- V1: initial schema ---
         if current_version < 1 {
@@ -294,17 +312,13 @@ impl SqliteProvider {
             }
 
             // Performance indexes
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS idx_files_updated ON files (updated_at)",
-            )
-            .execute(&pool)
-            .await?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS idx_files_updated ON files (updated_at)")
+                .execute(&pool)
+                .await?;
 
-            sqlx::query(
-                "CREATE INDEX IF NOT EXISTS idx_settings_user ON settings (user_id)",
-            )
-            .execute(&pool)
-            .await?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS idx_settings_user ON settings (user_id)")
+                .execute(&pool)
+                .await?;
 
             sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (2)")
                 .execute(&pool)
@@ -552,9 +566,11 @@ impl SqliteProvider {
                 sqlx::query("ALTER TABLE stream_entries ADD COLUMN updated_at INTEGER")
                     .execute(&pool)
                     .await?;
-                sqlx::query("UPDATE stream_entries SET updated_at = timestamp WHERE updated_at IS NULL")
-                    .execute(&pool)
-                    .await?;
+                sqlx::query(
+                    "UPDATE stream_entries SET updated_at = timestamp WHERE updated_at IS NULL",
+                )
+                .execute(&pool)
+                .await?;
             }
 
             sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (6)")
@@ -594,15 +610,53 @@ impl SqliteProvider {
             .unwrap_or(false);
 
             if !has_title_customized {
-                sqlx::query("ALTER TABLE tasks ADD COLUMN title_customized INTEGER NOT NULL DEFAULT 0")
-                    .execute(&pool)
-                    .await?;
-                sqlx::query("UPDATE tasks SET title = '', title_customized = 0")
+                sqlx::query(
+                    "ALTER TABLE tasks ADD COLUMN title_customized INTEGER NOT NULL DEFAULT 0",
+                )
+                .execute(&pool)
+                .await?;
+                sqlx::query(
+                    "UPDATE tasks SET title_customized = CASE WHEN length(trim(title)) > 0 THEN 1 ELSE 0 END",
+                )
                     .execute(&pool)
                     .await?;
             }
 
             sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (8)")
+                .execute(&pool)
+                .await?;
+        }
+
+        // --- V9: repair title_customized for rows with non-empty title but flag 0 ---
+        if current_version < 9 {
+            sqlx::query(
+                "UPDATE tasks SET title_customized = 1 WHERE length(trim(title)) > 0 AND title_customized = 0",
+            )
+            .execute(&pool)
+            .await?;
+
+            sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (9)")
+                .execute(&pool)
+                .await?;
+        }
+
+        // --- V10: tasks.task_type (project vs task) ---
+        if current_version < 10 {
+            let has_task_type: bool = sqlx::query_as::<_, (i64,)>(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name = 'task_type'",
+            )
+            .fetch_one(&pool)
+            .await
+            .map(|r| r.0 > 0)
+            .unwrap_or(false);
+
+            if !has_task_type {
+                sqlx::query("ALTER TABLE tasks ADD COLUMN task_type TEXT")
+                    .execute(&pool)
+                    .await?;
+            }
+
+            sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (10)")
                 .execute(&pool)
                 .await?;
         }
@@ -623,6 +677,7 @@ impl DatabaseProvider for SqliteProvider {
                 'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
                 'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                 'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                'task_type', task_type,
                 'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                 'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
                 'status_history', status_history, 'progress_logs', progress_logs,
@@ -643,6 +698,7 @@ impl DatabaseProvider for SqliteProvider {
                 'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
                 'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                 'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                'task_type', task_type,
                 'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                 'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
                 'status_history', status_history, 'progress_logs', progress_logs,
@@ -664,15 +720,17 @@ impl DatabaseProvider for SqliteProvider {
             r#"INSERT INTO tasks (
                 user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
                 ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+                task_type,
                 tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
                 version, deleted_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id, id) DO UPDATE SET
                 title=excluded.title, title_customized=excluded.title_customized, description=excluded.description, status=excluded.status, body=excluded.body,
                 created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
                 ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
                 role_id=excluded.role_id, role_ids=excluded.role_ids, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
                 priority=excluded.priority, promoted=excluded.promoted, phase=excluded.phase, kanban_column=excluded.kanban_column,
+                task_type=excluded.task_type,
                 tags=excluded.tags, subtask_ids=excluded.subtask_ids, resources=excluded.resources,
                 reminders=excluded.reminders, submissions=excluded.submissions, postponements=excluded.postponements,
                 status_history=excluded.status_history, progress_logs=excluded.progress_logs,
@@ -699,6 +757,7 @@ impl DatabaseProvider for SqliteProvider {
         .bind(v["promoted"].as_i64())
         .bind(v["phase"].as_str())
         .bind(v["kanban_column"].as_str())
+        .bind(v["task_type"].as_str())
         .bind(v["tags"].as_str().unwrap_or("[]"))
         .bind(v["subtask_ids"].as_str().unwrap_or("[]"))
         .bind(v["resources"].as_str().unwrap_or("[]"))
@@ -737,7 +796,11 @@ impl DatabaseProvider for SqliteProvider {
 
     // --- Stream ---
 
-    async fn list_stream_day_json(&self, user_id: &str, date_key: &str) -> anyhow::Result<Vec<String>> {
+    async fn list_stream_day_json(
+        &self,
+        user_id: &str,
+        date_key: &str,
+    ) -> anyhow::Result<Vec<String>> {
         let rows: Vec<(String,)> = sqlx::query_as(
             r#"SELECT json_object(
                 'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
@@ -753,7 +816,11 @@ impl DatabaseProvider for SqliteProvider {
         Ok(rows.into_iter().map(|r| r.0).collect())
     }
 
-    async fn list_stream_recent_json(&self, user_id: &str, days: i32) -> anyhow::Result<Vec<String>> {
+    async fn list_stream_recent_json(
+        &self,
+        user_id: &str,
+        days: i32,
+    ) -> anyhow::Result<Vec<String>> {
         let offset = format!("-{} days", days.max(1));
         let rows: Vec<(String,)> = sqlx::query_as(
             r#"SELECT json_object(
@@ -797,7 +864,12 @@ impl DatabaseProvider for SqliteProvider {
         Ok(rows.into_iter().map(|r| r.0).collect())
     }
 
-    async fn search_stream_json(&self, user_id: &str, q: &str, limit: i64) -> anyhow::Result<Vec<String>> {
+    async fn search_stream_json(
+        &self,
+        user_id: &str,
+        q: &str,
+        limit: i64,
+    ) -> anyhow::Result<Vec<String>> {
         let needle = q.trim();
         if needle.is_empty() {
             return Ok(vec![]);
@@ -1114,7 +1186,11 @@ impl DatabaseProvider for SqliteProvider {
 
     // --- Sync operations ---
 
-    async fn get_changes_since(&self, user_id: &str, since_version: i64) -> anyhow::Result<Vec<ChangeRecord>> {
+    async fn get_changes_since(
+        &self,
+        user_id: &str,
+        since_version: i64,
+    ) -> anyhow::Result<Vec<ChangeRecord>> {
         let mut changes = Vec::new();
 
         let task_rows: Vec<(String, String, i64, i64, Option<String>)> = sqlx::query_as(
@@ -1125,6 +1201,7 @@ impl DatabaseProvider for SqliteProvider {
                     'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
                     'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                     'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                    'task_type', task_type,
                     'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                     'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
                     'status_history', status_history, 'progress_logs', progress_logs,
@@ -1142,11 +1219,7 @@ impl DatabaseProvider for SqliteProvider {
             changes.push(ChangeRecord {
                 table: "tasks".into(),
                 key: r.0,
-                data: if r.4.is_some() {
-                    None
-                } else {
-                    Some(r.1)
-                },
+                data: if r.4.is_some() { None } else { Some(r.1) },
                 version: r.2,
                 updated_at: r.3.to_string(),
                 deleted_at: r.4,
@@ -1175,25 +1248,22 @@ impl DatabaseProvider for SqliteProvider {
             changes.push(ChangeRecord {
                 table: "stream_entries".into(),
                 key: r.0,
-                data: if r.4.is_some() {
-                    None
-                } else {
-                    Some(r.1)
-                },
+                data: if r.4.is_some() { None } else { Some(r.1) },
                 version: r.2,
                 updated_at: r.3.to_string(),
                 deleted_at: r.4,
             });
         }
 
-        let setting_rows: Vec<(String, Option<String>, i64, String, Option<String>)> = sqlx::query_as(
-            "SELECT key, value, version, updated_at, deleted_at
+        let setting_rows: Vec<(String, Option<String>, i64, String, Option<String>)> =
+            sqlx::query_as(
+                "SELECT key, value, version, updated_at, deleted_at
              FROM settings WHERE user_id = ? AND version > ? ORDER BY version",
-        )
-        .bind(user_id)
-        .bind(since_version)
-        .fetch_all(&self.pool)
-        .await?;
+            )
+            .bind(user_id)
+            .bind(since_version)
+            .fetch_all(&self.pool)
+            .await?;
 
         for r in setting_rows {
             let payload = r.1.as_ref().map(|val| {
@@ -1239,11 +1309,10 @@ impl DatabaseProvider for SqliteProvider {
     }
 
     async fn get_max_version(&self) -> anyhow::Result<i64> {
-        let row: (i64,) =
-            sqlx::query_as("SELECT current_version FROM version_seq WHERE id = 1")
-                .fetch_one(&self.pool)
-                .await
-                .unwrap_or((0,));
+        let row: (i64,) = sqlx::query_as("SELECT current_version FROM version_seq WHERE id = 1")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or((0,));
         Ok(row.0)
     }
 
@@ -1268,14 +1337,22 @@ impl DatabaseProvider for SqliteProvider {
         Ok(row.0)
     }
 
-    async fn apply_remote_change(&self, user_id: &str, change: &ChangeRecord) -> anyhow::Result<()> {
+    async fn apply_remote_change(
+        &self,
+        user_id: &str,
+        change: &ChangeRecord,
+    ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         apply_remote_change_tx(&mut tx, user_id, change).await?;
         tx.commit().await?;
         Ok(())
     }
 
-    async fn apply_remote_changes_batch(&self, user_id: &str, changes: &[ChangeRecord]) -> anyhow::Result<()> {
+    async fn apply_remote_changes_batch(
+        &self,
+        user_id: &str,
+        changes: &[ChangeRecord],
+    ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         for change in changes {
             apply_remote_change_tx(&mut tx, user_id, change).await?;

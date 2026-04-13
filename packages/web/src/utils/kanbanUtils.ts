@@ -1,5 +1,7 @@
 import type { KanbanColumn, Task } from '@my-little-todo/core';
 import {
+  displayTaskTitle,
+  enclosingProject,
   estimateTaskProgress,
   isNearFinishing,
   taskRoleIds,
@@ -7,7 +9,7 @@ import {
 } from '@my-little-todo/core';
 
 /** How tasks are grouped into the five Kanban columns. */
-export type KanbanGroupMode = 'status' | 'priority' | 'role';
+export type KanbanGroupMode = 'status' | 'priority' | 'role' | 'project';
 
 export const KANBAN_COLUMNS: { id: KanbanColumn; labelKey: string }[] = [
   { id: 'ideas', labelKey: 'Ideas pool' },
@@ -96,12 +98,7 @@ export function bucketTasksByRole(
   roleColumnIds: string[],
 ): Record<KanbanColumn, Task[]> {
   const buckets = emptyBuckets();
-  const [r0, r1, r2, r3] = [
-    roleColumnIds[0],
-    roleColumnIds[1],
-    roleColumnIds[2],
-    roleColumnIds[3],
-  ];
+  const [r0, r1, r2, r3] = [roleColumnIds[0], roleColumnIds[1], roleColumnIds[2], roleColumnIds[3]];
 
   for (const t of tasks) {
     if (t.parentId && !t.promoted) continue;
@@ -133,9 +130,47 @@ export function bucketTasksForGroupMode(
   mode: KanbanGroupMode,
   roleColumnIds: string[],
 ): Record<KanbanColumn, Task[]> {
-  if (mode === 'status') return bucketTasksByKanban(tasks, allTasks);
+  if (mode === 'status' || mode === 'project') return bucketTasksByKanban(tasks, allTasks);
   if (mode === 'priority') return bucketTasksByPriority(tasks, allTasks);
   return bucketTasksByRole(tasks, allTasks, roleColumnIds);
+}
+
+/** Within one Kanban column, group tasks by enclosing project (for project group mode). */
+export function groupColumnTasksByProject(
+  columnTasks: Task[],
+  allTasks: Task[],
+  ungroupedLabel: string,
+): { label: string; tasks: Task[] }[] {
+  const map = new Map<string, Task[]>();
+  const order: string[] = [];
+  for (const t of columnTasks) {
+    const proj = enclosingProject(t, allTasks);
+    const key = proj?.id ?? '__none__';
+    if (!map.has(key)) {
+      order.push(key);
+      map.set(key, []);
+    }
+    map.get(key)!.push(t);
+  }
+  const groups: { label: string; tasks: Task[] }[] = order.map((key) => {
+    if (key === '__none__') {
+      return { label: ungroupedLabel, tasks: map.get(key) ?? [] };
+    }
+    const p = allTasks.find((x) => x.id === key);
+    return {
+      label: p ? displayTaskTitle(p) : key,
+      tasks: map.get(key) ?? [],
+    };
+  });
+  for (const g of groups) {
+    g.tasks.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+  }
+  groups.sort((a, b) => {
+    if (a.label === ungroupedLabel && b.label !== ungroupedLabel) return 1;
+    if (a.label !== ungroupedLabel && b.label === ungroupedLabel) return -1;
+    return a.label.localeCompare(b.label);
+  });
+  return groups;
 }
 
 /** Target priority when dropping into a column (priority mode). */
@@ -157,10 +192,7 @@ export function priorityForColumn(col: KanbanColumn): number | null {
 }
 
 /** Target role id when dropping into a column (role mode); null = unassigned (ideas column). */
-export function roleIdForColumn(
-  col: KanbanColumn,
-  roleColumnIds: string[],
-): string | null {
+export function roleIdForColumn(col: KanbanColumn, roleColumnIds: string[]): string | null {
   if (col === 'done_recent') return null;
   const [r0, r1, r2, r3] = roleColumnIds;
   switch (col) {
@@ -199,7 +231,7 @@ export function buildKanbanDropPatch(
   mode: KanbanGroupMode,
   roleColumnIds: string[],
 ): Partial<Task> {
-  if (mode === 'status') {
+  if (mode === 'status' || mode === 'project') {
     return buildStatusKanbanPatch(task, targetCol);
   }
   if (mode === 'priority') {

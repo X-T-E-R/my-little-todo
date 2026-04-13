@@ -1,0 +1,37 @@
+import { useEffect, useState } from 'react';
+import { ContextBar } from '../components/ContextBar';
+import { useForegroundBridge } from '../hooks/useForegroundBridge';
+import { useModuleStore } from '../modules';
+import { useRoleStore, useTaskStore } from '../stores';
+import { useWindowContextStore } from '../stores/windowContextStore';
+
+export function ContextBarShell() {
+  useForegroundBridge();
+  const hydrate = useModuleStore((s) => s.hydrate);
+  const loadRoles = useRoleStore((s) => s.load);
+  const loadTasks = useTaskStore((s) => s.load);
+  const loadContexts = useWindowContextStore((s) => s.loadContexts);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      await hydrate();
+      await loadRoles();
+      await loadTasks();
+      await loadContexts();
+      setReady(true);
+    })();
+  }, [hydrate, loadRoles, loadTasks, loadContexts]);
+
+  return (
+    <div
+      className="h-screen w-screen overflow-hidden px-2 pt-1 transition-opacity duration-200"
+      style={{
+        background: 'transparent',
+        opacity: ready ? 1 : 0,
+      }}
+    >
+      <ContextBar />
+    </div>
+  );
+}

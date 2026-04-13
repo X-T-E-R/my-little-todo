@@ -3,7 +3,7 @@
  * Tasks and stream entries are first-class tables (not virtual files).
  */
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 11;
 
 export const CREATE_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -37,6 +37,7 @@ export const CREATE_TABLES_SQL = [
     promoted INTEGER,
     phase TEXT,
     kanban_column TEXT,
+    task_type TEXT,
     tags TEXT NOT NULL DEFAULT '[]',
     subtask_ids TEXT NOT NULL DEFAULT '[]',
     resources TEXT NOT NULL DEFAULT '[]',
@@ -82,6 +83,56 @@ export const CREATE_TABLES_SQL = [
     deleted_at INTEGER,
     version    INTEGER NOT NULL DEFAULT 0
   )`,
+
+  /** Local-only: 理一理 (Think Session) markdown sessions. */
+  `CREATE TABLE IF NOT EXISTS think_sessions (
+    id TEXT PRIMARY KEY,
+    content TEXT NOT NULL DEFAULT '',
+    start_mode TEXT NOT NULL DEFAULT 'blank',
+    extracted_actions TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+
+  /** Local-only: work threads with structured context + current markdown doc. */
+  `CREATE TABLE IF NOT EXISTS work_threads (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    role_id TEXT,
+    doc_markdown TEXT NOT NULL DEFAULT '',
+    context_items TEXT NOT NULL DEFAULT '[]',
+    next_actions TEXT NOT NULL DEFAULT '[]',
+    suggestions TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`,
+
+  /** Local-only: work thread milestone timeline. */
+  `CREATE TABLE IF NOT EXISTS work_thread_events (
+    id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    title TEXT NOT NULL,
+    detail_markdown TEXT,
+    payload TEXT,
+    created_at INTEGER NOT NULL
+  )`,
+
+  /** Local-only: foreground window → roles + note (Tauri Windows). */
+  `CREATE TABLE IF NOT EXISTS window_contexts (
+    id               TEXT PRIMARY KEY,
+    process_name     TEXT,
+    display_name     TEXT,
+    title_pattern    TEXT,
+    match_mode       TEXT NOT NULL DEFAULT 'contains',
+    role_ids         TEXT NOT NULL DEFAULT '[]',
+    note             TEXT NOT NULL DEFAULT '',
+    created_at       INTEGER NOT NULL,
+    updated_at       INTEGER NOT NULL,
+    last_matched_at  INTEGER
+  )`,
 ];
 
 export const CREATE_INDEXES_SQL = [
@@ -95,4 +146,7 @@ export const CREATE_INDEXES_SQL = [
   'CREATE INDEX IF NOT EXISTS idx_settings_updated ON settings(updated_at)',
   'CREATE INDEX IF NOT EXISTS idx_settings_version ON settings(version)',
   'CREATE INDEX IF NOT EXISTS idx_blobs_deleted ON blobs(deleted_at)',
+  'CREATE INDEX IF NOT EXISTS idx_think_sessions_updated ON think_sessions(updated_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_work_threads_updated ON work_threads(updated_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_work_thread_events_thread ON work_thread_events(thread_id, created_at DESC)',
 ];

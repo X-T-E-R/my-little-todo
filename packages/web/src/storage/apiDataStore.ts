@@ -6,10 +6,22 @@ import {
   taskFromDbRow,
   taskToDbRow,
 } from '@my-little-todo/core';
-import type { StreamEntry, Task } from '@my-little-todo/core';
+import type {
+  StreamEntry,
+  Task,
+  ThinkSession,
+  WindowContext,
+  WorkThread,
+  WorkThreadEvent,
+} from '@my-little-todo/core';
 import { getAuthToken } from '../stores/authStore';
 import type { AttachmentConfig, UploadResult } from './blobApi';
 import type { DataStore } from './dataStore';
+import { getPrimaryRoleId, hydrateTaskWithEntry } from './taskEntryBridge';
+
+const THINK_SESSIONS_KV = 'think-sessions:v1';
+const WORK_THREADS_KV = 'work-threads:v1';
+const WORK_THREAD_EVENTS_KV = 'work-thread-events:v1';
 
 export function createApiDataStore(baseUrl: string, token?: string): DataStore {
   const jsonHeaders = (): HeadersInit => {
@@ -26,12 +38,48 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
     return h;
   };
 
+  const fetchTaskRows = async (): Promise<TaskDbRow[]> => {
+    const res = await fetch(`${baseUrl}/api/tasks`, { headers: authOnly() });
+    if (!res.ok) return [];
+    const rows = (await res.json()) as string[];
+    return rows.map((s) => JSON.parse(s) as TaskDbRow);
+  };
+
+  const fetchAllStreamEntries = async (): Promise<StreamEntry[]> => {
+    const res = await fetch(`${baseUrl}/api/stream/all`, { headers: authOnly() });
+    if (!res.ok) return [];
+    const rows = (await res.json()) as string[];
+    return rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow));
+  };
+
+  const hydrateTasks = async (taskRows: TaskDbRow[]): Promise<Task[]> => {
+    if (taskRows.length === 0) return [];
+    const entries = await fetchAllStreamEntries();
+    const entriesById = new Map(entries.map((entry) => [entry.id, entry] as const));
+    return taskRows.map((row) =>
+      hydrateTaskWithEntry(
+        taskFromDbRow(row),
+        entriesById.get(row.id) ?? (row.source_stream_id ? entriesById.get(row.source_stream_id) : undefined),
+      ),
+    );
+  };
+
+  const attachTaskLinks = async (entries: StreamEntry[]): Promise<StreamEntry[]> => {
+    if (entries.length === 0) return entries;
+    const taskRows = await fetchTaskRows();
+    const entryToTaskId = new Map<string, string>();
+    for (const row of taskRows) {
+      entryToTaskId.set(row.source_stream_id ?? row.id, row.id);
+    }
+    return entries.map((entry) => ({
+      ...entry,
+      extractedTaskId: entryToTaskId.get(entry.id),
+    }));
+  };
+
   return {
     async getAllTasks(): Promise<Task[]> {
-      const res = await fetch(`${baseUrl}/api/tasks`, { headers: authOnly() });
-      if (!res.ok) return [];
-      const rows = (await res.json()) as string[];
-      return rows.map((s) => taskFromDbRow(JSON.parse(s) as TaskDbRow));
+      return hydrateTasks(await fetchTaskRows());
     },
 
     async getTask(id: string): Promise<Task | null> {
@@ -41,10 +89,31 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
       if (res.status === 404) return null;
       if (!res.ok) return null;
       const row = (await res.json()) as TaskDbRow;
-      return taskFromDbRow(row);
+      const [task] = await hydrateTasks([row]);
+      return task ?? null;
     },
 
     async putTask(task: Task): Promise<void> {
+      const streamRow = streamEntryToDbRow(
+        {
+          id: task.id,
+          content: task.body,
+          timestamp: task.createdAt,
+          tags: task.tags,
+          attachments: [],
+          roleId: getPrimaryRoleId(task),
+          entryType: 'task',
+        },
+        0,
+        null,
+      );
+      const streamRes = await fetch(`${baseUrl}/api/stream/${encodeURIComponent(task.id)}`, {
+        method: 'PUT',
+        headers: jsonHeaders(),
+        body: JSON.stringify(streamRow),
+      });
+      if (!streamRes.ok) throw new Error(`putStreamEntry failed: HTTP ${streamRes.status}`);
+
       const row = taskToDbRow(task, 0, null);
       const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(task.id)}`, {
         method: 'PUT',
@@ -55,6 +124,21 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
     },
 
     async deleteTask(id: string): Promise<void> {
+      const [taskRes, streamRes] = await Promise.all([
+        fetch(`${baseUrl}/api/tasks/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: authOnly(),
+        }),
+        fetch(`${baseUrl}/api/stream/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: authOnly(),
+        }),
+      ]);
+      if (!taskRes.ok) throw new Error(`deleteTask failed: HTTP ${taskRes.status}`);
+      if (!streamRes.ok) throw new Error(`deleteStreamEntry failed: HTTP ${streamRes.status}`);
+    },
+
+    async deleteTaskFacet(id: string): Promise<void> {
       const res = await fetch(`${baseUrl}/api/tasks/${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: authOnly(),
@@ -68,7 +152,7 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
       });
       if (!res.ok) return [];
       const rows = (await res.json()) as string[];
-      return rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow));
+      return attachTaskLinks(rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow)));
     },
 
     async getRecentStream(days = 14): Promise<StreamEntry[]> {
@@ -78,7 +162,7 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
       );
       if (!res.ok) return [];
       const rows = (await res.json()) as string[];
-      return rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow));
+      return attachTaskLinks(rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow)));
     },
 
     async listStreamDateKeys(): Promise<string[]> {
@@ -97,7 +181,7 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
       );
       if (!res.ok) return [];
       const rows = (await res.json()) as string[];
-      return rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow));
+      return attachTaskLinks(rows.map((s) => streamEntryFromDbRow(JSON.parse(s) as StreamEntryDbRow)));
     },
 
     async putStreamEntry(entry: StreamEntry): Promise<void> {
@@ -111,11 +195,20 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
     },
 
     async deleteStreamEntry(id: string): Promise<void> {
-      const res = await fetch(`${baseUrl}/api/stream/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: authOnly(),
-      });
-      if (!res.ok) throw new Error(`deleteStreamEntry failed: HTTP ${res.status}`);
+      const [streamRes, taskRes] = await Promise.all([
+        fetch(`${baseUrl}/api/stream/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: authOnly(),
+        }),
+        fetch(`${baseUrl}/api/tasks/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: authOnly(),
+        }),
+      ]);
+      if (!streamRes.ok) throw new Error(`deleteStreamEntry failed: HTTP ${streamRes.status}`);
+      if (!taskRes.ok && taskRes.status !== 404) {
+        throw new Error(`deleteTask failed: HTTP ${taskRes.status}`);
+      }
     },
 
     async getSetting(key: string): Promise<string | null> {
@@ -175,6 +268,17 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
       return `${baseUrl}/api/blobs/${id}`;
     },
 
+    async getBlobData(id: string) {
+      const res = await fetch(`${baseUrl}/api/blobs/${id}`, { headers: authOnly() });
+      if (!res.ok) return null;
+      const buffer = await res.arrayBuffer();
+      return {
+        data: new Uint8Array(buffer),
+        mimeType: res.headers.get('content-type') || 'application/octet-stream',
+        filename: id,
+      };
+    },
+
     async deleteBlob(id: string): Promise<void> {
       await fetch(`${baseUrl}/api/blobs/${id}`, {
         method: 'DELETE',
@@ -203,6 +307,121 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
           storage: 'local',
           image_host_url: '',
         };
+      }
+    },
+
+    async getAllWindowContexts(): Promise<WindowContext[]> {
+      return [];
+    },
+
+    async putWindowContext(_ctx: WindowContext): Promise<void> {
+      /* server-side window contexts not implemented */
+    },
+
+    async deleteWindowContext(_id: string): Promise<void> {
+      /* server-side window contexts not implemented */
+    },
+
+    async saveThinkSession(session: ThinkSession): Promise<void> {
+      const all = await this.listThinkSessions(5000);
+      const idx = all.findIndex((s) => s.id === session.id);
+      const next =
+        idx >= 0 ? [...all.slice(0, idx), session, ...all.slice(idx + 1)] : [session, ...all];
+      await this.putSetting(THINK_SESSIONS_KV, JSON.stringify(next));
+    },
+
+    async getThinkSession(id: string): Promise<ThinkSession | null> {
+      const all = await this.listThinkSessions(5000);
+      return all.find((s) => s.id === id) ?? null;
+    },
+
+    async listThinkSessions(limit = 200): Promise<ThinkSession[]> {
+      try {
+        const raw = await this.getSetting(THINK_SESSIONS_KV);
+        if (!raw) return [];
+        const arr = JSON.parse(raw) as ThinkSession[];
+        if (!Array.isArray(arr)) return [];
+        arr.sort((a, b) => b.updatedAt - a.updatedAt);
+        const lim = Math.min(Math.max(1, limit), 500);
+        return arr.slice(0, lim);
+      } catch {
+        return [];
+      }
+    },
+
+    async deleteThinkSession(id: string): Promise<void> {
+      const all = await this.listThinkSessions(5000);
+      await this.putSetting(THINK_SESSIONS_KV, JSON.stringify(all.filter((s) => s.id !== id)));
+    },
+
+    async saveWorkThread(thread: WorkThread): Promise<void> {
+      const all = await this.listWorkThreads(5000);
+      const idx = all.findIndex((t) => t.id === thread.id);
+      const next =
+        idx >= 0 ? [...all.slice(0, idx), thread, ...all.slice(idx + 1)] : [thread, ...all];
+      await this.putSetting(WORK_THREADS_KV, JSON.stringify(next));
+    },
+
+    async getWorkThread(id: string): Promise<WorkThread | null> {
+      const all = await this.listWorkThreads(5000);
+      return all.find((thread) => thread.id === id) ?? null;
+    },
+
+    async listWorkThreads(limit = 200): Promise<WorkThread[]> {
+      try {
+        const raw = await this.getSetting(WORK_THREADS_KV);
+        if (!raw) return [];
+        const arr = JSON.parse(raw) as WorkThread[];
+        if (!Array.isArray(arr)) return [];
+        arr.sort((a, b) => b.updatedAt - a.updatedAt);
+        const lim = Math.min(Math.max(1, limit), 500);
+        return arr.slice(0, lim);
+      } catch {
+        return [];
+      }
+    },
+
+    async deleteWorkThread(id: string): Promise<void> {
+      const [threads, events] = await Promise.all([
+        this.listWorkThreads(5000),
+        this.listWorkThreadEvents(id, 5000),
+      ]);
+      await this.putSetting(
+        WORK_THREADS_KV,
+        JSON.stringify(threads.filter((thread) => thread.id !== id)),
+      );
+      if (events.length > 0) {
+        const allEventsRaw = await this.getSetting(WORK_THREAD_EVENTS_KV);
+        const allEvents = allEventsRaw ? (JSON.parse(allEventsRaw) as WorkThreadEvent[]) : [];
+        await this.putSetting(
+          WORK_THREAD_EVENTS_KV,
+          JSON.stringify(allEvents.filter((event) => event.threadId !== id)),
+        );
+      }
+    },
+
+    async appendWorkThreadEvent(event: WorkThreadEvent): Promise<void> {
+      const raw = await this.getSetting(WORK_THREAD_EVENTS_KV);
+      const base = raw ? ((JSON.parse(raw) as WorkThreadEvent[]) ?? []) : [];
+      const deduped = base.filter((item) => item.id !== event.id);
+      deduped.push(event);
+      deduped.sort((a, b) => b.createdAt - a.createdAt);
+      await this.putSetting(WORK_THREAD_EVENTS_KV, JSON.stringify(deduped.slice(0, 5000)));
+    },
+
+    async listWorkThreadEvents(threadId: string, limit = 200): Promise<WorkThreadEvent[]> {
+      try {
+        const raw = await this.getSetting(WORK_THREAD_EVENTS_KV);
+        if (!raw) return [];
+        const arr = JSON.parse(raw) as WorkThreadEvent[];
+        if (!Array.isArray(arr)) return [];
+        const filtered = arr
+          .filter((event) => event.threadId === threadId)
+          .sort((a, b) => b.createdAt - a.createdAt);
+        const lim = Math.min(Math.max(1, limit), 1000);
+        return filtered.slice(0, lim);
+      } catch {
+        return [];
       }
     },
   };

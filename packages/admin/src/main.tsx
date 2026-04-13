@@ -4,7 +4,13 @@ import './locales';
 import './styles.css';
 import { AdminApp } from './AdminApp';
 
-createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root');
+
+if (!rootElement) {
+  throw new Error('Missing root element');
+}
+
+createRoot(rootElement).render(
   <StrictMode>
     <AdminApp />
   </StrictMode>,

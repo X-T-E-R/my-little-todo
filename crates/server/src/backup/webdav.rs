@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use super::traits::BackupProvider;
+use async_trait::async_trait;
 
 /// WebDAV backup provider using HTTP requests.
 #[allow(dead_code)]

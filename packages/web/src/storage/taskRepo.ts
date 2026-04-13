@@ -1,6 +1,7 @@
-import type { Task, TaskStatus } from '@my-little-todo/core';
-import { taskId, taskRoleIds, withTaskRoles } from '@my-little-todo/core';
+import type { StreamEntry, Task, TaskStatus } from '@my-little-todo/core';
+import { streamEntryId, taskRoleIds, withTaskRoles } from '@my-little-todo/core';
 import { getDataStore } from './dataStore';
+import { normalizeTaskRoleIds } from './taskEntryBridge';
 
 export async function loadAllTasks(): Promise<Task[]> {
   return getDataStore().getAllTasks();
@@ -13,6 +14,54 @@ export async function loadTask(id: string): Promise<Task | null> {
 export async function saveTask(task: Task): Promise<void> {
   task.updatedAt = new Date();
   await getDataStore().putTask(task);
+}
+
+export async function createTaskForEntry(
+  entry: StreamEntry,
+  opts?: {
+    title?: string;
+    description?: string;
+    ddl?: Date;
+    ddlType?: Task['ddlType'];
+    roleIds?: string[];
+    parentId?: string;
+    titleCustomized?: boolean;
+  },
+): Promise<Task> {
+  const now = new Date();
+  const trimmedTitle = opts?.title?.trim() ?? '';
+  const inferredCustom = trimmedTitle.length > 0;
+  const roleIds = normalizeTaskRoleIds(
+    { roleId: undefined, roleIds: opts?.roleIds },
+    entry.roleId,
+  );
+  const task: Task = {
+    id: entry.id,
+    title: trimmedTitle,
+    titleCustomized: opts?.titleCustomized ?? inferredCustom,
+    description: opts?.description,
+    status: 'inbox',
+    createdAt: entry.timestamp,
+    updatedAt: now,
+    ddl: opts?.ddl,
+    ddlType: opts?.ddlType,
+    tags: entry.tags,
+    body: entry.content,
+    subtaskIds: [],
+    parentId: opts?.parentId,
+    sourceStreamId: entry.id,
+    roleId: roleIds[0],
+    roleIds: roleIds.length > 0 ? roleIds : undefined,
+    resources: [],
+    reminders: [],
+    submissions: [],
+    postponements: [],
+    statusHistory: [{ from: 'inbox' as const, to: 'inbox' as const, timestamp: now }],
+    phase: 'understood',
+    progressLogs: [],
+  };
+  await saveTask(task);
+  return task;
 }
 
 export async function createTask(
@@ -31,36 +80,27 @@ export async function createTask(
     titleCustomized?: boolean;
   },
 ): Promise<Task> {
-  const now = new Date();
   const trimmedTitle = title.trim();
-  const inferredCustom = trimmedTitle.length > 0;
-  const task: Task = {
-    id: taskId(),
+  const now = new Date();
+  const entry: StreamEntry = {
+    id: opts?.sourceStreamId ?? streamEntryId(),
+    content: opts?.body ?? trimmedTitle,
+    timestamp: now,
+    tags: opts?.tags ?? [],
+    attachments: [],
+    roleId: opts?.roleId,
+    entryType: 'task',
+  };
+  await getDataStore().putStreamEntry(entry);
+  return createTaskForEntry(entry, {
     title: trimmedTitle,
-    titleCustomized: opts?.titleCustomized ?? inferredCustom,
     description: opts?.description,
-    status: 'inbox',
-    createdAt: now,
-    updatedAt: now,
     ddl: opts?.ddl,
     ddlType: opts?.ddlType,
-    tags: opts?.tags ?? [],
-    body: opts?.body ?? '',
-    subtaskIds: [],
+    roleIds: normalizeTaskRoleIds({ roleId: opts?.roleId, roleIds: opts?.roleIds }, entry.roleId),
     parentId: opts?.parentId,
-    sourceStreamId: opts?.sourceStreamId,
-    roleId: opts?.roleId,
-    roleIds: opts?.roleIds,
-    resources: [],
-    reminders: [],
-    submissions: [],
-    postponements: [],
-    statusHistory: [{ from: 'inbox' as const, to: 'inbox' as const, timestamp: now }],
-    phase: 'understood',
-    progressLogs: [],
-  };
-  await saveTask(task);
-  return task;
+    titleCustomized: opts?.titleCustomized,
+  });
 }
 
 export async function deleteTask(id: string): Promise<void> {

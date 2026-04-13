@@ -40,7 +40,22 @@ export {
 } from './taskStore';
 export type { PickRecommendationOptions } from './taskStore';
 export { useRoleStore, filterByRole, NO_ROLE_FILTER } from './roleStore';
-export { useScheduleStore, isInScheduleBlock } from './scheduleStore';
+export {
+  useTimeAwarenessStore,
+  useTimeAwarenessStore as useScheduleStore,
+  isInScheduleBlock,
+  isApproachingBlock,
+  minutesUntilNextBlockStart,
+  getCurrentTimeContext,
+  getTimeSlotSuggestion,
+  computeHourlyAcceptancePatterns,
+  getHourPreferenceBoost,
+  getLearnedTimeSummary,
+} from './timeAwarenessStore';
+export type { ScheduleBlock } from './timeAwarenessStore';
 export { useShortcutStore } from './shortcutStore';
 export { useAuthStore, getAuthToken } from './authStore';
 export { useModuleStore } from '../modules/moduleStore';
+export { useWindowContextStore } from './windowContextStore';
+export { useThinkSessionStore } from './thinkSessionStore';
+export { getRecentStreamCandidates, useWorkThreadStore } from './workThreadStore';

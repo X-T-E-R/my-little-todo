@@ -29,6 +29,8 @@ pub struct ServerConfig {
     pub jwt_secret: String,
     pub default_admin_password: Option<String>,
     pub static_dir: Option<String>,
+    pub cors_allowed_origins: Vec<String>,
+    pub admin_export_dirs: Vec<String>,
 }
 
 impl Default for ServerConfig {
@@ -43,8 +45,19 @@ impl Default for ServerConfig {
             jwt_secret: uuid::Uuid::new_v4().to_string(),
             default_admin_password: None,
             static_dir: None,
+            cors_allowed_origins: Vec::new(),
+            admin_export_dirs: Vec::new(),
         }
     }
+}
+
+fn parse_csv_env(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 impl ServerConfig {
@@ -82,6 +95,14 @@ impl ServerConfig {
                 .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string()),
             default_admin_password: std::env::var("DEFAULT_ADMIN_PASSWORD").ok(),
             static_dir: std::env::var("STATIC_DIR").ok(),
+            cors_allowed_origins: std::env::var("CORS_ALLOWED_ORIGINS")
+                .ok()
+                .map(|v| parse_csv_env(&v))
+                .unwrap_or_default(),
+            admin_export_dirs: std::env::var("ADMIN_EXPORT_DIRS")
+                .ok()
+                .map(|v| parse_csv_env(&v))
+                .unwrap_or_default(),
         }
     }
 
@@ -135,6 +156,12 @@ impl ServerConfig {
         if let Ok(v) = std::env::var("STATIC_DIR") {
             self.static_dir = Some(v);
         }
+        if let Ok(v) = std::env::var("CORS_ALLOWED_ORIGINS") {
+            self.cors_allowed_origins = parse_csv_env(&v);
+        }
+        if let Ok(v) = std::env::var("ADMIN_EXPORT_DIRS") {
+            self.admin_export_dirs = parse_csv_env(&v);
+        }
         self
     }
 
@@ -159,6 +186,8 @@ mod tests {
         assert!(config.database_url.is_none());
         assert!(config.default_admin_password.is_none());
         assert!(config.static_dir.is_none());
+        assert!(config.cors_allowed_origins.is_empty());
+        assert!(config.admin_export_dirs.is_empty());
         assert!(!config.jwt_secret.is_empty());
     }
 
@@ -174,6 +203,8 @@ mod tests {
             jwt_secret: "fixed-secret".into(),
             default_admin_password: Some("admin123".into()),
             static_dir: Some("/var/www".into()),
+            cors_allowed_origins: vec!["https://app.example.com".into()],
+            admin_export_dirs: vec!["/srv/mlt-export".into()],
         };
 
         let toml_str = config.to_toml_string();
@@ -184,10 +215,21 @@ mod tests {
         assert_eq!(parsed.auth_mode, AuthMode::Single);
         assert_eq!(parsed.db_type, DbType::Postgres);
         assert_eq!(parsed.data_dir, "/tmp/data");
-        assert_eq!(parsed.database_url, Some("postgres://localhost/test".into()));
+        assert_eq!(
+            parsed.database_url,
+            Some("postgres://localhost/test".into())
+        );
         assert_eq!(parsed.jwt_secret, "fixed-secret");
         assert_eq!(parsed.default_admin_password, Some("admin123".into()));
         assert_eq!(parsed.static_dir, Some("/var/www".into()));
+        assert_eq!(
+            parsed.cors_allowed_origins,
+            vec!["https://app.example.com".to_string()]
+        );
+        assert_eq!(
+            parsed.admin_export_dirs,
+            vec!["/srv/mlt-export".to_string()]
+        );
     }
 
     #[test]
@@ -205,10 +247,7 @@ mod tests {
 
     #[test]
     fn auth_mode_serde() {
-        assert_eq!(
-            serde_json::to_string(&AuthMode::None).unwrap(),
-            "\"none\""
-        );
+        assert_eq!(serde_json::to_string(&AuthMode::None).unwrap(), "\"none\"");
         assert_eq!(
             serde_json::to_string(&AuthMode::Single).unwrap(),
             "\"single\""

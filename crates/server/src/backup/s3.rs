@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use super::traits::BackupProvider;
+use async_trait::async_trait;
 
 /// S3-compatible backup provider (supports AWS S3, MinIO, Cloudflare R2, etc.)
 /// Uses reqwest with S3 v4 signing for zero-dependency approach.

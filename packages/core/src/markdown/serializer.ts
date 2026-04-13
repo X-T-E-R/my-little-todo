@@ -34,24 +34,36 @@ function serializeTaskMetaHeader(task: Task): string[] {
     `updated: ${task.updatedAt.toISOString()}`,
   ];
 
-  if (task.completedAt) meta.push(`completed: ${task.completedAt.toISOString()}`);
-  if (task.ddl) meta.push(`ddl: ${task.ddl.toISOString()}`);
-  if (task.ddlType) meta.push(`ddl_type: ${task.ddlType}`);
-  if (task.plannedAt) meta.push(`planned: ${task.plannedAt.toISOString()}`);
+  const pushMeta = (key: string, value: string | number | undefined | null) => {
+    if (value !== undefined && value !== null && value !== '') {
+      meta.push(`${key}: ${value}`);
+    }
+  };
+  const pushListMeta = (key: string, items: string[]) => {
+    if (items.length > 0) {
+      meta.push(`${key}: [${items.join(', ')}]`);
+    }
+  };
+
+  pushMeta('completed', task.completedAt?.toISOString());
+  pushMeta('ddl', task.ddl?.toISOString());
+  pushMeta('ddl_type', task.ddlType);
+  pushMeta('planned', task.plannedAt?.toISOString());
   const rids = taskRoleIds(task);
   if (rids.length > 1) {
     meta.push(`roles: [${rids.map((id) => `"${id}"`).join(', ')}]`);
   } else if (rids.length === 1) {
     meta.push(`role: ${rids[0]}`);
   }
-  if (task.tags.length > 0) meta.push(`tags: [${task.tags.join(', ')}]`);
-  if (task.priority != null) meta.push(`priority: ${task.priority}`);
-  if (task.sourceStreamId) meta.push(`source: ${task.sourceStreamId}`);
-  if (task.subtaskIds.length > 0) meta.push(`subtasks: [${task.subtaskIds.join(', ')}]`);
-  if (task.parentId) meta.push(`parent: ${task.parentId}`);
-  if (task.promoted) meta.push('promoted: true');
-  if (task.phase) meta.push(`phase: ${task.phase}`);
-  if (task.kanbanColumn) meta.push(`kanban_column: ${task.kanbanColumn}`);
+  pushListMeta('tags', task.tags);
+  pushMeta('priority', task.priority);
+  pushMeta('source', task.sourceStreamId);
+  pushListMeta('subtasks', task.subtaskIds);
+  pushMeta('parent', task.parentId);
+  pushMeta('promoted', task.promoted ? 'true' : undefined);
+  pushMeta('phase', task.phase);
+  pushMeta('kanban_column', task.kanbanColumn);
+  pushMeta('task_type', task.taskType === 'project' ? 'project' : undefined);
   meta.push('---');
   return meta;
 }

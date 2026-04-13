@@ -31,6 +31,8 @@ packages/web/~/
 # Local data
 data/
 import-legacy-data.json
+.playwright-cli/
+output/
 
 # Internal docs (not for public release)
 参考资料/

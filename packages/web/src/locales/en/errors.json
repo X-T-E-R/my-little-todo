@@ -1,1 +1,6 @@
-{}
+{
+  "Something went wrong": "Something went wrong",
+  "Unknown error": "Unknown error",
+  "Retry": "Retry",
+  "Reload page": "Reload page"
+}

@@ -10,6 +10,8 @@ export interface FocusSessionState {
   /** When set, user must wait until this time to confirm exit from locked focus. */
   exitCooldownUntil?: Date;
   pendingExitReason?: string;
+  /** True: bottom nav visible; user can browse other tabs while session stays active. */
+  peeking?: boolean;
 }
 
 interface FocusSessionSlice {
@@ -41,6 +43,7 @@ function parseSession(s: FocusSessionState): FocusSessionState | null {
     ...s,
     startedAt: started,
     exitCooldownUntil,
+    peeking: s.peeking === true,
   };
 }
 

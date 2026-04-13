@@ -27,6 +27,8 @@ interface RoleState {
   updateSettings: (changes: Partial<RoleSettings>) => Promise<void>;
 }
 
+let _roleLoadPromise: Promise<void> | null = null;
+
 export const useRoleStore = create<RoleState>((set, get) => ({
   roles: [],
   currentRoleId: null,
@@ -35,13 +37,19 @@ export const useRoleStore = create<RoleState>((set, get) => ({
   landingRoleId: null,
 
   load: async () => {
-    set({ loading: true });
-    try {
-      const { roles, settings, currentRoleId } = await loadRolesData();
-      set({ roles, settings, currentRoleId, loading: false });
-    } catch {
-      set({ loading: false });
-    }
+    if (_roleLoadPromise) return _roleLoadPromise;
+    _roleLoadPromise = (async () => {
+      set({ loading: true });
+      try {
+        const { roles, settings, currentRoleId } = await loadRolesData();
+        set({ roles, settings, currentRoleId, loading: false });
+      } catch {
+        set({ loading: false });
+      } finally {
+        _roleLoadPromise = null;
+      }
+    })();
+    return _roleLoadPromise;
   },
 
   switchRole: (roleId) => {

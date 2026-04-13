@@ -1,6 +1,5 @@
 export { ApiServerSyncTarget } from './apiSyncTarget';
 export { SyncEngine, getSyncEngine } from './syncEngine';
-export { initSyncFromConfig } from './syncManager';
 export type {
   ChangeRecord,
   ConflictResolution,

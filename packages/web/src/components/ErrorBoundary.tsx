@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import i18n from '../locales';
 
 interface Props {
   children: ReactNode;
@@ -7,6 +8,10 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
+}
+
+function t(key: string): string {
+  return i18n.t(key, { ns: 'errors' }) ?? key;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -45,7 +50,7 @@ export class ErrorBoundary extends Component<Props, State> {
           background: 'var(--color-bg, #fff)',
         }}
       >
-        <h1 style={{ fontSize: 24, marginBottom: 12 }}>出了点问题</h1>
+        <h1 style={{ fontSize: 24, marginBottom: 12 }}>{t('Something went wrong')}</h1>
         <p
           style={{
             fontSize: 14,
@@ -55,7 +60,7 @@ export class ErrorBoundary extends Component<Props, State> {
             marginBottom: 24,
           }}
         >
-          {this.state.error?.message || '未知错误'}
+          {this.state.error?.message || t('Unknown error')}
         </p>
         <div style={{ display: 'flex', gap: 12 }}>
           <button
@@ -70,7 +75,7 @@ export class ErrorBoundary extends Component<Props, State> {
               fontSize: 14,
             }}
           >
-            重试
+            {t('Retry')}
           </button>
           <button
             type="button"
@@ -85,7 +90,7 @@ export class ErrorBoundary extends Component<Props, State> {
               fontSize: 14,
             }}
           >
-            刷新页面
+            {t('Reload page')}
           </button>
         </div>
       </div>

@@ -16,6 +16,15 @@ export interface QueuedOperation {
   retries: number;
 }
 
+export class LegacyQueueActionRequiredError extends Error {
+  readonly code = 'LEGACY_QUEUE_ACTION_REQUIRED';
+
+  constructor(message = 'Legacy offline queue requires manual migration or cleanup.') {
+    super(message);
+    this.name = 'LegacyQueueActionRequiredError';
+  }
+}
+
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -97,6 +106,19 @@ export async function getQueueSize(): Promise<number> {
   });
 }
 
+export async function inspectLegacyQueue(): Promise<{
+  total: number;
+  writeFileCount: number;
+  deleteFileCount: number;
+}> {
+  const ops = await getQueuedOperations();
+  return {
+    total: ops.length,
+    writeFileCount: ops.filter((op) => op.type === 'writeFile').length,
+    deleteFileCount: ops.filter((op) => op.type === 'deleteFile').length,
+  };
+}
+
 const MAX_RETRIES = 5;
 let _syncing = false;
 let _listeners: Array<(size: number) => void> = [];
@@ -132,7 +154,12 @@ export async function replayQueue(executor: {
         }
         await removeFromQueue(op.id);
         succeeded++;
-      } catch {
+      } catch (error) {
+        if (error instanceof LegacyQueueActionRequiredError) {
+          console.warn('[offlineQueue]', error.message);
+          failed++;
+          break;
+        }
         if (op.retries >= MAX_RETRIES) {
           await removeFromQueue(op.id);
           failed++;
@@ -179,12 +206,14 @@ export function startAutoSync(
 export function createDirectExecutor(_baseUrl: string) {
   return {
     async writeFile(_content: string, ..._segments: string[]): Promise<void> {
-      console.warn(
-        '[offlineQueue] Discarding legacy queued writeFile (data layer is relational now).',
+      throw new LegacyQueueActionRequiredError(
+        'Legacy queued writeFile entries are preserved and require manual migration or cleanup.',
       );
     },
     async deleteFile(..._segments: string[]): Promise<void> {
-      console.warn('[offlineQueue] Discarding legacy queued deleteFile.');
+      throw new LegacyQueueActionRequiredError(
+        'Legacy queued deleteFile entries are preserved and require manual migration or cleanup.',
+      );
     },
   };
 }

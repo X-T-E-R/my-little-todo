@@ -35,6 +35,8 @@ export interface TaskDbRow {
   promoted: number | null;
   phase: string | null;
   kanban_column: string | null;
+  /** 'task' | 'project'; null/absent treated as task */
+  task_type: string | null;
   tags: string;
   subtask_ids: string;
   resources: string;
@@ -126,15 +128,28 @@ function roleFieldsFromDbRow(row: TaskDbRow): Pick<Task, 'roleId' | 'roleIds'> {
   return { roleId: primaryRole, roleIds: multiRoles };
 }
 
+function parseTaskCollections(row: TaskDbRow) {
+  return {
+    tags: parseJson<string[]>(row.tags, []),
+    subtaskIds: parseJson<string[]>(row.subtask_ids, []),
+    resources: parseJson<unknown[]>(row.resources, []).map(reviveResource),
+    reminders: parseJson<unknown[]>(row.reminders, []).map(reviveReminder),
+    submissions: parseJson<unknown[]>(row.submissions, []).map(reviveSubmission),
+    postponements: parseJson<unknown[]>(row.postponements, []).map(revivePostponement),
+    statusHistory: parseJson<unknown[]>(row.status_history, []).map(reviveStatusChange),
+    progressLogs: parseJson<unknown[]>(row.progress_logs, []).map(reviveProgressLog),
+  };
+}
+
+function getTaskType(taskType: TaskDbRow['task_type']): Task['taskType'] {
+  if (taskType === 'project' || taskType === 'task') {
+    return taskType;
+  }
+  return undefined;
+}
+
 export function taskFromDbRow(row: TaskDbRow): Task {
-  const tags = parseJson<string[]>(row.tags, []);
-  const subtaskIds = parseJson<string[]>(row.subtask_ids, []);
-  const resources = parseJson<unknown[]>(row.resources, []).map(reviveResource);
-  const reminders = parseJson<unknown[]>(row.reminders, []).map(reviveReminder);
-  const submissions = parseJson<unknown[]>(row.submissions, []).map(reviveSubmission);
-  const postponements = parseJson<unknown[]>(row.postponements, []).map(revivePostponement);
-  const statusHistory = parseJson<unknown[]>(row.status_history, []).map(reviveStatusChange);
-  const progressLogs = parseJson<unknown[]>(row.progress_logs, []).map(reviveProgressLog);
+  const collections = parseTaskCollections(row);
 
   return {
     id: row.id,
@@ -156,14 +171,9 @@ export function taskFromDbRow(row: TaskDbRow): Task {
     promoted: row.promoted === 1 ? true : undefined,
     phase: (row.phase as TaskPhase) ?? undefined,
     kanbanColumn: (row.kanban_column as KanbanColumn) ?? undefined,
-    tags,
-    subtaskIds,
-    resources,
-    reminders,
-    submissions,
-    postponements,
-    statusHistory,
-    progressLogs: progressLogs.length > 0 ? progressLogs : undefined,
+    taskType: getTaskType(row.task_type),
+    ...collections,
+    progressLogs: collections.progressLogs.length > 0 ? collections.progressLogs : undefined,
   };
 }
 
@@ -171,9 +181,55 @@ function toJson<T>(v: T): string {
   return JSON.stringify(v);
 }
 
+function serializeDate<T extends object, K extends keyof T & string>(
+  value: T,
+  key: K,
+  date: Date,
+): T {
+  return {
+    ...value,
+    [key]: date.toISOString(),
+  } as T;
+}
+
+function serializeTaskCollections(task: Task) {
+  return {
+    tags: toJson(task.tags),
+    subtask_ids: toJson(task.subtaskIds),
+    resources: toJson(
+      task.resources.map((resource) => serializeDate(resource, 'addedAt', resource.addedAt)),
+    ),
+    reminders: toJson(
+      task.reminders.map((reminder) => serializeDate(reminder, 'time', reminder.time)),
+    ),
+    submissions: toJson(
+      task.submissions.map((submission) =>
+        serializeDate(submission, 'timestamp', submission.timestamp),
+      ),
+    ),
+    postponements: toJson(
+      task.postponements.map((postponement) => ({
+        ...serializeDate(postponement, 'timestamp', postponement.timestamp),
+        fromDate: postponement.fromDate.toISOString(),
+        toDate: postponement.toDate.toISOString(),
+      })),
+    ),
+    status_history: toJson(
+      task.statusHistory.map((statusChange) =>
+        serializeDate(statusChange, 'timestamp', statusChange.timestamp),
+      ),
+    ),
+    progress_logs: toJson(
+      (task.progressLogs ?? []).map((progressLog) =>
+        serializeDate(progressLog, 'timestamp', progressLog.timestamp),
+      ),
+    ),
+  };
+}
+
 export function taskToDbRow(task: Task, version: number, deletedAt: number | null): TaskDbRow {
   const ids = taskRoleIds(task);
-  const roleIdsJson = ids.length > 1 ? JSON.stringify(ids) : null;
+  const collections = serializeTaskCollections(task);
 
   return {
     id: task.id,
@@ -189,53 +245,15 @@ export function taskToDbRow(task: Task, version: number, deletedAt: number | nul
     ddl_type: task.ddlType ?? null,
     planned_at: task.plannedAt?.getTime() ?? null,
     role_id: task.roleId ?? null,
-    role_ids: roleIdsJson,
+    role_ids: ids.length > 1 ? JSON.stringify(ids) : null,
     parent_id: task.parentId ?? null,
     source_stream_id: task.sourceStreamId ?? null,
     priority: task.priority ?? null,
     promoted: task.promoted ? 1 : null,
     phase: task.phase ?? null,
     kanban_column: task.kanbanColumn ?? null,
-    tags: toJson(task.tags),
-    subtask_ids: toJson(task.subtaskIds),
-    resources: toJson(
-      task.resources.map((r) => ({
-        ...r,
-        addedAt: r.addedAt.toISOString(),
-      })),
-    ),
-    reminders: toJson(
-      task.reminders.map((r) => ({
-        ...r,
-        time: r.time.toISOString(),
-      })),
-    ),
-    submissions: toJson(
-      task.submissions.map((s) => ({
-        ...s,
-        timestamp: s.timestamp.toISOString(),
-      })),
-    ),
-    postponements: toJson(
-      task.postponements.map((p) => ({
-        ...p,
-        timestamp: p.timestamp.toISOString(),
-        fromDate: p.fromDate.toISOString(),
-        toDate: p.toDate.toISOString(),
-      })),
-    ),
-    status_history: toJson(
-      task.statusHistory.map((s) => ({
-        ...s,
-        timestamp: s.timestamp.toISOString(),
-      })),
-    ),
-    progress_logs: toJson(
-      (task.progressLogs ?? []).map((p) => ({
-        ...p,
-        timestamp: p.timestamp.toISOString(),
-      })),
-    ),
+    task_type: task.taskType ?? null,
+    ...collections,
     version,
     deleted_at: deletedAt,
   };

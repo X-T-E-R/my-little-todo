@@ -1,16 +1,16 @@
-import type { StreamEntry, StreamEntryType } from '@my-little-todo/core';
+import { type Attachment, type StreamEntry, type StreamEntryType, formatDateKey } from '@my-little-todo/core';
 import type { DdlType } from '@my-little-todo/core';
-import { formatDateKey } from '@my-little-todo/core';
 import { create } from 'zustand';
 import i18n from '../locales';
+import { getDataStore } from '../storage/dataStore';
 import {
   addStreamEntry,
-  linkEntryToTask,
   loadRecentDays,
   searchStreamEntries,
   updateStreamEntry,
 } from '../storage/streamRepo';
-import { createTask } from '../storage/taskRepo';
+import { createTaskForEntry } from '../storage/taskRepo';
+import { NO_ROLE_FILTER } from './roleStore';
 
 interface StreamState {
   entries: StreamEntry[];
@@ -35,6 +35,7 @@ interface StreamState {
       body?: string;
       roleId?: string;
       entryType?: StreamEntryType;
+      attachments?: Attachment[];
     },
   ) => Promise<StreamEntry>;
   updateEntry: (entry: StreamEntry) => Promise<void>;
@@ -45,9 +46,20 @@ interface StreamState {
   setEntryType: (entryId: string, entryType: StreamEntryType) => Promise<void>;
   addSubtaskToEntry: (entryId: string, title: string) => Promise<void>;
   setEntryDdl: (entryId: string, ddl: Date, ddlType?: DdlType) => Promise<void>;
+  /** Keep stream card role in sync when task roles change (primary = first id). */
+  syncStreamEntryRoleForTask: (taskId: string, primaryRoleId: string | undefined) => Promise<void>;
 }
 
 let _streamLoadPromise: Promise<void> | null = null;
+
+function resolveRoleIdForNewEntry(
+  metaRoleId: string | undefined,
+  currentFilter: string | null,
+): string | undefined {
+  if (metaRoleId !== undefined) return metaRoleId;
+  if (currentFilter && currentFilter !== NO_ROLE_FILTER) return currentFilter;
+  return undefined;
+}
 
 export const useStreamStore = create<StreamState>((set, get) => ({
   entries: [],
@@ -96,12 +108,12 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       set({ searchQuery: '', searchResults: null });
       return;
     }
-    set({ loading: true });
+    set({ loading: true, error: null });
     try {
       const searchResults = await searchStreamEntries(trimmed, 200);
       set({ searchQuery: trimmed, searchResults, loading: false });
-    } catch {
-      set({ loading: false });
+    } catch (e) {
+      set({ error: String(e), loading: false });
     }
   },
 
@@ -117,10 +129,11 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       body?: string;
       roleId?: string;
       entryType?: StreamEntryType;
+      attachments?: Attachment[];
     },
   ) => {
     const { useRoleStore } = await import('./roleStore');
-    const roleId = meta?.roleId ?? useRoleStore.getState().currentRoleId ?? undefined;
+    const roleId = resolveRoleIdForNewEntry(meta?.roleId, useRoleStore.getState().currentRoleId);
     const entryType: StreamEntryType = meta?.entryType ?? (saveAsTask ? 'task' : 'spark');
 
     const tempId = `_temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -131,39 +144,48 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       tags: content.match(/#[^\s]+/g)?.map((t) => t.slice(1)) ?? [],
       entryType,
       roleId,
-      attachments: [],
+      attachments: meta?.attachments ?? [],
     };
     set((state) => ({ entries: [...state.entries, optimistic] }));
 
     try {
-      const entry = await addStreamEntry(content, roleId, entryType);
+      const entry = await addStreamEntry(content, roleId, entryType, meta?.attachments ?? []);
       set((state) => ({
         entries: state.entries.map((e) => (e.id === tempId ? entry : e)),
       }));
 
       if (saveAsTask) {
-        const task = await createTask('', {
-          sourceStreamId: entry.id,
+        const canonicalEntry = {
+          ...entry,
+          content: meta?.body ?? content,
           tags: meta?.tags ?? entry.tags,
-          roleId: entry.roleId,
-          body: meta?.body ?? content,
+          entryType: 'task' as const,
+        };
+        if (
+          canonicalEntry.content !== entry.content ||
+          canonicalEntry.entryType !== entry.entryType ||
+          canonicalEntry.tags !== entry.tags
+        ) {
+          await updateStreamEntry(canonicalEntry);
+        }
+        const task = await createTaskForEntry(canonicalEntry, {
           ddl: meta?.ddl,
           ddlType: meta?.ddlType,
           titleCustomized: false,
         });
-        const dateKey = formatDateKey(entry.timestamp);
-        await linkEntryToTask(entry.id, dateKey, task.id);
+        const finalEntry: StreamEntry = {
+          ...canonicalEntry,
+          extractedTaskId: task.id,
+          entryType: 'task',
+        };
         set((state) => ({
-          entries: state.entries.map((e) =>
-            e.id === entry.id ? { ...e, extractedTaskId: task.id, entryType: 'task' } : e,
-          ),
+          entries: state.entries.map((e) => (e.id === entry.id ? finalEntry : e)),
         }));
         const { useTaskStore } = await import('./taskStore');
-        const ts = useTaskStore.getState();
-        if (!ts.tasks.find((t) => t.id === task.id)) {
-          ts.tasks = [...ts.tasks, task];
-          useTaskStore.setState({ tasks: ts.tasks });
-        }
+        useTaskStore.setState((state) =>
+          state.tasks.find((t) => t.id === task.id) ? state : { tasks: [...state.tasks, task] },
+        );
+        return finalEntry;
       }
 
       return entry;
@@ -206,20 +228,19 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     if (!entry) throw new Error('Entry not found');
     if (entry.extractedTaskId) return entry.extractedTaskId;
 
-    const task = await createTask('', {
-      sourceStreamId: entryId,
-      tags: entry.tags,
-      roleId: entry.roleId,
-      body: entry.content,
-      titleCustomized: false,
-    });
-
-    const dateKey = formatDateKey(entry.timestamp);
-    await linkEntryToTask(entryId, dateKey, task.id);
+    const task = await createTaskForEntry(
+      {
+        ...entry,
+        entryType: 'task',
+      },
+      {
+        titleCustomized: false,
+      },
+    );
 
     set((state) => ({
       entries: state.entries.map((e) =>
-        e.id === entryId ? { ...e, extractedTaskId: task.id } : e,
+        e.id === entryId ? { ...e, extractedTaskId: task.id, entryType: 'task' } : e,
       ),
     }));
 
@@ -240,10 +261,26 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       await get().enrichEntry(entryId);
     }
 
+    if (entryType !== 'task' && entry.extractedTaskId) {
+      await getDataStore().deleteTaskFacet?.(entry.extractedTaskId);
+      const { useTaskStore } = await import('./taskStore');
+      useTaskStore.setState((state) => ({
+        tasks: state.tasks.filter((task) => task.id !== entry.extractedTaskId),
+      }));
+    }
+
     const updated = { ...entry, entryType };
     await updateStreamEntry(updated);
     set((state) => ({
-      entries: state.entries.map((e) => (e.id === entryId ? { ...e, entryType } : e)),
+      entries: state.entries.map((e) =>
+        e.id === entryId
+          ? {
+              ...e,
+              entryType,
+              extractedTaskId: entryType === 'task' ? e.extractedTaskId : undefined,
+            }
+          : e,
+      ),
     }));
   },
 
@@ -261,6 +298,13 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     if (task) {
       await store.updateTask({ ...task, ddl, ddlType: ddlType ?? task.ddlType });
     }
+  },
+
+  syncStreamEntryRoleForTask: async (taskId: string, primaryRoleId: string | undefined) => {
+    const entry = get().entries.find((e) => e.extractedTaskId === taskId);
+    if (!entry) return;
+    if (entry.roleId === primaryRoleId) return;
+    await get().updateEntry({ ...entry, roleId: primaryRoleId });
   },
 }));
 

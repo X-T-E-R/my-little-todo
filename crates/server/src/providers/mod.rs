@@ -16,16 +16,13 @@ pub async fn create_provider(config: &ServerConfig) -> anyhow::Result<Arc<dyn Da
         DbType::Sqlite => {
             #[cfg(feature = "sqlite")]
             {
-                let db_url = config
-                    .database_url
-                    .clone()
-                    .unwrap_or_else(|| {
-                        let dir = &config.data_dir;
-                        if let Err(e) = std::fs::create_dir_all(dir) {
-                            eprintln!("[DB] Warning: failed to create data dir '{}': {}", dir, e);
-                        }
-                        format!("sqlite:{}/my-little-todo.db?mode=rwc", dir)
-                    });
+                let db_url = config.database_url.clone().unwrap_or_else(|| {
+                    let dir = &config.data_dir;
+                    if let Err(e) = std::fs::create_dir_all(dir) {
+                        eprintln!("[DB] Warning: failed to create data dir '{}': {}", dir, e);
+                    }
+                    format!("sqlite:{}/my-little-todo.db?mode=rwc", dir)
+                });
                 let provider = sqlite::SqliteProvider::new(&db_url).await?;
                 Ok(Arc::new(provider))
             }

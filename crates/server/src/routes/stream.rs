@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::config::AuthMode;
+use crate::task_stream_facade;
 use crate::AppState;
 
 fn data_partition(state: &AppState, ext_user_id: &str) -> String {
@@ -26,9 +27,14 @@ type ApiResult<T> = Result<Json<T>, (StatusCode, Json<ErrorBody>)>;
 fn internal(msg: &str) -> (StatusCode, Json<ErrorBody>) {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ErrorBody {
-            error: msg.into(),
-        }),
+        Json(ErrorBody { error: msg.into() }),
+    )
+}
+
+fn bad_request(msg: &str) -> (StatusCode, Json<ErrorBody>) {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorBody { error: msg.into() }),
     )
 }
 
@@ -63,14 +69,17 @@ pub async fn search_stream(
     State(state): State<AppState>,
     Query(q): Query<StreamSearchQuery>,
     axum::Extension(ext_id): axum::Extension<String>,
-) -> ApiResult<Vec<String>> {
+) -> ApiResult<Vec<Value>> {
     let user_id = data_partition(&state, &ext_id);
     let rows = state
         .db
         .search_stream_json(&user_id, &q.q, q.limit)
         .await
         .map_err(|e| internal(&e.to_string()))?;
-    Ok(Json(rows))
+    let entries = task_stream_facade::list_stream_from_rows(state.db.as_ref(), &user_id, rows)
+        .await
+        .map_err(|e| internal(&e))?;
+    Ok(Json(entries))
 }
 
 /// GET /api/stream?date=YYYY-MM-DD
@@ -78,14 +87,17 @@ pub async fn list_stream_day(
     State(state): State<AppState>,
     Query(q): Query<StreamDateQuery>,
     axum::Extension(ext_id): axum::Extension<String>,
-) -> ApiResult<Vec<String>> {
+) -> ApiResult<Vec<Value>> {
     let user_id = data_partition(&state, &ext_id);
     let rows = state
         .db
         .list_stream_day_json(&user_id, &q.date)
         .await
         .map_err(|e| internal(&e.to_string()))?;
-    Ok(Json(rows))
+    let entries = task_stream_facade::list_stream_from_rows(state.db.as_ref(), &user_id, rows)
+        .await
+        .map_err(|e| internal(&e))?;
+    Ok(Json(entries))
 }
 
 /// GET /api/stream/dates — distinct YYYY-MM-DD keys (newest first)
@@ -107,14 +119,34 @@ pub async fn list_stream_recent(
     State(state): State<AppState>,
     Query(q): Query<StreamRecentQuery>,
     axum::Extension(ext_id): axum::Extension<String>,
-) -> ApiResult<Vec<String>> {
+) -> ApiResult<Vec<Value>> {
     let user_id = data_partition(&state, &ext_id);
     let rows = state
         .db
         .list_stream_recent_json(&user_id, q.days)
         .await
         .map_err(|e| internal(&e.to_string()))?;
-    Ok(Json(rows))
+    let entries = task_stream_facade::list_stream_from_rows(state.db.as_ref(), &user_id, rows)
+        .await
+        .map_err(|e| internal(&e))?;
+    Ok(Json(entries))
+}
+
+/// GET /api/stream/all
+pub async fn list_stream_all(
+    State(state): State<AppState>,
+    axum::Extension(ext_id): axum::Extension<String>,
+) -> ApiResult<Vec<Value>> {
+    let user_id = data_partition(&state, &ext_id);
+    let rows = state
+        .db
+        .list_all_stream_json(&user_id)
+        .await
+        .map_err(|e| internal(&e.to_string()))?;
+    let entries = task_stream_facade::list_stream_from_rows(state.db.as_ref(), &user_id, rows)
+        .await
+        .map_err(|e| internal(&e))?;
+    Ok(Json(entries))
 }
 
 /// PUT /api/stream/:id — body is full stream entry JSON
@@ -128,13 +160,11 @@ pub async fn put_stream_entry(
     if let Some(obj) = body.as_object_mut() {
         obj.insert("id".into(), json!(id));
     }
-    let s = body.to_string();
-    state
-        .db
-        .upsert_stream_entry_json(&user_id, &s)
+    task_stream_facade::validate_public_stream_payload(&body).map_err(|e| bad_request(&e))?;
+    let entry = task_stream_facade::put_stream_entry(state.db.as_ref(), &user_id, &id, &body)
         .await
-        .map_err(|e| internal(&e.to_string()))?;
-    Ok(Json(json!({ "ok": true })))
+        .map_err(|e| internal(&e))?;
+    Ok(Json(entry))
 }
 
 /// DELETE /api/stream/:id
@@ -144,10 +174,8 @@ pub async fn delete_stream_entry(
     axum::Extension(ext_id): axum::Extension<String>,
 ) -> ApiResult<Value> {
     let user_id = data_partition(&state, &ext_id);
-    state
-        .db
-        .delete_stream_entry_row(&user_id, &id)
+    task_stream_facade::delete_stream_entry(state.db.as_ref(), &user_id, &id)
         .await
-        .map_err(|e| internal(&e.to_string()))?;
+        .map_err(|e| internal(&e))?;
     Ok(Json(json!({ "ok": true })))
 }

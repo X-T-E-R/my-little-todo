@@ -7,15 +7,34 @@ import {
   taskFromDbRow,
   taskToDbRow,
 } from '@my-little-todo/core';
-import type { StreamEntry, Task } from '@my-little-todo/core';
+import type {
+  StreamEntry,
+  Task,
+  ThinkSession,
+  WindowContext,
+  WorkThread,
+  WorkThreadEvent,
+} from '@my-little-todo/core';
 import type { AttachmentConfig, UploadResult } from './blobApi';
 import type { DataStore, LocalChangeRecord } from './dataStore';
 import { CREATE_INDEXES_SQL, CREATE_TABLES_SQL, SCHEMA_VERSION } from './sqliteSchema';
+import {
+  deriveTaskFacetFromEntry,
+  hydrateTaskWithEntry,
+  normalizeTaskRoleIds,
+  shouldProjectStreamRoleToTask,
+} from './taskEntryBridge';
 
 type CapDB = {
   execute(statement: string, values?: unknown[]): Promise<{ changes?: { changes?: number } }>;
   query(statement: string, values?: unknown[]): Promise<{ values?: Record<string, unknown>[] }>;
 };
+
+function coerceBlobBytes(value: unknown): Uint8Array {
+  if (value instanceof Uint8Array) return value;
+  if (Array.isArray(value)) return new Uint8Array(value.map((item) => Number(item) || 0));
+  return new Uint8Array();
+}
 
 async function openCapacitorDb(): Promise<CapDB> {
   const { CapacitorSQLite, SQLiteConnection } = await import('@capacitor-community/sqlite');
@@ -76,7 +95,9 @@ async function ensureSchema(db: CapDB): Promise<void> {
         `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (3, ${Date.now()})`,
       );
     }
-    const rows2 = await db.query('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1');
+    const rows2 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
     const ver2 = rows2.values?.[0]?.version != null ? Number(rows2.values[0].version) : 0;
     if (ver2 < 4) {
       try {
@@ -88,20 +109,183 @@ async function ensureSchema(db: CapDB): Promise<void> {
         `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (4, ${Date.now()})`,
       );
     }
-    const rows3 = await db.query('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1');
+    const rows3 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
     const ver3 = rows3.values?.[0]?.version != null ? Number(rows3.values[0].version) : 0;
     if (ver3 < 5) {
       try {
-        await db.execute('ALTER TABLE tasks ADD COLUMN title_customized INTEGER NOT NULL DEFAULT 0');
-        await db.execute(`UPDATE tasks SET title = '', title_customized = 0`);
+        await db.execute(
+          'ALTER TABLE tasks ADD COLUMN title_customized INTEGER NOT NULL DEFAULT 0',
+        );
+        await db.execute(
+          'UPDATE tasks SET title_customized = CASE WHEN length(trim(title)) > 0 THEN 1 ELSE 0 END',
+        );
       } catch {
         /* column may already exist */
       }
       await db.execute(
-        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (${SCHEMA_VERSION}, ${Date.now()})`,
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (5, ${Date.now()})`,
+      );
+    }
+    const rowsV7 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
+    const verBefore7 = rowsV7.values?.[0]?.version != null ? Number(rowsV7.values[0].version) : 0;
+    if (verBefore7 < 7) {
+      await db.execute(
+        'UPDATE tasks SET title_customized = 1 WHERE length(trim(title)) > 0 AND title_customized = 0',
+      );
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (7, ${Date.now()})`,
+      );
+    }
+    const rowsV8 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
+    const verBefore9 = rowsV8.values?.[0]?.version != null ? Number(rowsV8.values[0].version) : 0;
+    if (verBefore9 < 9) {
+      try {
+        await db.execute('ALTER TABLE tasks ADD COLUMN task_type TEXT');
+      } catch {
+        /* column may already exist */
+      }
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (9, ${Date.now()})`,
+      );
+    }
+    const rowsV9 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
+    const verBefore10 = rowsV9.values?.[0]?.version != null ? Number(rowsV9.values[0].version) : 0;
+    if (verBefore10 < 10) {
+      await db.execute(`CREATE TABLE IF NOT EXISTS think_sessions (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL DEFAULT '',
+        start_mode TEXT NOT NULL DEFAULT 'blank',
+        extracted_actions TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`);
+      try {
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_think_sessions_updated ON think_sessions(updated_at DESC)',
+        );
+      } catch {
+        /* index may exist */
+      }
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (10, ${Date.now()})`,
+      );
+    }
+    const rowsV10 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
+    const verBefore11 =
+      rowsV10.values?.[0]?.version != null ? Number(rowsV10.values[0].version) : 0;
+    if (verBefore11 < 11) {
+      await db.execute(`CREATE TABLE IF NOT EXISTS work_threads (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
+        role_id TEXT,
+        doc_markdown TEXT NOT NULL DEFAULT '',
+        context_items TEXT NOT NULL DEFAULT '[]',
+        next_actions TEXT NOT NULL DEFAULT '[]',
+        suggestions TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`);
+      await db.execute(`CREATE TABLE IF NOT EXISTS work_thread_events (
+        id TEXT PRIMARY KEY,
+        thread_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        title TEXT NOT NULL,
+        detail_markdown TEXT,
+        payload TEXT,
+        created_at INTEGER NOT NULL
+      )`);
+      try {
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_work_threads_updated ON work_threads(updated_at DESC)',
+        );
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_work_thread_events_thread ON work_thread_events(thread_id, created_at DESC)',
+        );
+      } catch {
+        /* index may exist */
+      }
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (11, ${Date.now()})`,
       );
     }
   }
+}
+
+function thinkSessionFromRow(r: Record<string, unknown>): ThinkSession {
+  const raw = r.extracted_actions;
+  let extracted: ThinkSession['extractedActions'];
+  if (raw != null && String(raw).trim() !== '') {
+    try {
+      extracted = JSON.parse(String(raw)) as ThinkSession['extractedActions'];
+    } catch {
+      extracted = undefined;
+    }
+  }
+  return {
+    id: String(r.id),
+    content: String(r.content ?? ''),
+    startMode: (String(r.start_mode) as ThinkSession['startMode']) || 'blank',
+    createdAt: Number(r.created_at),
+    updatedAt: Number(r.updated_at),
+    extractedActions: extracted,
+  };
+}
+
+function workThreadFromRow(r: Record<string, unknown>): WorkThread {
+  const parseValue = <T>(value: unknown, fallback: T): T => {
+    if (value == null || String(value).trim() === '') return fallback;
+    try {
+      return JSON.parse(String(value)) as T;
+    } catch {
+      return fallback;
+    }
+  };
+
+  return {
+    id: String(r.id),
+    title: String(r.title ?? ''),
+    status: (String(r.status) as WorkThread['status']) || 'active',
+    roleId: r.role_id != null ? String(r.role_id) : undefined,
+    docMarkdown: String(r.doc_markdown ?? ''),
+    contextItems: parseValue<WorkThread['contextItems']>(r.context_items, []),
+    nextActions: parseValue<WorkThread['nextActions']>(r.next_actions, []),
+    suggestions: parseValue<WorkThread['suggestions']>(r.suggestions, undefined),
+    createdAt: Number(r.created_at),
+    updatedAt: Number(r.updated_at),
+  };
+}
+
+function workThreadEventFromRow(r: Record<string, unknown>): WorkThreadEvent {
+  let payload: WorkThreadEvent['payload'];
+  if (r.payload != null && String(r.payload).trim() !== '') {
+    try {
+      payload = JSON.parse(String(r.payload)) as WorkThreadEvent['payload'];
+    } catch {
+      payload = undefined;
+    }
+  }
+  return {
+    id: String(r.id),
+    threadId: String(r.thread_id),
+    type: String(r.type) as WorkThreadEvent['type'],
+    actor: String(r.actor) as WorkThreadEvent['actor'],
+    title: String(r.title ?? ''),
+    detailMarkdown: r.detail_markdown != null ? String(r.detail_markdown) : undefined,
+    payload,
+    createdAt: Number(r.created_at),
+  };
 }
 
 async function bumpVersion(db: CapDB): Promise<number> {
@@ -132,6 +316,7 @@ function rowToTaskDbRow(r: Record<string, unknown>): TaskDbRow {
     promoted: r.promoted != null ? Number(r.promoted) : null,
     phase: r.phase != null ? String(r.phase) : null,
     kanban_column: r.kanban_column != null ? String(r.kanban_column) : null,
+    task_type: r.task_type != null ? String(r.task_type) : null,
     tags: String(r.tags ?? '[]'),
     subtask_ids: String(r.subtask_ids ?? '[]'),
     resources: String(r.resources ?? '[]'),
@@ -163,44 +348,151 @@ function rowToStreamDbRow(r: Record<string, unknown>): StreamEntryDbRow {
   };
 }
 
+function resolvedStreamEntryId(taskRow: TaskDbRow): string {
+  return taskRow.source_stream_id ?? taskRow.id;
+}
+
+function taskFromJoinedRows(
+  taskRow: TaskDbRow,
+  streamRowsById: Map<string, StreamEntryDbRow>,
+): Task {
+  const baseTask = taskFromDbRow(taskRow);
+  const streamRow =
+    streamRowsById.get(taskRow.id) ?? streamRowsById.get(resolvedStreamEntryId(taskRow));
+  const entry = streamRow ? streamEntryFromDbRow(streamRow) : undefined;
+  return hydrateTaskWithEntry(baseTask, entry);
+}
+
+function streamEntriesWithTaskLinks(
+  streamRows: Record<string, unknown>[],
+  taskRows: TaskDbRow[],
+): StreamEntry[] {
+  const entryToTaskId = new Map<string, string>();
+  for (const taskRow of taskRows) {
+    entryToTaskId.set(resolvedStreamEntryId(taskRow), taskRow.id);
+  }
+  return streamRows.map((row) => {
+    const entry = streamEntryFromDbRow(rowToStreamDbRow(row));
+    return {
+      ...entry,
+      extractedTaskId: entryToTaskId.get(entry.id),
+    };
+  });
+}
+
 export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
   const db = await openCapacitorDb();
   await ensureSchema(db);
 
   const now = () => Date.now();
+  const deleteTaskFacet = async (id: string): Promise<void> => {
+    const ts = now();
+    const v = await bumpVersion(db);
+    await db.execute(
+      'UPDATE tasks SET deleted_at = ?, updated_at = ?, version = ? WHERE id = ? AND deleted_at IS NULL',
+      [ts, ts, v, id],
+    );
+  };
 
   return {
     async getAllTasks(): Promise<Task[]> {
-      const rows = await db.query(
-        'SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC',
+      const [taskRows, streamRows] = await Promise.all([
+        db.query('SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC'),
+        db.query('SELECT * FROM stream_entries WHERE deleted_at IS NULL'),
+      ]);
+      if (!taskRows.values) return [];
+      const taskDbRows = taskRows.values.map((r) => rowToTaskDbRow(r));
+      const streamRowsById = new Map(
+        (streamRows.values ?? []).map((r) => {
+          const row = rowToStreamDbRow(r);
+          return [row.id, row] as const;
+        }),
       );
-      if (!rows.values) return [];
-      return rows.values.map((r) => taskFromDbRow(rowToTaskDbRow(r)));
+      return taskDbRows.map((row) => taskFromJoinedRows(row, streamRowsById));
     },
 
     async getTask(id: string): Promise<Task | null> {
       const rows = await db.query('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL', [id]);
       if (!rows.values?.length) return null;
-      return taskFromDbRow(rowToTaskDbRow(rows.values[0]));
+      const taskRow = rowToTaskDbRow(rows.values[0]);
+      const streamIds = [...new Set([taskRow.id, resolvedStreamEntryId(taskRow)])];
+      const placeholders = streamIds.map(() => '?').join(', ');
+      const streamRows = await db.query(
+        `SELECT * FROM stream_entries WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
+        streamIds,
+      );
+      const streamRowsById = new Map(
+        (streamRows.values ?? []).map((r) => {
+          const row = rowToStreamDbRow(r);
+          return [row.id, row] as const;
+        }),
+      );
+      return taskFromJoinedRows(taskRow, streamRowsById);
     },
 
     async putTask(task: Task): Promise<void> {
+      const existingStreamRows = await db.query(
+        'SELECT * FROM stream_entries WHERE id = ? AND deleted_at IS NULL',
+        [task.id],
+      );
+      const existingStream = existingStreamRows.values?.[0]
+        ? streamEntryFromDbRow(rowToStreamDbRow(existingStreamRows.values[0]))
+        : undefined;
+      const canonicalEntry: StreamEntry = {
+        id: task.id,
+        content: task.body,
+        timestamp: existingStream?.timestamp ?? task.createdAt,
+        tags: task.tags,
+        attachments: existingStream?.attachments ?? [],
+        roleId: normalizeTaskRoleIds(task, existingStream?.roleId)[0],
+        entryType: 'task',
+      };
+      const streamVersion = await bumpVersion(db);
+      const streamRow = streamEntryToDbRow(canonicalEntry, streamVersion, null);
+      await db.execute(
+        `INSERT INTO stream_entries (
+          id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
+          tags, attachments, version, deleted_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET
+          content=excluded.content, entry_type=excluded.entry_type, timestamp=excluded.timestamp,
+          date_key=excluded.date_key, role_id=excluded.role_id, extracted_task_id=excluded.extracted_task_id,
+          tags=excluded.tags, attachments=excluded.attachments, version=excluded.version, deleted_at=excluded.deleted_at,
+          updated_at=excluded.updated_at`,
+        [
+          streamRow.id,
+          streamRow.content,
+          streamRow.entry_type,
+          streamRow.timestamp,
+          streamRow.date_key,
+          streamRow.role_id,
+          null,
+          streamRow.tags,
+          streamRow.attachments,
+          streamRow.version,
+          streamRow.deleted_at,
+          streamRow.updated_at ?? streamRow.timestamp,
+        ],
+      );
+
       const v = await bumpVersion(db);
-      const t = { ...task, updatedAt: new Date() };
+      const t = deriveTaskFacetFromEntry({ ...task, updatedAt: new Date() }, canonicalEntry);
       const row = taskToDbRow(t, v, null);
       await db.execute(
         `INSERT INTO tasks (
           id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
           ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+          task_type,
           tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
           version, deleted_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(id) DO UPDATE SET
           title=excluded.title, title_customized=excluded.title_customized, description=excluded.description, status=excluded.status, body=excluded.body,
           created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
           ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
           role_id=excluded.role_id, role_ids=excluded.role_ids, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
           priority=excluded.priority, promoted=excluded.promoted, phase=excluded.phase, kanban_column=excluded.kanban_column,
+          task_type=excluded.task_type,
           tags=excluded.tags, subtask_ids=excluded.subtask_ids, resources=excluded.resources,
           reminders=excluded.reminders, submissions=excluded.submissions, postponements=excluded.postponements,
           status_history=excluded.status_history, progress_logs=excluded.progress_logs,
@@ -211,21 +503,22 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           row.title_customized,
           row.description,
           row.status,
-          row.body,
+          '',
           row.created_at,
           row.updated_at,
           row.completed_at,
           row.ddl,
           row.ddl_type,
           row.planned_at,
-          row.role_id,
-          row.role_ids,
+          null,
+          row.role_ids ?? JSON.stringify(normalizeTaskRoleIds(task, canonicalEntry.roleId)),
           row.parent_id,
-          row.source_stream_id,
+          null,
           row.priority,
           row.promoted,
           row.phase,
           row.kanban_column,
+          row.task_type,
           row.tags,
           row.subtask_ids,
           row.resources,
@@ -241,33 +534,48 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
     },
 
     async deleteTask(id: string): Promise<void> {
+      await deleteTaskFacet(id);
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        'UPDATE tasks SET deleted_at = ?, updated_at = ?, version = ? WHERE id = ? AND deleted_at IS NULL',
-        [ts, ts, v, id],
+        'UPDATE stream_entries SET deleted_at = ?, version = ? WHERE id = ? AND deleted_at IS NULL',
+        [ts, v, id],
       );
     },
 
+    deleteTaskFacet,
+
     async getStreamDay(dateKey: string): Promise<StreamEntry[]> {
-      const rows = await db.query(
-        'SELECT * FROM stream_entries WHERE date_key = ? AND deleted_at IS NULL ORDER BY timestamp ASC',
-        [dateKey],
-      );
+      const [rows, taskRows] = await Promise.all([
+        db.query(
+          'SELECT * FROM stream_entries WHERE date_key = ? AND deleted_at IS NULL ORDER BY timestamp ASC',
+          [dateKey],
+        ),
+        db.query('SELECT * FROM tasks WHERE deleted_at IS NULL'),
+      ]);
       if (!rows.values) return [];
-      return rows.values.map((r) => streamEntryFromDbRow(rowToStreamDbRow(r)));
+      return streamEntriesWithTaskLinks(
+        rows.values,
+        (taskRows.values ?? []).map((r) => rowToTaskDbRow(r)),
+      );
     },
 
     async getRecentStream(days = 14): Promise<StreamEntry[]> {
       const min = new Date();
       min.setDate(min.getDate() - days);
       const minKey = formatDateKey(min);
-      const rows = await db.query(
-        'SELECT * FROM stream_entries WHERE deleted_at IS NULL AND date_key >= ? ORDER BY timestamp DESC',
-        [minKey],
-      );
+      const [rows, taskRows] = await Promise.all([
+        db.query(
+          'SELECT * FROM stream_entries WHERE deleted_at IS NULL AND date_key >= ? ORDER BY timestamp DESC',
+          [minKey],
+        ),
+        db.query('SELECT * FROM tasks WHERE deleted_at IS NULL'),
+      ]);
       if (!rows.values) return [];
-      return rows.values.map((r) => streamEntryFromDbRow(rowToStreamDbRow(r)));
+      return streamEntriesWithTaskLinks(
+        rows.values,
+        (taskRows.values ?? []).map((r) => rowToTaskDbRow(r)),
+      );
     },
 
     async listStreamDateKeys(): Promise<string[]> {
@@ -282,12 +590,18 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const needle = query.trim();
       if (!needle) return [];
       const lim = Math.min(Math.max(1, limit), 500);
-      const rows = await db.query(
-        'SELECT * FROM stream_entries WHERE deleted_at IS NULL AND instr(lower(content), lower(?)) > 0 ORDER BY timestamp DESC LIMIT ?',
-        [needle, lim],
-      );
+      const [rows, taskRows] = await Promise.all([
+        db.query(
+          'SELECT * FROM stream_entries WHERE deleted_at IS NULL AND instr(lower(content), lower(?)) > 0 ORDER BY timestamp DESC LIMIT ?',
+          [needle, lim],
+        ),
+        db.query('SELECT * FROM tasks WHERE deleted_at IS NULL'),
+      ]);
       if (!rows.values) return [];
-      return rows.values.map((r) => streamEntryFromDbRow(rowToStreamDbRow(r)));
+      return streamEntriesWithTaskLinks(
+        rows.values,
+        (taskRows.values ?? []).map((r) => rowToTaskDbRow(r)),
+      );
     },
 
     async putStreamEntry(entry: StreamEntry): Promise<void> {
@@ -310,7 +624,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           row.timestamp,
           row.date_key,
           row.role_id,
-          row.extracted_task_id,
+          null,
           row.tags,
           row.attachments,
           row.version,
@@ -318,9 +632,25 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           row.updated_at ?? row.timestamp,
         ],
       );
+      const linkedTaskRows = await db.query('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL', [
+        entry.id,
+      ]);
+      const linkedTaskRaw = linkedTaskRows.values?.[0];
+      if (linkedTaskRaw) {
+        const linkedTask = taskFromDbRow(rowToTaskDbRow(linkedTaskRaw));
+        if (shouldProjectStreamRoleToTask(linkedTask)) {
+          const roleIds = normalizeTaskRoleIds(linkedTask, entry.roleId);
+          const nextVersion = await bumpVersion(db);
+          await db.execute(
+            'UPDATE tasks SET role_ids = ?, role_id = NULL, updated_at = ?, version = ? WHERE id = ? AND deleted_at IS NULL',
+            [roleIds.length > 0 ? JSON.stringify(roleIds) : null, Date.now(), nextVersion, entry.id],
+          );
+        }
+      }
     },
 
     async deleteStreamEntry(id: string): Promise<void> {
+      await deleteTaskFacet(id);
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
@@ -399,6 +729,20 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       return `blob://${id}`;
     },
 
+    async getBlobData(id: string) {
+      const rows = await db.query(
+        'SELECT data, mime_type, filename FROM blobs WHERE id = ? AND deleted_at IS NULL LIMIT 1',
+        [id],
+      );
+      const row = rows.values?.[0];
+      if (!row) return null;
+      return {
+        data: coerceBlobBytes(row.data),
+        mimeType: String(row.mime_type ?? 'application/octet-stream'),
+        filename: String(row.filename ?? ''),
+      };
+    },
+
     async deleteBlob(id: string): Promise<void> {
       const ts = now();
       const v = await bumpVersion(db);
@@ -415,6 +759,138 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
         storage: 'local',
         image_host_url: '',
       };
+    },
+
+    async getAllWindowContexts(): Promise<WindowContext[]> {
+      return [];
+    },
+
+    async putWindowContext(_ctx: WindowContext): Promise<void> {
+      /* Capacitor: not implemented */
+    },
+
+    async deleteWindowContext(_id: string): Promise<void> {
+      /* Capacitor: not implemented */
+    },
+
+    async saveThinkSession(session: ThinkSession): Promise<void> {
+      const extracted =
+        session.extractedActions != null && session.extractedActions.length > 0
+          ? JSON.stringify(session.extractedActions)
+          : null;
+      await db.execute(
+        `INSERT INTO think_sessions (id, content, start_mode, extracted_actions, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           content=excluded.content,
+           start_mode=excluded.start_mode,
+           extracted_actions=excluded.extracted_actions,
+           updated_at=excluded.updated_at`,
+        [
+          session.id,
+          session.content,
+          session.startMode,
+          extracted,
+          session.createdAt,
+          session.updatedAt,
+        ],
+      );
+    },
+
+    async getThinkSession(id: string): Promise<ThinkSession | null> {
+      const rows = await db.query('SELECT * FROM think_sessions WHERE id = ?', [id]);
+      const r = rows.values?.[0];
+      return r ? thinkSessionFromRow(r as Record<string, unknown>) : null;
+    },
+
+    async listThinkSessions(limit = 200): Promise<ThinkSession[]> {
+      const lim = Math.min(Math.max(1, limit), 500);
+      const rows = await db.query(
+        `SELECT * FROM think_sessions ORDER BY updated_at DESC LIMIT ${lim}`,
+      );
+      if (!rows.values) return [];
+      return rows.values.map((r) => thinkSessionFromRow(r as Record<string, unknown>));
+    },
+
+    async deleteThinkSession(id: string): Promise<void> {
+      await db.execute('DELETE FROM think_sessions WHERE id = ?', [id]);
+    },
+
+    async saveWorkThread(thread: WorkThread): Promise<void> {
+      await db.execute(
+        `INSERT INTO work_threads (
+          id, title, status, role_id, doc_markdown, context_items, next_actions, suggestions, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          title=excluded.title,
+          status=excluded.status,
+          role_id=excluded.role_id,
+          doc_markdown=excluded.doc_markdown,
+          context_items=excluded.context_items,
+          next_actions=excluded.next_actions,
+          suggestions=excluded.suggestions,
+          updated_at=excluded.updated_at`,
+        [
+          thread.id,
+          thread.title,
+          thread.status,
+          thread.roleId ?? null,
+          thread.docMarkdown,
+          JSON.stringify(thread.contextItems),
+          JSON.stringify(thread.nextActions),
+          thread.suggestions != null ? JSON.stringify(thread.suggestions) : null,
+          thread.createdAt,
+          thread.updatedAt,
+        ],
+      );
+    },
+
+    async getWorkThread(id: string): Promise<WorkThread | null> {
+      const rows = await db.query('SELECT * FROM work_threads WHERE id = ?', [id]);
+      const row = rows.values?.[0];
+      return row ? workThreadFromRow(row as Record<string, unknown>) : null;
+    },
+
+    async listWorkThreads(limit = 200): Promise<WorkThread[]> {
+      const lim = Math.min(Math.max(1, limit), 500);
+      const rows = await db.query(
+        `SELECT * FROM work_threads ORDER BY updated_at DESC LIMIT ${lim}`,
+      );
+      if (!rows.values) return [];
+      return rows.values.map((r) => workThreadFromRow(r as Record<string, unknown>));
+    },
+
+    async deleteWorkThread(id: string): Promise<void> {
+      await db.execute('DELETE FROM work_thread_events WHERE thread_id = ?', [id]);
+      await db.execute('DELETE FROM work_threads WHERE id = ?', [id]);
+    },
+
+    async appendWorkThreadEvent(event: WorkThreadEvent): Promise<void> {
+      await db.execute(
+        `INSERT INTO work_thread_events (
+          id, thread_id, type, actor, title, detail_markdown, payload, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          event.id,
+          event.threadId,
+          event.type,
+          event.actor,
+          event.title,
+          event.detailMarkdown ?? null,
+          event.payload != null ? JSON.stringify(event.payload) : null,
+          event.createdAt,
+        ],
+      );
+    },
+
+    async listWorkThreadEvents(threadId: string, limit = 200): Promise<WorkThreadEvent[]> {
+      const lim = Math.min(Math.max(1, limit), 1000);
+      const rows = await db.query(
+        `SELECT * FROM work_thread_events WHERE thread_id = ? ORDER BY created_at DESC LIMIT ${lim}`,
+        [threadId],
+      );
+      if (!rows.values) return [];
+      return rows.values.map((r) => workThreadEventFromRow(r as Record<string, unknown>));
     },
 
     async getMaxVersion(): Promise<number> {

@@ -1,42 +1,38 @@
-import type { Task, TaskStatus } from '@my-little-todo/core';
-import { daysUntil, displayTaskTitle, isOverdue, taskRoleIds, withTaskRoles } from '@my-little-todo/core';
-import { AnimatePresence, motion } from 'framer-motion';
+import type { Task } from '@my-little-todo/core';
 import {
-  Check,
-  Clock,
-  Coffee,
-  Dices,
-  ExternalLink,
-  Info,
-  Lock,
-  PartyPopper,
-  Pause,
-  PenLine,
-  Play,
-  Wind,
-} from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+  daysUntil,
+  displayTaskTitle,
+  isOverdue,
+  taskRoleIds,
+  withTaskRoles,
+} from '@my-little-todo/core';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Clock, Coffee, Dices, Lock, NotebookPen, PartyPopper, Sparkles, Wind } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
+import { useOpenAiChat } from '../ai/useOpenAiChat';
 import { OnboardingTip } from '../components/OnboardingTip';
 import { RecommendationHistory } from '../components/RecommendationHistory';
 import { RolePillMulti } from '../components/RolePickerPopover';
 import { TaskContextMenu } from '../components/TaskContextMenu';
+import { useModuleStore } from '../modules';
 import {
   countTaskSwitchesInWindow,
+  ensureFocusSessionHydrated,
   filterByRole,
   formatDdlLabel,
+  getCurrentTimeContext,
+  getTimeSlotSuggestion,
   isInScheduleBlock,
   pickRandom,
   useBehaviorStore,
   useCoachActivityStore,
   useExecCoachStore,
-  ensureFocusSessionHydrated,
   useFocusSessionStore,
   useNowOverrideStore,
   useRoleStore,
-  useScheduleStore,
   useTaskStore,
-  type FocusSessionState,
+  useTimeAwarenessStore,
 } from '../stores';
 import type { EnergyLevel } from '../stores/execCoachStore';
 import { pickRecommendation } from '../stores/taskStore';
@@ -50,444 +46,39 @@ const REJECTION_REASONS = [
 
 const GENTLE_INTERVENTIONS = [
   "You've rejected several tasks. Maybe now isn't a good time for work? Take a break.",
-  "Rejecting is okay — but if you don't want to do any task, maybe try a different environment or approach.",
+  "Rejecting is okay - but if you don't want to do any task, maybe try a different environment or approach.",
   "Consecutive rejections might mean you need a break, or the task breakdown isn't right. Want to adjust?",
 ];
 
-function pickForNow(list: Task[], allTasks: Task[], energy: EnergyLevel) {
-  return pickRecommendation(list, { energyLevel: energy, allTasks });
-}
-
-function formatElapsed(
-  ms: number,
-  t: (key: string, options?: Record<string, unknown>) => string,
-): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return t('{{hours}} hours {{minutes}} minutes', { hours, minutes });
-  if (minutes > 0) return t('{{minutes}} minutes {{seconds}} seconds', { minutes, seconds });
-  return t('{{seconds}} seconds', { seconds });
-}
-
-function formatTimeOfDay(date: Date): string {
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
-
-function FocusSubtaskRow({
-  subtask,
-  onToggle,
-}: {
-  subtask: Task;
-  onToggle: () => void;
-}) {
-  const done = subtask.status === 'completed';
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className="flex items-start gap-2.5 rounded-lg px-3 py-2 w-full text-left transition-colors hover:bg-[var(--color-bg)]"
-    >
-      <div
-        className="flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors mt-0.5"
-        style={{
-          borderColor: done ? 'var(--color-success)' : 'var(--color-border)',
-          background: done ? 'var(--color-success)' : 'transparent',
-        }}
-      >
-        {done && <Check size={10} className="text-white" />}
-      </div>
-      <span
-        className="text-[13px] leading-relaxed"
-        style={{
-          color: done ? 'var(--color-text-tertiary)' : 'var(--color-text)',
-          textDecoration: done ? 'line-through' : 'none',
-        }}
-      >
-        {displayTaskTitle(subtask)}
-      </span>
-    </button>
-  );
-}
-
-function FocusModeView({
-  task,
-  session,
-  locked,
-  lowEnergy,
-  onShelve,
-  onComplete,
-  onOpenDetail,
-}: {
-  task: Task;
-  session: FocusSessionState;
-  locked: boolean;
-  lowEnergy: boolean;
-  onShelve: () => void;
-  onComplete: () => void;
-  onOpenDetail: () => void;
-}) {
-  const { tasks, updateTask, updateStatus } = useTaskStore();
-  const updateFocusSession = useFocusSessionStore((s) => s.updateSession);
-  const { t } = useTranslation('now');
-  const { t: tc } = useTranslation('coach');
-  const [elapsed, setElapsed] = useState(0);
-  const [localNotes, setLocalNotes] = useState(session.notes);
-  const [showNotes, setShowNotes] = useState(false);
-  const [exitStep, setExitStep] = useState<'idle' | 'reason' | 'cooldown'>('idle');
-  const [exitReason, setExitReason] = useState('');
-  const [cooldownLeft, setCooldownLeft] = useState(0);
-  const notesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setElapsed(Date.now() - session.startedAt.getTime());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [session.startedAt]);
-
-  useEffect(() => {
-    setLocalNotes(session.notes);
-  }, [session.notes, session.taskId]);
-
-  const handleNotesChange = (val: string) => {
-    setLocalNotes(val);
-    if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
-    notesTimerRef.current = setTimeout(() => {
-      updateFocusSession({ notes: val });
-    }, 300);
-  };
-
-  const resizeTextarea = () => {
-    if (!textareaRef.current) return;
-    textareaRef.current.style.height = 'auto';
-    textareaRef.current.style.height = `${Math.max(textareaRef.current.scrollHeight, 60)}px`;
-  };
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: textarea height follows content
-  useEffect(resizeTextarea, [localNotes]);
-
-  const subtasks = (task.subtaskIds ?? [])
-    .map((id) => tasks.find((t) => t.id === id))
-    .filter((t): t is Task => t !== undefined);
-
-  const handleToggleSubtask = async (sub: Task) => {
-    const newStatus: TaskStatus = sub.status === 'completed' ? 'active' : 'completed';
-    await updateStatus(sub.id, newStatus);
-  };
-
-  const handleComplete = () => {
-    if (localNotes.trim()) {
-      const timestamp = formatTimeOfDay(new Date());
-      const separator = task.body.trim() ? '\n\n' : '';
-      const noteEntry = `${separator}---\n**${timestamp} ${t('Focus notes')}**\n${localNotes.trim()}`;
-      updateTask({ ...task, body: task.body + noteEntry });
-    }
-    onComplete();
-  };
-
-  useEffect(() => {
-    if (exitStep !== 'cooldown' || cooldownLeft <= 0) return;
-    const t = window.setTimeout(() => {
-      setCooldownLeft((c) => {
-        if (c <= 1) {
-          setExitStep('idle');
-          onShelve();
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
-    return () => window.clearTimeout(t);
-  }, [exitStep, cooldownLeft, onShelve]);
-
-  const handleShelveClick = () => {
-    if (!locked) {
-      onShelve();
-      return;
-    }
-    setExitStep('reason');
-  };
-
-  const handleConfirmLockedExit = () => {
-    if (exitReason.trim().length < 10) return;
-    setCooldownLeft(30);
-    setExitStep('cooldown');
-  };
-
-  const ddlLabel = task.ddl ? formatDdlLabel(task.ddl) : null;
-
-  return (
-    <div className="relative flex h-full flex-col items-center px-6 overflow-y-auto overflow-x-hidden">
-      <div
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full blur-[100px] pointer-events-none opacity-5"
-        style={{ background: 'var(--color-success)' }}
-      />
-
-      <div className="relative z-10 w-full max-w-md pt-12 pb-8">
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="text-center"
-        >
-          <h1
-            className="text-2xl sm:text-4xl font-extrabold tracking-tight leading-tight"
-            style={{ color: 'var(--color-text)' }}
-          >
-            {displayTaskTitle(task)}
-          </h1>
-          <div className="mt-3 flex justify-center">
-            <RolePillMulti
-              roleIds={taskRoleIds(task)}
-              onChangeRoleIds={(ids) => updateTask({ ...task, ...withTaskRoles(task, ids) })}
-              size="md"
-            />
-          </div>
-        </motion.div>
-
-        {/* Timer info */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-          className="mt-8 text-center"
-        >
-          <div
-            className="inline-flex items-center gap-3 rounded-2xl px-5 py-3 shadow-sm"
-            style={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-            }}
-          >
-            <div className="flex items-center gap-1.5">
-              <Play size={12} style={{ color: 'var(--color-success)' }} />
-              <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                {t('Started at {{time}}', { time: formatTimeOfDay(session.startedAt) })}
-              </span>
-            </div>
-            <div className="w-px h-4" style={{ background: 'var(--color-border)' }} />
-            <span
-              className="text-sm font-semibold tabular-nums"
-              style={{ color: 'var(--color-text)' }}
-            >
-              {t('{{elapsed}} elapsed', { elapsed: formatElapsed(elapsed, t) })}
-            </span>
-          </div>
-          {ddlLabel && !lowEnergy && (
-            <div className="mt-2 flex items-center justify-center gap-1.5">
-              <Clock size={12} style={{ color: 'var(--color-warning)' }} />
-              <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                {ddlLabel}
-              </span>
-            </div>
-          )}
-        </motion.div>
-
-        {/* Quick notes */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="mt-8"
-        >
-          <button
-            type="button"
-            onClick={() => setShowNotes(!showNotes)}
-            className="flex items-center gap-1.5 text-xs font-medium mb-2"
-            style={{ color: 'var(--color-text-tertiary)' }}
-          >
-            <PenLine size={12} />
-            {showNotes ? t('Collapse notes') : t('Quick notes')}
-          </button>
-          <AnimatePresence>
-            {showNotes && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden"
-              >
-                <textarea
-                  ref={textareaRef}
-                  value={localNotes}
-                  onChange={(e) => handleNotesChange(e.target.value)}
-                  placeholder={t('Jot down thoughts while working...')}
-                  className="w-full resize-none rounded-xl px-3 py-2.5 text-[13px] leading-relaxed outline-none"
-                  style={{
-                    background: 'var(--color-surface)',
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text)',
-                    minHeight: '60px',
-                  }}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-
-        {/* Subtasks */}
-        {subtasks.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            className="mt-6"
-          >
-            <p className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
-              {t('Subtasks ({{completed}}/{{total}})', {
-                completed: subtasks.filter((s) => s.status === 'completed').length,
-                total: subtasks.length,
-              })}
-            </p>
-            <div
-              className="rounded-xl overflow-hidden"
-              style={{ border: '1px solid var(--color-border)' }}
-            >
-              {subtasks.map((sub) => (
-                <FocusSubtaskRow
-                  key={sub.id}
-                  subtask={sub}
-                  onToggle={() => handleToggleSubtask(sub)}
-                />
-              ))}
-            </div>
-          </motion.div>
-        )}
-
-        {locked && (
-          <p
-            className="mt-4 text-center text-[11px] font-medium"
-            style={{ color: 'var(--color-accent)' }}
-          >
-            <Lock size={12} className="inline mr-1" />
-            {tc('Locked focus')}
-          </p>
-        )}
-
-        {exitStep === 'reason' && (
-          <div
-            className="mt-6 rounded-2xl p-4 space-y-3"
-            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
-          >
-            <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
-              {tc('lock_exit_title')}
-            </p>
-            <textarea
-              value={exitReason}
-              onChange={(e) => setExitReason(e.target.value)}
-              placeholder={tc('lock_exit_reason')}
-              rows={3}
-              className="w-full rounded-xl px-3 py-2 text-[13px] outline-none"
-              style={{
-                background: 'var(--color-bg)',
-                border: '1px solid var(--color-border)',
-                color: 'var(--color-text)',
-              }}
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setExitStep('idle')}
-                className="flex-1 rounded-xl py-2 text-xs font-medium"
-                style={{
-                  border: '1px solid var(--color-border)',
-                  color: 'var(--color-text-secondary)',
-                }}
-              >
-                {t('Cancel')}
-              </button>
-              <button
-                type="button"
-                disabled={exitReason.trim().length < 10}
-                onClick={handleConfirmLockedExit}
-                className="flex-1 rounded-xl py-2 text-xs font-semibold text-white disabled:opacity-40"
-                style={{ background: 'var(--color-warning)' }}
-              >
-                {tc('lock_exit_confirm')}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {exitStep === 'cooldown' && cooldownLeft > 0 && (
-          <p className="mt-6 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            {tc('lock_exit_wait', { seconds: cooldownLeft })}
-          </p>
-        )}
-
-        {/* Action buttons */}
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="mt-10 flex items-center gap-3"
-        >
-          <button
-            type="button"
-            onClick={handleShelveClick}
-            disabled={exitStep !== 'idle'}
-            className="flex-1 flex items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-sm font-medium transition-all hover:scale-[1.01] active:scale-[0.98] disabled:opacity-50"
-            style={{
-              border: '1px solid var(--color-border)',
-              color: 'var(--color-text-secondary)',
-            }}
-          >
-            <Pause size={16} />
-            {t('Shelve')}
-          </button>
-          <button
-            type="button"
-            onClick={handleComplete}
-            className="group relative flex-[2] overflow-hidden rounded-2xl px-6 py-3.5 text-white font-semibold text-sm shadow-lg transition-all hover:scale-[1.02] active:scale-95"
-            style={{ background: 'var(--color-success)' }}
-          >
-            <div className="absolute inset-0 bg-white/20 translate-y-full transition-transform group-hover:translate-y-0 ease-out duration-300" />
-            <span className="relative flex items-center justify-center gap-2">
-              <Check size={16} />
-              {t('Complete')}
-            </span>
-          </button>
-        </motion.div>
-
-        {/* Detail link */}
-        {!locked && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.6 }}
-            className="mt-6 text-center"
-          >
-            <button
-              type="button"
-              onClick={onOpenDetail}
-              className="flex items-center gap-1.5 text-xs font-medium mx-auto transition-colors"
-              style={{ color: 'var(--color-text-tertiary)' }}
-            >
-              <ExternalLink size={12} />
-              {t('View / Edit task details')}
-            </button>
-          </motion.div>
-        )}
-      </div>
-    </div>
-  );
+function pickNowRecommendation(list: Task[], allTasks: Task[], energy: EnergyLevel) {
+  const taOn = useModuleStore.getState().isEnabled('time-awareness');
+  const blocks = useTimeAwarenessStore.getState().blocks;
+  const behaviorEvents = useBehaviorStore.getState().events;
+  return pickRecommendation(list, {
+    energyLevel: energy,
+    allTasks,
+    timeAwareness: taOn ? { enabled: true, blocks, behaviorEvents } : undefined,
+  });
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: NowView has many states
 export function NowView({
   onNavigateToStream,
   onBrainDump,
+  onOpenThinkSession,
+  onOpenWorkThread,
 }: {
   onNavigateToStream?: () => void;
   onBrainDump?: () => void;
+  onOpenThinkSession?: () => void;
+  onOpenWorkThread?: () => void;
 }) {
   const { t } = useTranslation('now');
   const { t: tCoach } = useTranslation('coach');
+  const { t: tAi } = useTranslation('ai');
+  const openAiChat = useOpenAiChat();
+  const aiAgentEnabled = useModuleStore((s) => s.isEnabled('ai-agent'));
   const [showRejectPanel, setShowRejectPanel] = useState(false);
-  const [showReason, setShowReason] = useState(false);
   const [currentTask, setCurrentTask] = useState<Task | null>(null);
   const [rejectionCount, setRejectionCount] = useState(0);
   const [showIntervention, setShowIntervention] = useState(false);
@@ -502,24 +93,48 @@ export function NowView({
   const session = useFocusSessionStore((s) => s.session);
   const setSession = useFocusSessionStore((s) => s.setSession);
   const overrideTaskId = useNowOverrideStore((s) => s.overrideTaskId);
-  const { tasks, loading, load, selectTask, updateTask, updateStatus, deleteTask } = useTaskStore();
+  const {
+    tasks,
+    loading,
+    error: taskError,
+    load,
+    selectTask,
+    updateTask,
+    updateStatus,
+    deleteTask,
+  } = useTaskStore();
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const filtered = useMemo(() => filterByRole(tasks, currentRoleId), [tasks, currentRoleId]);
   const { recordEvent, load: loadBehavior } = useBehaviorStore();
-  const scheduleBlocks = useScheduleStore((s) => s.blocks);
-  const loadSchedules = useScheduleStore((s) => s.load);
-  const activeSchedule = useMemo(() => isInScheduleBlock(scheduleBlocks), [scheduleBlocks]);
+  const timeAwarenessEnabled = useModuleStore((s) => s.isEnabled('time-awareness'));
+  const scheduleBlocks = useTimeAwarenessStore((s) => s.blocks);
+  const loadTimeAwareness = useTimeAwarenessStore((s) => s.load);
+  const behaviorEvents = useBehaviorStore((s) => s.events);
+  const activeSchedule = useMemo(
+    () => (timeAwarenessEnabled ? isInScheduleBlock(scheduleBlocks) : null),
+    [scheduleBlocks, timeAwarenessEnabled],
+  );
+  const timeSlotSuggestion = useMemo(
+    () =>
+      timeAwarenessEnabled
+        ? getTimeSlotSuggestion(scheduleBlocks, behaviorEvents)
+        : { kind: 'neutral' as const, messageKey: 'time_suggestion_neutral' },
+    [timeAwarenessEnabled, scheduleBlocks, behaviorEvents],
+  );
+  const timeContext = useMemo(
+    () => (timeAwarenessEnabled ? getCurrentTimeContext(scheduleBlocks) : null),
+    [timeAwarenessEnabled, scheduleBlocks],
+  );
   const energyLevel = useExecCoachStore((s) => s.energyLevel);
-  const bumpCompletionCount = useExecCoachStore((s) => s.bumpCompletionCount);
   const activityEvents = useCoachActivityStore((s) => s.events);
   const loadCoachActivity = useCoachActivityStore((s) => s.load);
 
   useEffect(() => {
     load();
     loadBehavior();
-    loadSchedules();
+    loadTimeAwareness();
     loadCoachActivity();
-  }, [load, loadBehavior, loadSchedules, loadCoachActivity]);
+  }, [load, loadBehavior, loadTimeAwareness, loadCoachActivity]);
 
   useEffect(() => {
     if (!overrideTaskId || loading) return;
@@ -536,7 +151,7 @@ export function NowView({
     } else {
       useNowOverrideStore.getState().setOverrideTaskId(null);
     }
-  }, [overrideTaskId, tasks, loading]);
+  }, [overrideTaskId, tasks, loading, setSession]);
 
   useEffect(() => {
     ensureFocusSessionHydrated().finally(() => setFocusStoreHydrated(true));
@@ -545,14 +160,14 @@ export function NowView({
   useEffect(() => {
     if (!focusStoreHydrated) return;
     if (filtered.length > 0 && !currentTask && !session) {
-      setCurrentTask(pickForNow(filtered, tasks, energyLevel));
+      setCurrentTask(pickNowRecommendation(filtered, tasks, energyLevel));
     }
   }, [focusStoreHydrated, filtered, currentTask, session, tasks, energyLevel]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset state when role filter changes
   useEffect(() => {
     if (!session) {
-      setCurrentTask(pickForNow(filtered, tasks, energyLevel));
+      setCurrentTask(pickNowRecommendation(filtered, tasks, energyLevel));
       setRejectionCount(0);
       setShowRejectPanel(false);
       setShowIntervention(false);
@@ -585,12 +200,13 @@ export function NowView({
         startedAt: new Date(),
         notes: '',
         locked: true,
+        peeking: false,
       });
       return;
     }
     const timer = window.setTimeout(() => setLockTick((x) => (x === null ? null : x - 1)), 1000);
     return () => window.clearTimeout(timer);
-  }, [lockTick, currentTask, recordEvent]);
+  }, [lockTick, currentTask, recordEvent, setSession]);
 
   const handleReject = (reasonId: string) => {
     setShowRejectPanel(false);
@@ -612,7 +228,7 @@ export function NowView({
     }
 
     const remaining = filtered.filter((t) => t.id !== currentTask?.id);
-    const next = pickForNow(remaining, tasks, energyLevel);
+    const next = pickNowRecommendation(remaining, tasks, energyLevel);
     setCurrentTask(next);
     if (next) {
       setChosenByUserTaskId(null);
@@ -626,7 +242,7 @@ export function NowView({
   const handleDismissIntervention = () => {
     setShowIntervention(false);
     const remaining = filtered.filter((t) => t.id !== currentTask?.id);
-    const next = pickForNow(remaining, tasks, energyLevel);
+    const next = pickNowRecommendation(remaining, tasks, energyLevel);
     setCurrentTask(next);
     if (next) {
       setChosenByUserTaskId(null);
@@ -646,7 +262,7 @@ export function NowView({
   const handleBackToWork = () => {
     setIsOffTime(false);
     setRejectionCount(0);
-    const next = pickForNow(filtered, tasks, energyLevel);
+    const next = pickNowRecommendation(filtered, tasks, energyLevel);
     setCurrentTask(next);
     if (next) {
       setChosenByUserTaskId(null);
@@ -658,6 +274,7 @@ export function NowView({
   };
 
   const handleRandom = () => {
+    if (session) return;
     if (currentTask) {
       recordEvent({
         taskId: currentTask.id,
@@ -677,7 +294,7 @@ export function NowView({
   };
 
   const handleStartWorking = () => {
-    if (!currentTask) return;
+    if (!currentTask || session) return;
     recordEvent({
       taskId: currentTask.id,
       taskTitle: displayTaskTitle(currentTask),
@@ -692,46 +309,53 @@ export function NowView({
       startedAt: new Date(),
       notes: '',
       locked: false,
+      peeking: false,
     });
   };
 
   const handleStartLocked = () => {
-    if (!currentTask || energyLevel === 'low') return;
+    if (session || !currentTask || energyLevel === 'low') return;
     setLockTick(3);
   };
 
-  const handleShelve = () => {
-    const shelvedId = session?.taskId;
-    setSession(null);
-    setChosenByUserTaskId(null);
-    const remaining = filtered.filter((t) => t.id !== shelvedId);
-    const next = pickForNow(remaining, tasks, energyLevel);
-    setCurrentTask(next);
-  };
-
-  const handleFocusComplete = useCallback(async () => {
-    if (!session) return;
-    await updateStatus(session.taskId, 'completed');
-    bumpCompletionCount();
-    const keys = ['celebrate_a', 'celebrate_b', 'celebrate_c', 'celebrate_d'] as const;
-    setCelebrateLine(tCoach(keys[Math.floor(Math.random() * keys.length)] ?? 'celebrate_a'));
-    setSession(null);
-    setShowCompletionCelebration(true);
-    setTimeout(() => {
-      setShowCompletionCelebration(false);
-      const freshTasks = useTaskStore.getState().tasks;
-      const freshFiltered = filterByRole(freshTasks, useRoleStore.getState().currentRoleId);
-      setCurrentTask(
-        pickForNow(freshFiltered, freshTasks, useExecCoachStore.getState().energyLevel),
-      );
-    }, 2500);
-  }, [session, updateStatus, bumpCompletionCount, tCoach, setSession]);
-
-  const handleOpenDetail = () => {
-    if (session) {
-      selectTask(session.taskId);
-    }
-  };
+  useEffect(() => {
+    const onShelved = (ev: Event) => {
+      const shelvedId = (ev as CustomEvent<{ taskId: string | null }>).detail?.taskId;
+      setChosenByUserTaskId(null);
+      const taskList = useTaskStore.getState().tasks;
+      const roleId = useRoleStore.getState().currentRoleId;
+      const energy = useExecCoachStore.getState().energyLevel;
+      const roleFiltered = filterByRole(taskList, roleId);
+      const remaining = roleFiltered.filter((t) => t.id !== shelvedId);
+      const next = pickNowRecommendation(remaining, taskList, energy);
+      setCurrentTask(next);
+    };
+    let celebrateTimer: ReturnType<typeof setTimeout> | null = null;
+    const onCompleted = () => {
+      const keys = ['celebrate_a', 'celebrate_b', 'celebrate_c', 'celebrate_d'] as const;
+      setCelebrateLine(tCoach(keys[Math.floor(Math.random() * keys.length)] ?? 'celebrate_a'));
+      setShowCompletionCelebration(true);
+      celebrateTimer = setTimeout(() => {
+        setShowCompletionCelebration(false);
+        const freshTasks = useTaskStore.getState().tasks;
+        const freshFiltered = filterByRole(freshTasks, useRoleStore.getState().currentRoleId);
+        setCurrentTask(
+          pickNowRecommendation(
+            freshFiltered,
+            freshTasks,
+            useExecCoachStore.getState().energyLevel,
+          ),
+        );
+      }, 2500);
+    };
+    window.addEventListener('mlt-focus-shelved', onShelved);
+    window.addEventListener('mlt-focus-completed', onCompleted);
+    return () => {
+      window.removeEventListener('mlt-focus-shelved', onShelved);
+      window.removeEventListener('mlt-focus-completed', onCompleted);
+      if (celebrateTimer) clearTimeout(celebrateTimer);
+    };
+  }, [tCoach]);
 
   if (loading && tasks.length === 0) {
     return (
@@ -739,6 +363,24 @@ export function NowView({
         <span className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
           {t('Loading...')}
         </span>
+      </div>
+    );
+  }
+
+  if (taskError && tasks.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <span className="text-sm" style={{ color: 'var(--color-danger)' }}>
+          {t('Failed to load tasks')}
+        </span>
+        <button
+          type="button"
+          onClick={() => load()}
+          className="rounded-lg px-4 py-1.5 text-xs font-medium"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+        >
+          {t('Retry')}
+        </button>
       </div>
     );
   }
@@ -772,23 +414,8 @@ export function NowView({
     );
   }
 
-  // Focus mode
-  if (session) {
-    const focusTask = tasks.find((t) => t.id === session.taskId);
-    if (focusTask) {
-      return (
-        <FocusModeView
-          task={focusTask}
-          session={session}
-          locked={!!session.locked}
-          lowEnergy={energyLevel === 'low'}
-          onShelve={handleShelve}
-          onComplete={handleFocusComplete}
-          onOpenDetail={handleOpenDetail}
-        />
-      );
-    }
-    setSession(null);
+  if (session && !session.peeking) {
+    return <div className="h-full w-full" aria-hidden />;
   }
 
   if (isOffTime) {
@@ -879,17 +506,33 @@ export function NowView({
   }
 
   const ddlLabel = currentTask.ddl ? formatDdlLabel(currentTask.ddl) : null;
-
-  const explainWhy = (): string => {
+  const showTimeSuggestion =
+    timeAwarenessEnabled && !activeSchedule && timeSlotSuggestion.kind !== 'neutral';
+  const recommendationReason = (() => {
     if (!currentTask.ddl) return t('This is your most important thing right now');
     const days = Math.ceil((currentTask.ddl.getTime() - Date.now()) / 86400000);
     if (days <= 0) return t('Already overdue, get on it!');
     if (days <= 2) return t("Most urgent + you've been putting it off");
     return t('Recommended based on urgency and priority');
-  };
+  })();
+  const timeMetaLabel =
+    timeAwarenessEnabled && timeContext
+      ? `${t(`time_period_${timeContext.period}`)}${
+          timeContext.approachingBlockMinutes != null
+            ? ` · ${t('time_approaching_block', { minutes: timeContext.approachingBlockMinutes })}`
+            : ''
+        }`
+      : null;
+  const ddlTone = currentTask.ddl
+    ? isOverdue(currentTask.ddl)
+      ? 'var(--color-danger)'
+      : daysUntil(currentTask.ddl) <= 2
+        ? 'var(--color-warning)'
+        : 'var(--color-text-secondary)'
+    : 'var(--color-text-secondary)';
 
   return (
-    <div className="relative flex h-full flex-col items-center justify-center px-6 overflow-hidden">
+    <div className="relative h-full overflow-y-auto px-4 py-4 sm:px-6 lg:px-8">
       {lockTick !== null && lockTick > 0 && (
         <div
           className="fixed inset-0 z-[150] flex flex-col items-center justify-center gap-2"
@@ -949,22 +592,20 @@ export function NowView({
         </div>
       )}
 
-      <RecommendationHistory />
-
-      {/* Onboarding tip */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 w-full max-w-md px-4">
-        <OnboardingTip tipId="now-intro">
-          <Trans i18nKey="now_intro_tip" ns="now" components={{ strong: <strong /> }} />
-        </OnboardingTip>
-      </div>
-
       <div
-        className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full blur-[100px] pointer-events-none opacity-5"
+        className="pointer-events-none absolute inset-x-0 top-0 h-48 opacity-80"
+        style={{
+          background:
+            'linear-gradient(180deg, color-mix(in srgb, var(--color-accent-soft) 32%, transparent), transparent)',
+        }}
+      />
+      <div
+        className="pointer-events-none absolute right-[-6rem] top-20 h-64 w-64 rounded-full opacity-[0.08] blur-[90px]"
         style={{ background: 'var(--color-accent)' }}
       />
 
       <div
-        className="relative z-10 w-full max-w-md text-center"
+        className="relative z-10 mx-auto flex w-full max-w-[1180px] flex-col gap-4 lg:gap-5"
         onContextMenu={(e) => {
           if (currentTask) {
             e.preventDefault();
@@ -972,314 +613,440 @@ export function NowView({
           }
         }}
       >
-        {activeSchedule && (
-          <motion.div
-            initial={{ opacity: 0, y: -5 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-6 inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-[11px] font-medium"
-            style={{
-              background: `${activeSchedule.color}15`,
-              border: `1px solid ${activeSchedule.color}30`,
-              color: activeSchedule.color,
-            }}
-          >
-            <Clock size={12} />
-            {t('Current schedule: {{name}} ({{startTime}}-{{endTime}})', {
-              name: activeSchedule.name,
-              startTime: activeSchedule.startTime,
-              endTime: activeSchedule.endTime,
-            })}
-          </motion.div>
-        )}
-        <motion.div
-          key={currentTask.id}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: 'easeOut' }}
-        >
-          <button
-            type="button"
-            onClick={() => selectTask(currentTask.id)}
-            className="text-3xl sm:text-5xl font-extrabold tracking-tight leading-tight transition-colors hover:text-[var(--color-accent)]"
-            style={{ color: 'var(--color-text)' }}
-          >
-            {displayTaskTitle(currentTask)}
-          </button>
-          {chosenByUserTaskId === currentTask.id && (
-            <p
-              className="mt-2 text-[11px] font-semibold uppercase tracking-wider"
-              style={{ color: 'var(--color-accent)' }}
-            >
-              {t('Chosen by you')}
-            </p>
-          )}
-          <div className="mt-3 flex justify-center">
-            <RolePillMulti
-              roleIds={taskRoleIds(currentTask)}
-              onChangeRoleIds={(ids) =>
-                updateTask({ ...currentTask, ...withTaskRoles(currentTask, ids) })
-              }
-              size="md"
-            />
-          </div>
-          {currentTask.description && (
-            <p
-              className="mt-3 text-lg font-medium"
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              {currentTask.description}
-            </p>
-          )}
-        </motion.div>
-
-        {ddlLabel && currentTask.ddl && energyLevel !== 'low' && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3, duration: 0.5 }}
-            className="mt-8 inline-flex items-center gap-2 rounded-full px-4 py-2 shadow-sm"
-            style={{
-              background: 'var(--color-surface)',
-              border: '1px solid var(--color-border)',
-            }}
-          >
-            <Clock
-              size={16}
-              style={{
-                color: isOverdue(currentTask.ddl)
-                  ? 'var(--color-danger)'
-                  : daysUntil(currentTask.ddl) <= 2
-                    ? 'var(--color-warning)'
-                    : 'var(--color-text-tertiary)',
-              }}
-            />
-            <span className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-              {ddlLabel}
-            </span>
-          </motion.div>
-        )}
-
-        <div className="mt-12 min-h-[160px]">
-          <AnimatePresence mode="wait">
-            {showIntervention ? (
-              <motion.div
-                key="intervention"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                className="rounded-2xl p-5 text-center shadow-sm"
-                style={{
-                  background: 'var(--color-surface)',
-                  border: '1px solid var(--color-border)',
-                }}
-              >
-                <p
-                  className="text-sm leading-relaxed mb-5"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  {t(
-                    GENTLE_INTERVENTIONS[
-                      Math.floor(rejectionCount / 3) % GENTLE_INTERVENTIONS.length
-                    ],
-                  )}
-                </p>
-                <div className="flex flex-col gap-2">
-                  <button
-                    type="button"
-                    onClick={handleDismissIntervention}
-                    className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition-all hover:scale-[1.02] active:scale-95"
-                    style={{ background: 'var(--color-accent)', color: 'white' }}
-                  >
-                    {t('Got it, show me the next one')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleOffTime}
-                    className="w-full rounded-xl px-4 py-2.5 text-sm font-medium transition-colors"
-                    style={{ color: 'var(--color-text-tertiary)' }}
-                  >
-                    <span className="flex items-center justify-center gap-1.5">
-                      <Coffee size={14} />
-                      {t('Not working time')}
-                    </span>
-                  </button>
-                </div>
-              </motion.div>
-            ) : !showRejectPanel ? (
-              <motion.div
-                key="actions"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95, filter: 'blur(4px)' }}
-                transition={{ duration: 0.3 }}
-                className="flex flex-col items-center gap-4"
-              >
-                <div className="flex flex-col sm:flex-row gap-3 w-full max-w-[280px] items-stretch">
-                  <button
-                    type="button"
-                    onClick={handleStartWorking}
-                    className="group relative flex-1 overflow-hidden rounded-2xl px-6 py-4 text-white font-semibold text-lg shadow-lg transition-all hover:scale-[1.02] active:scale-95"
-                    style={{ background: 'var(--color-accent)' }}
-                  >
-                    <div className="absolute inset-0 bg-white/20 translate-y-full transition-transform group-hover:translate-y-0 ease-out duration-300" />
-                    <span className="relative">{t('Start working')}</span>
-                  </button>
-                  {energyLevel !== 'low' && (
-                    <button
-                      type="button"
-                      onClick={handleStartLocked}
-                      className="flex-1 rounded-2xl px-4 py-3 text-sm font-semibold transition-all border"
-                      style={{
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text-secondary)',
-                      }}
-                    >
-                      <Lock size={14} className="inline mr-1" />
-                      {tCoach('Lock in')}
-                    </button>
-                  )}
-                </div>
-                {energyLevel === 'low' && onBrainDump && (
-                  <button
-                    type="button"
-                    onClick={onBrainDump}
-                    className="mt-2 text-xs font-medium"
-                    style={{ color: 'var(--color-accent)' }}
-                  >
-                    {tCoach('Brain dump')}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowRejectPanel(true)}
-                  className="rounded-xl px-6 py-2 text-sm font-medium transition-colors"
-                  style={{ color: 'var(--color-text-tertiary)' }}
-                >
-                  {t("Don't want to")}
-                </button>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="reject-panel"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                className="flex flex-col gap-2 rounded-2xl p-4 shadow-sm"
-                style={{
-                  background: 'var(--color-surface)',
-                  border: '1px solid var(--color-border)',
-                }}
-              >
-                <div className="flex items-center justify-between mb-4 px-2">
-                  <p
-                    className="text-sm font-medium"
-                    style={{ color: 'var(--color-text-secondary)' }}
-                  >
-                    {t("Why don't you want to?")}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setShowRejectPanel(false)}
-                    className="text-xs transition-colors"
-                    style={{ color: 'var(--color-text-tertiary)' }}
-                  >
-                    {t('Cancel')}
-                  </button>
-                </div>
-                {REJECTION_REASONS.map((reason, i) => (
-                  <motion.button
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                    key={reason.id}
-                    type="button"
-                    onClick={() => handleReject(reason.id)}
-                    className="block w-full rounded-xl px-4 py-3 text-left text-sm font-medium transition-all active:scale-[0.98]"
-                    style={{
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text-secondary)',
-                      border: '1px solid var(--color-border)',
-                    }}
-                  >
-                    {t(reason.label)}
-                  </motion.button>
-                ))}
-                <motion.button
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: REJECTION_REASONS.length * 0.05 }}
-                  type="button"
-                  onClick={handleOffTime}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-medium transition-all"
-                  style={{ color: 'var(--color-text-tertiary)' }}
-                >
-                  <Coffee size={13} />
-                  {t('Not working time')}
-                </motion.button>
-              </motion.div>
-            )}
-          </AnimatePresence>
+        <div className="max-w-3xl">
+          <OnboardingTip tipId="now-intro">
+            <Trans i18nKey="now_intro_tip" ns="now" components={{ strong: <strong /> }} />
+          </OnboardingTip>
         </div>
 
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.6 }}
-          className="mt-8 flex flex-col items-center gap-4"
-        >
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowReason(!showReason)}
-              className="flex items-center gap-1.5 text-xs transition-colors"
-              style={{ color: 'var(--color-text-tertiary)' }}
-            >
-              <Info size={14} />
-              <span>{t('Why this one?')}</span>
-            </button>
-            <AnimatePresence>
-              {showReason && (
-                <motion.div
-                  initial={{ opacity: 0, y: 5, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 5, scale: 0.95 }}
-                  className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2 w-max max-w-[200px] rounded-lg px-3 py-2 text-xs shadow-md"
-                  style={{
-                    background: 'var(--color-surface)',
-                    color: 'var(--color-text-secondary)',
-                    border: '1px solid var(--color-border)',
-                  }}
-                >
-                  {explainWhy()}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleRandom}
-            className="group flex items-center gap-2 text-xs font-medium transition-colors"
-            style={{ color: 'var(--color-text-tertiary)' }}
+        <div className="grid items-start gap-5 md:grid-cols-[minmax(0,1.35fr)_minmax(14rem,0.82fr)] lg:grid-cols-[minmax(0,1.42fr)_minmax(17rem,0.88fr)] xl:gap-6">
+          <motion.section
+            key={currentTask.id}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, ease: 'easeOut' }}
+            className="min-w-0 overflow-hidden rounded-[var(--radius-panel)] border"
+            style={{
+              borderColor: 'var(--color-border)',
+              background:
+                'linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 97%, var(--color-bg)), var(--color-surface))',
+            }}
           >
-            <Dices size={16} className="transition-transform duration-500 group-hover:rotate-180" />
-            <span>{t('Try another')}</span>
-          </button>
+            <div className="space-y-5 px-5 py-5 sm:px-6 sm:py-6 lg:px-7 lg:py-7">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium">
+                {timeMetaLabel && (
+                  <span style={{ color: 'var(--color-text-tertiary)' }}>{timeMetaLabel}</span>
+                )}
+                {activeSchedule && (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full px-2.5 py-1"
+                    style={{
+                      background: `${activeSchedule.color}15`,
+                      color: activeSchedule.color,
+                    }}
+                  >
+                    <Clock size={12} />
+                    {t('Current schedule: {{name}} ({{startTime}}-{{endTime}})', {
+                      name: activeSchedule.name,
+                      startTime: activeSchedule.startTime,
+                      endTime: activeSchedule.endTime,
+                    })}
+                  </span>
+                )}
+                {chosenByUserTaskId === currentTask.id && (
+                  <span style={{ color: 'var(--color-accent)' }}>{t('Chosen by you')}</span>
+                )}
+              </div>
 
-          {onNavigateToStream && (
-            <button
-              type="button"
-              onClick={onNavigateToStream}
-              className="group flex items-center gap-2 text-xs font-medium transition-colors"
-              style={{ color: 'var(--color-text-tertiary)' }}
+              <div className="space-y-4">
+                <button
+                  type="button"
+                  onClick={() => selectTask(currentTask.id)}
+                  className="max-w-[18ch] text-left text-[clamp(1.7rem,2.5vw,2.55rem)] font-black leading-[1.08] tracking-[-0.035em] transition-colors hover:text-[var(--color-accent)]"
+                  style={{ color: 'var(--color-text)' }}
+                >
+                  {displayTaskTitle(currentTask)}
+                </button>
+
+                <p
+                  className="max-w-[52ch] text-[15px] leading-7"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {recommendationReason}
+                </p>
+
+                {currentTask.description && (
+                  <p
+                    className="max-w-[58ch] text-[14px] leading-7"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {currentTask.description}
+                  </p>
+                )}
+              </div>
+
+              <div
+                className="grid gap-4 border-t pt-4 sm:grid-cols-2"
+                style={{ borderColor: 'color-mix(in srgb, var(--color-border) 82%, transparent)' }}
+              >
+                <div className="space-y-2">
+                  <p
+                    className="text-[11px] font-semibold"
+                    style={{ color: 'var(--color-text-tertiary)' }}
+                  >
+                    {t('Current role')}
+                  </p>
+                  <RolePillMulti
+                    roleIds={taskRoleIds(currentTask)}
+                    onChangeRoleIds={(ids) =>
+                      updateTask({ ...currentTask, ...withTaskRoles(currentTask, ids) })
+                    }
+                    size="sm"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <p
+                    className="text-[11px] font-semibold"
+                    style={{ color: 'var(--color-text-tertiary)' }}
+                  >
+                    {t('Deadline')}
+                  </p>
+                  {ddlLabel ? (
+                    <div
+                      className="inline-flex items-center gap-2 text-sm"
+                      style={{ color: ddlTone }}
+                    >
+                      <Clock size={14} />
+                      <span>{ddlLabel}</span>
+                    </div>
+                  ) : (
+                    <span className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {t('No deadline')}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div
+                className="border-t pt-5"
+                style={{ borderColor: 'color-mix(in srgb, var(--color-border) 82%, transparent)' }}
+              >
+                <p
+                  className="mb-3 text-[11px] font-semibold"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
+                  {t('Main actions')}
+                </p>
+
+                <AnimatePresence mode="wait">
+                  {showIntervention ? (
+                    <motion.div
+                      key="intervention"
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      transition={{ duration: 0.22 }}
+                      className="rounded-[var(--radius-card)] border px-4 py-4"
+                      style={{
+                        background: 'color-mix(in srgb, var(--color-surface) 92%, var(--color-bg))',
+                        borderColor: 'var(--color-border)',
+                      }}
+                    >
+                      <p
+                        className="text-sm leading-7"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                      >
+                        {t(
+                          GENTLE_INTERVENTIONS[
+                            Math.floor(rejectionCount / 3) % GENTLE_INTERVENTIONS.length
+                          ],
+                        )}
+                      </p>
+                      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                        <button
+                          type="button"
+                          onClick={handleDismissIntervention}
+                          className="min-h-11 flex-1 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-colors"
+                          style={{ background: 'var(--color-accent)' }}
+                        >
+                          {t('Got it, show me the next one')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleOffTime}
+                          className="min-h-11 rounded-xl border px-4 py-3 text-sm font-medium transition-colors"
+                          style={{
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)',
+                          }}
+                        >
+                          <span className="flex items-center justify-center gap-1.5">
+                            <Coffee size={14} />
+                            {t('Not working time')}
+                          </span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  ) : !showRejectPanel ? (
+                    <motion.div
+                      key="actions"
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 6 }}
+                      transition={{ duration: 0.2 }}
+                      className="space-y-3"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row">
+                        <button
+                          type="button"
+                          onClick={handleStartWorking}
+                          className="min-h-11 flex-1 rounded-xl px-5 py-3.5 text-sm font-semibold text-white transition-colors"
+                          style={{ background: 'var(--color-accent)' }}
+                        >
+                          {t('Start working')}
+                        </button>
+                        {energyLevel !== 'low' && (
+                          <button
+                            type="button"
+                            onClick={handleStartLocked}
+                            className="min-h-11 rounded-xl border px-4 py-3 text-sm font-semibold transition-colors sm:min-w-[10rem]"
+                            style={{
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)',
+                            }}
+                          >
+                            <span className="flex items-center justify-center gap-1.5">
+                              <Lock size={14} />
+                              {tCoach('Lock in')}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowRejectPanel(true)}
+                          className="text-sm font-medium transition-colors"
+                          style={{ color: 'var(--color-text-tertiary)' }}
+                        >
+                          {t("Don't want to")}
+                        </button>
+                        {energyLevel === 'low' && onBrainDump && (
+                          <button
+                            type="button"
+                            onClick={onBrainDump}
+                            className="text-sm font-medium transition-colors"
+                            style={{ color: 'var(--color-accent)' }}
+                          >
+                            {tCoach('Brain dump')}
+                          </button>
+                        )}
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="reject-panel"
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      transition={{ duration: 0.22 }}
+                      className="space-y-2 rounded-[var(--radius-card)] border px-4 py-4"
+                      style={{
+                        background: 'color-mix(in srgb, var(--color-surface) 92%, var(--color-bg))',
+                        borderColor: 'var(--color-border)',
+                      }}
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <p
+                          className="text-sm font-medium"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          {t("Why don't you want to?")}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setShowRejectPanel(false)}
+                          className="text-xs font-medium transition-colors"
+                          style={{ color: 'var(--color-text-tertiary)' }}
+                        >
+                          {t('Cancel')}
+                        </button>
+                      </div>
+
+                      {REJECTION_REASONS.map((reason, i) => (
+                        <motion.button
+                          initial={{ opacity: 0, x: -8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.04 }}
+                          key={reason.id}
+                          type="button"
+                          onClick={() => handleReject(reason.id)}
+                          className="block w-full rounded-xl border px-4 py-3 text-left text-sm font-medium transition-colors"
+                          style={{
+                            background: 'transparent',
+                            color: 'var(--color-text-secondary)',
+                            borderColor: 'var(--color-border)',
+                          }}
+                        >
+                          {t(reason.label)}
+                        </motion.button>
+                      ))}
+
+                      <motion.button
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: REJECTION_REASONS.length * 0.04 }}
+                        type="button"
+                        onClick={handleOffTime}
+                        className="flex w-full items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-medium transition-colors"
+                        style={{ color: 'var(--color-text-tertiary)' }}
+                      >
+                        <Coffee size={13} />
+                        {t('Not working time')}
+                      </motion.button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          </motion.section>
+
+          <motion.aside
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08, duration: 0.32 }}
+            className="min-w-0 overflow-hidden rounded-[var(--radius-panel)] border"
+            style={{
+              background: 'color-mix(in srgb, var(--color-surface) 95%, var(--color-bg))',
+              borderColor: 'var(--color-border)',
+            }}
+          >
+            <section className="px-4 py-4 sm:px-5 sm:py-5">
+              <p
+                className="text-[11px] font-semibold"
+                style={{ color: 'var(--color-text-tertiary)' }}
+              >
+                {t('Why this one?')}
+              </p>
+              <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
+                {recommendationReason}
+              </p>
+              {showTimeSuggestion && (
+                <p
+                  className="mt-3 text-[13px] leading-6"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {t(timeSlotSuggestion.messageKey)}
+                </p>
+              )}
+              {activeSchedule && (
+                <p
+                  className="mt-3 text-[13px] leading-6"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {t('Current schedule: {{name}} ({{startTime}}-{{endTime}})', {
+                    name: activeSchedule.name,
+                    startTime: activeSchedule.startTime,
+                    endTime: activeSchedule.endTime,
+                  })}
+                </p>
+              )}
+            </section>
+
+            <section
+              className="border-t px-4 py-4 sm:px-5 sm:py-5"
+              style={{ borderColor: 'color-mix(in srgb, var(--color-border) 85%, transparent)' }}
             >
-              <Wind size={16} className="transition-transform group-hover:translate-x-0.5" />
-              <span>{t('Record an inspiration')}</span>
-            </button>
-          )}
-        </motion.div>
+              <div className="mb-2">
+                <p
+                  className="text-[11px] font-semibold"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
+                  {t('What you can do next')}
+                </p>
+                <p className="mt-1 text-[13px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('Need a different shape?')}
+                </p>
+              </div>
+
+              <div
+                className="divide-y"
+                style={{ borderColor: 'color-mix(in srgb, var(--color-border) 82%, transparent)' }}
+              >
+                {onOpenThinkSession && (
+                  <button
+                    type="button"
+                    onClick={onOpenThinkSession}
+                    className="flex w-full items-center justify-between py-3 text-left text-sm font-medium transition-colors"
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    <span>{t('Think it through first')}</span>
+                    <NotebookPen size={15} />
+                  </button>
+                )}
+
+                {onOpenWorkThread && (
+                  <button
+                    type="button"
+                    onClick={onOpenWorkThread}
+                    className="flex w-full items-center justify-between py-3 text-left text-sm font-medium transition-colors"
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    <span>{t('Open a thread')}</span>
+                    <NotebookPen size={15} />
+                  </button>
+                )}
+
+                {aiAgentEnabled && currentTask && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openAiChat(
+                        'general',
+                        `Context: "Now" recommends the task "${displayTaskTitle(currentTask)}". Help me decide whether to start, defer, or break it down. Be brief and kind.`,
+                      )
+                    }
+                    className="flex w-full items-center justify-between py-3 text-left text-sm font-medium transition-colors"
+                    style={{ color: 'var(--color-accent)' }}
+                    title={tAi('Now ask AI hint')}
+                  >
+                    <span>{tAi('Now ask AI')}</span>
+                    <Sparkles size={15} />
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleRandom}
+                  className="group flex w-full items-center justify-between py-3 text-left text-sm font-medium transition-colors"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  <span>{t('Try another')}</span>
+                  <Dices
+                    size={15}
+                    className="transition-transform duration-500 group-hover:rotate-180"
+                  />
+                </button>
+
+                {onNavigateToStream && (
+                  <button
+                    type="button"
+                    onClick={onNavigateToStream}
+                    className="group flex w-full items-center justify-between py-3 text-left text-sm font-medium transition-colors"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    <span>{t('Record an inspiration')}</span>
+                    <Wind size={15} className="transition-transform group-hover:translate-x-0.5" />
+                  </button>
+                )}
+
+                <RecommendationHistory triggerMode="inline" className="mt-1 border-0 px-0 py-3" />
+              </div>
+            </section>
+          </motion.aside>
+        </div>
 
         {taskCtxMenu && currentTask && (
           <TaskContextMenu
@@ -1299,7 +1066,11 @@ export function NowView({
                   useRoleStore.getState().currentRoleId,
                 );
                 setCurrentTask(
-                  pickForNow(freshFiltered, freshTasks, useExecCoachStore.getState().energyLevel),
+                  pickNowRecommendation(
+                    freshFiltered,
+                    freshTasks,
+                    useExecCoachStore.getState().energyLevel,
+                  ),
                 );
               })
             }
@@ -1311,7 +1082,11 @@ export function NowView({
                   useRoleStore.getState().currentRoleId,
                 );
                 setCurrentTask(
-                  pickForNow(freshFiltered, freshTasks, useExecCoachStore.getState().energyLevel),
+                  pickNowRecommendation(
+                    freshFiltered,
+                    freshTasks,
+                    useExecCoachStore.getState().energyLevel,
+                  ),
                 );
               })
             }
@@ -1324,7 +1099,11 @@ export function NowView({
                 );
                 setChosenByUserTaskId(null);
                 setCurrentTask(
-                  pickForNow(freshFiltered, freshTasks, useExecCoachStore.getState().energyLevel),
+                  pickNowRecommendation(
+                    freshFiltered,
+                    freshTasks,
+                    useExecCoachStore.getState().energyLevel,
+                  ),
                 );
               })
             }

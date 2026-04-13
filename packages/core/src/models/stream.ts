@@ -2,6 +2,11 @@ export interface Attachment {
   type: 'image' | 'link' | 'file';
   url: string;
   title?: string;
+  id?: string;
+  provider?: 'local-files' | 'mlt-server' | 'webdav';
+  category?: 'image' | 'document' | 'video' | 'audio' | 'archive' | 'other';
+  mimeType?: string;
+  size?: number;
 }
 
 export type StreamEntryType = 'spark' | 'task' | 'log';

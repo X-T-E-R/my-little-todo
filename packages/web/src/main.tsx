@@ -9,7 +9,11 @@ import { setDataStore } from './storage/dataStore';
 import { createDirectExecutor, startAutoSync } from './storage/offlineQueue';
 import { setSettingsApiBase } from './storage/settingsApi';
 import { useAuthStore } from './stores/authStore';
+import { getSyncEngine } from './sync';
 import { getPlatform, initPlatform } from './utils/platform';
+import { AnnotatorShell } from './widgets/AnnotatorShell';
+import { ContextBarShell } from './widgets/ContextBarShell';
+import { WidgetShell } from './widgets/WidgetShell';
 
 // Apply saved theme immediately to prevent flash
 {
@@ -27,17 +31,22 @@ async function initStorage() {
   if (platform === 'tauri') {
     const { createTauriSqliteDataStore } = await import('./storage/tauriSqliteStore');
     const store = await createTauriSqliteDataStore();
+    _apiBaseUrl = '';
+    useAuthStore.getState().setApiBase('');
+    setSettingsApiBase('');
     setDataStore(store);
 
     const { migrateLegacyData } = await import('./storage/migrateLegacy');
     await migrateLegacyData(store);
   } else if (platform === 'capacitor') {
-    // Phase 6: will be replaced with CapacitorSqliteDataStore
-    const url = localStorage.getItem('mlt-cloud-url') || '';
-    _apiBaseUrl = url;
-    useAuthStore.getState().setApiBase(url);
-    setSettingsApiBase(url);
-    setDataStore(createApiDataStore(url));
+    const { createCapacitorSqliteDataStore } = await import(
+      /* @vite-ignore */ './storage/capacitorSqliteStore'
+    );
+    const store = await createCapacitorSqliteDataStore();
+    _apiBaseUrl = '';
+    useAuthStore.getState().setApiBase('');
+    setSettingsApiBase('');
+    setDataStore(store);
   } else {
     // web-hosted / web-standalone: API server IS the storage
     const url = '';
@@ -50,20 +59,20 @@ async function initStorage() {
 
 async function main() {
   await initStorage();
+  const platform = getPlatform();
 
   // Offline queue replay only applies to API-based stores
-  if (_apiBaseUrl !== undefined && getPlatform() !== 'tauri') {
+  if (_apiBaseUrl && (platform === 'web-hosted' || platform === 'web-standalone')) {
     startAutoSync(createDirectExecutor(_apiBaseUrl));
   }
 
   // Sync engine: only Tauri uses local SQLite + incremental sync targets (API/WebDAV).
   // Web and Capacitor use the API as primary storage — no separate sync engine.
-  if (getPlatform() === 'tauri') {
+  if (platform === 'tauri' || platform === 'capacitor') {
     const { initSyncFromConfig } = await import('./sync/syncManager');
     await initSyncFromConfig().catch((err) =>
       console.warn('[SyncEngine] Failed to initialize from config:', err),
     );
-    const { getSyncEngine } = await import('./sync/syncEngine');
     const flush = () => getSyncEngine().flushPendingLocalSync();
     window.addEventListener('pagehide', flush);
     window.addEventListener('beforeunload', flush);
@@ -73,10 +82,22 @@ async function main() {
   if (!root) {
     throw new Error('Missing root element #root');
   }
+
+  const params = new URLSearchParams(window.location.search);
+  const mlt = params.get('mlt');
+  const Shell =
+    mlt === 'widget'
+      ? WidgetShell
+      : mlt === 'context-bar'
+        ? ContextBarShell
+        : mlt === 'annotator'
+          ? AnnotatorShell
+          : App;
+
   createRoot(root).render(
     <StrictMode>
       <ErrorBoundary>
-        <App />
+        <Shell />
       </ErrorBoundary>
     </StrictMode>,
   );

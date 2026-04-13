@@ -18,13 +18,13 @@ import { useTaskStore } from '../stores/taskStore';
 
 interface DndReparentProviderProps {
   children: ReactNode;
+  enabled?: boolean;
 }
 
-export function DndReparentProvider({ children }: DndReparentProviderProps) {
+export function DndReparentProvider({ children, enabled = true }: DndReparentProviderProps) {
   const reparentTask = useTaskStore((s) => s.reparentTask);
   const tasks = useTaskStore((s) => s.tasks);
   const [activeId, setActiveId] = useState<string | null>(null);
-
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
@@ -55,6 +55,10 @@ export function DndReparentProvider({ children }: DndReparentProviderProps) {
 
     await reparentTask(childId, parentId);
   };
+
+  if (!enabled) {
+    return <>{children}</>;
+  }
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>

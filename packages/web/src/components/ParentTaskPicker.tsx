@@ -1,7 +1,7 @@
 import type { Task } from '@my-little-todo/core';
 import { displayTaskTitle } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Check, Search, X } from 'lucide-react';
+import { Check, FolderKanban, Search, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTaskStore } from '../stores/taskStore';
@@ -10,7 +10,8 @@ function getDescendantIds(taskId: string, tasks: Task[]): Set<string> {
   const ids = new Set<string>();
   const queue = [taskId];
   while (queue.length > 0) {
-    const current = queue.pop()!;
+    const current = queue.pop();
+    if (!current) continue;
     ids.add(current);
     const task = tasks.find((t) => t.id === current);
     for (const childId of task?.subtaskIds ?? []) {
@@ -43,6 +44,15 @@ export function ParentTaskPicker({ childId, onSelect, onClose }: ParentTaskPicke
       return true;
     });
   }, [tasks, excluded, query]);
+
+  const projectCandidates = useMemo(
+    () => candidates.filter((task) => task.taskType === 'project'),
+    [candidates],
+  );
+  const otherCandidates = useMemo(
+    () => candidates.filter((task) => task.taskType !== 'project'),
+    [candidates],
+  );
 
   return (
     <AnimatePresence>
@@ -108,26 +118,73 @@ export function ParentTaskPicker({ childId, onSelect, onClose }: ParentTaskPicke
                 {t('No tasks found')}
               </p>
             ) : (
-              candidates.map((task) => (
-                <button
-                  key={task.id}
-                  type="button"
-                  onClick={() => onSelect(task.id)}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] rounded-lg transition-colors hover:bg-[var(--color-bg)]"
-                  style={{ color: 'var(--color-text)' }}
-                >
-                  <Check size={14} className="shrink-0 opacity-0" />
-                  <span className="truncate">{displayTaskTitle(task)}</span>
-                  {task.ddl && (
-                    <span
-                      className="ml-auto text-[10px] shrink-0"
+              <>
+                {projectCandidates.length > 0 && (
+                  <div className="pt-1">
+                    <div
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide"
                       style={{ color: 'var(--color-text-tertiary)' }}
                     >
-                      {task.ddl.toLocaleDateString()}
-                    </span>
-                  )}
-                </button>
-              ))
+                      <FolderKanban size={12} />
+                      {t('Projects')}
+                    </div>
+                    {projectCandidates.map((task) => (
+                      <button
+                        key={task.id}
+                        type="button"
+                        onClick={() => onSelect(task.id)}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] rounded-lg transition-colors hover:bg-[var(--color-bg)]"
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        <FolderKanban
+                          size={14}
+                          className="shrink-0 opacity-80"
+                          style={{ color: 'var(--color-accent)' }}
+                        />
+                        <span className="truncate">{displayTaskTitle(task)}</span>
+                        {task.ddl && (
+                          <span
+                            className="ml-auto text-[10px] shrink-0"
+                            style={{ color: 'var(--color-text-tertiary)' }}
+                          >
+                            {task.ddl.toLocaleDateString()}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {projectCandidates.length > 0 && otherCandidates.length > 0 && (
+                  <div
+                    className="mx-2 my-1"
+                    style={{ borderTop: '1px solid var(--color-border)' }}
+                  />
+                )}
+                {otherCandidates.length > 0 && (
+                  <div className={projectCandidates.length > 0 ? 'pt-0' : 'pt-1'}>
+                    {otherCandidates.map((task) => (
+                      <button
+                        key={task.id}
+                        type="button"
+                        onClick={() => onSelect(task.id)}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] rounded-lg transition-colors hover:bg-[var(--color-bg)]"
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        <Check size={14} className="shrink-0 opacity-0" />
+                        <span className="truncate">{displayTaskTitle(task)}</span>
+                        {task.ddl && (
+                          <span
+                            className="ml-auto text-[10px] shrink-0"
+                            style={{ color: 'var(--color-text-tertiary)' }}
+                          >
+                            {task.ddl.toLocaleDateString()}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </motion.div>

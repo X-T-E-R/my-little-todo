@@ -1,9 +1,20 @@
 import type { Role } from '@my-little-todo/core';
+import { displayTaskTitle } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowDown, ArrowUp, Inbox, Layers, Palette, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ArrowDown,
+  ArrowUp,
+  FolderKanban,
+  Inbox,
+  Layers,
+  Palette,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { NO_ROLE_FILTER, useRoleStore } from '../stores';
+import { NO_ROLE_FILTER, filterByRole, useRoleStore, useTaskStore } from '../stores';
 
 function RoleAvatar({ role, size = 32 }: { role: Role; size?: number }) {
   const initial = role.name.charAt(0).toUpperCase();
@@ -234,6 +245,49 @@ function RoleContextMenu({
   );
 }
 
+function ActiveProjectsStrip() {
+  const { t } = useTranslation('task');
+  const tasks = useTaskStore((s) => s.tasks);
+  const currentRoleId = useRoleStore((s) => s.currentRoleId);
+  const selectTask = useTaskStore((s) => s.selectTask);
+  const projects = useMemo(() => {
+    const list = tasks.filter(
+      (x) => x.taskType === 'project' && x.status !== 'completed' && x.status !== 'archived',
+    );
+    return filterByRole(list, currentRoleId)
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+      .slice(0, 8);
+  }, [tasks, currentRoleId]);
+
+  if (projects.length === 0) return null;
+
+  return (
+    <div className="w-full px-0.5 mt-1 mb-1">
+      <p
+        className="text-[9px] font-bold uppercase tracking-wide mb-1 px-0.5 truncate"
+        style={{ color: 'var(--color-text-tertiary)' }}
+      >
+        {t('Projects')}
+      </p>
+      <div className="flex flex-col gap-0.5">
+        {projects.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => selectTask(p.id)}
+            title={displayTaskTitle(p)}
+            className="flex items-center gap-1 rounded-lg px-1 py-1 text-left transition-colors hover:bg-[var(--color-bg)] w-full min-w-0"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <FolderKanban size={12} className="shrink-0" style={{ color: 'var(--color-accent)' }} />
+            <span className="text-[10px] font-medium truncate w-full">{displayTaskTitle(p)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CtxItem({
   icon,
   label,
@@ -363,6 +417,8 @@ export function RoleSidebar({ horizontal = false }: { horizontal?: boolean }) {
             accentColor={role.color}
           />
         ))}
+
+      <ActiveProjectsStrip />
 
       <AnimatePresence>
         {showAdd && <AddRoleInline onDone={() => setShowAdd(false)} />}

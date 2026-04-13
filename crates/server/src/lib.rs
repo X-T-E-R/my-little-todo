@@ -4,18 +4,20 @@ pub mod config;
 pub mod export;
 pub mod providers;
 pub mod routes;
+pub mod task_stream_facade;
 pub mod utils;
 
 use std::sync::Arc;
 
 use axum::{
+    http::{header, HeaderValue, Method},
     middleware as axum_mw,
     routing::{delete, get, post, put},
     Json, Router,
 };
 use config::ServerConfig;
 use providers::DatabaseProvider;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Clone)]
@@ -39,11 +41,6 @@ pub fn create_app(
         version,
         git_hash,
     };
-
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
 
     // Auth routes (no auth middleware)
     let auth_routes = Router::new()
@@ -80,6 +77,7 @@ pub fn create_app(
 
     let stream_routes = Router::new()
         .route("/stream", get(routes::stream::list_stream_day))
+        .route("/stream/all", get(routes::stream::list_stream_all))
         .route("/stream/recent", get(routes::stream::list_stream_recent))
         .route("/stream/dates", get(routes::stream::list_stream_dates))
         .route("/stream/search", get(routes::stream::search_stream))
@@ -127,6 +125,11 @@ pub fn create_app(
             "/admin/users/{id}/password",
             post(routes::admin::reset_user_password),
         )
+        .route(
+            "/admin/file-host/config",
+            get(routes::blobs::get_admin_file_host_config)
+                .put(routes::blobs::put_admin_file_host_config),
+        )
         .route("/admin/stats", get(routes::admin::get_stats))
         .route("/admin/storage", get(routes::data::storage_info))
         .route("/admin/migrate", post(routes::data::migrate_data))
@@ -141,6 +144,10 @@ pub fn create_app(
         .route(
             "/ai/shared-config",
             get(routes::admin::get_shared_ai_config),
+        )
+        .route(
+            "/ai/chat/completions",
+            post(routes::ai_proxy::proxy_chat_completions),
         )
         .layer(axum_mw::from_fn_with_state(
             state.clone(),
@@ -165,9 +172,12 @@ pub fn create_app(
             "/blobs/{id}",
             get(routes::blobs::get_blob).delete(routes::blobs::delete_blob),
         )
+        .route("/blobs/config", get(routes::blobs::get_attachment_config))
+        .route("/file-host/upload", post(routes::blobs::upload_file_host))
+        .route("/file-host/config", get(routes::blobs::get_file_host_config))
         .route(
-            "/blobs/config",
-            get(routes::blobs::get_attachment_config),
+            "/file-host/{id}",
+            get(routes::blobs::get_file_host).delete(routes::blobs::delete_file_host),
         )
         .layer(axum_mw::from_fn_with_state(
             state.clone(),
@@ -229,8 +239,13 @@ pub fn create_app(
                     "timestamp": timestamp_now(),
                 }))
             }),
-        )
-        .layer(cors);
+        );
+
+    let router = if let Some(cors) = build_cors(config.as_ref()) {
+        router.layer(cors)
+    } else {
+        router
+    };
 
     if let Some(ref dir) = static_dir {
         let index = format!("{}/index.html", dir);
@@ -239,6 +254,53 @@ pub fn create_app(
     } else {
         router
     }
+}
+
+fn build_cors(config: &ServerConfig) -> Option<CorsLayer> {
+    if config.cors_allowed_origins.is_empty() {
+        println!(
+            "[CORS] No allowed origins configured; browser cross-origin requests are disabled."
+        );
+        return None;
+    }
+
+    let allowed_origins = config
+        .cors_allowed_origins
+        .iter()
+        .filter_map(|origin| match HeaderValue::from_str(origin) {
+            Ok(value) => Some(value),
+            Err(err) => {
+                eprintln!(
+                    "[CORS] Ignoring invalid allowed origin '{}': {}",
+                    origin, err
+                );
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if allowed_origins.is_empty() {
+        eprintln!("[CORS] No valid allowed origins configured; cross-origin requests disabled.");
+        return None;
+    }
+
+    println!(
+        "[CORS] Allowing browser origins: {}",
+        config.cors_allowed_origins.join(", ")
+    );
+
+    Some(
+        CorsLayer::new()
+            .allow_origin(allowed_origins)
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::DELETE,
+                Method::OPTIONS,
+            ])
+            .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]),
+    )
 }
 
 pub async fn start(

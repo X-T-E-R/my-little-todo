@@ -3,11 +3,206 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
-use chrono::{TimeZone, Utc};
+use chrono::{NaiveDate, TimeZone, Utc};
 use uuid::Uuid;
 
 use crate::config::AuthMode;
+use crate::task_stream_facade;
 use crate::AppState;
+
+const NONE_ROLE_MARKER: &str = "__none__";
+const MCP_MODULE_KEY: &str = "module:mcp-integration:enabled";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PermissionLevel {
+    Read,
+    Create,
+    Full,
+}
+
+impl PermissionLevel {
+    fn from_setting(s: &str) -> Self {
+        match s {
+            "full" => PermissionLevel::Full,
+            "create" => PermissionLevel::Create,
+            _ => PermissionLevel::Read,
+        }
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            PermissionLevel::Read => 0,
+            PermissionLevel::Create => 1,
+            PermissionLevel::Full => 2,
+        }
+    }
+}
+
+#[derive(Clone)]
+enum RoleAcl {
+    All,
+    Restricted(HashSet<String>),
+}
+
+fn tool_min_rank(name: &str) -> u8 {
+    match name {
+        "get_overview"
+        | "list_tasks"
+        | "get_task"
+        | "list_stream"
+        | "search"
+        | "get_roles"
+        | "list_projects"
+        | "get_project_progress" => 0,
+        "create_task" | "add_stream" => 1,
+        "update_task" | "delete_task" | "update_stream_entry" | "manage_role" => 2,
+        _ => 0,
+    }
+}
+
+fn task_role_ids(v: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(arr) = v.get("role_ids").and_then(|x| x.as_array()) {
+        for id in arr.iter().filter_map(|value| value.as_str()) {
+            let id = id.to_string();
+            if !id.is_empty() && !out.contains(&id) {
+                out.push(id);
+            }
+        }
+    } else if let Some(s) = v.get("role_ids").and_then(|x| x.as_str()) {
+        if let Ok(arr) = serde_json::from_str::<Vec<String>>(s) {
+            for id in arr {
+                if !id.is_empty() && !out.contains(&id) {
+                    out.push(id);
+                }
+            }
+        }
+    }
+    if let Some(primary_role) = v.get("primary_role").and_then(|x| x.as_str()) {
+        let primary_role = primary_role.to_string();
+        if !primary_role.is_empty() && !out.contains(&primary_role) {
+            out.insert(0, primary_role);
+        }
+    } else {
+        let r = v
+            .get("role")
+            .or_else(|| v.get("role_id"))
+            .and_then(|x| x.as_str());
+        if let Some(rid) = r {
+            if !rid.is_empty() && !out.contains(&rid.to_string()) {
+                out.push(rid.to_string());
+            }
+        }
+    }
+    out
+}
+
+fn task_primary_role(v: &Value) -> Option<String> {
+    v.get("primary_role")
+        .and_then(|value| value.as_str())
+        .map(String::from)
+        .or_else(|| task_role_ids(v).into_iter().next())
+}
+
+fn json_string_array(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(arr)) => arr
+            .iter()
+            .filter_map(|item| item.as_str().map(String::from))
+            .collect(),
+        Some(Value::String(s)) => serde_json::from_str::<Vec<String>>(s).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+fn stream_role_id(v: &Value) -> Option<String> {
+    v.get("role_id")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
+fn task_matches_acl(acl: &RoleAcl, v: &Value) -> bool {
+    match acl {
+        RoleAcl::All => true,
+        RoleAcl::Restricted(set) => {
+            let ids = task_role_ids(v);
+            if ids.is_empty() {
+                return set.contains(NONE_ROLE_MARKER);
+            }
+            ids.iter().any(|id| set.contains(id))
+        }
+    }
+}
+
+fn stream_matches_acl(acl: &RoleAcl, v: &Value) -> bool {
+    match acl {
+        RoleAcl::All => true,
+        RoleAcl::Restricted(set) => match stream_role_id(v) {
+            None => set.contains(NONE_ROLE_MARKER),
+            Some(rid) => set.contains(&rid),
+        },
+    }
+}
+
+fn role_allowed_for_write(acl: &RoleAcl, role_opt: Option<&str>) -> bool {
+    match acl {
+        RoleAcl::All => true,
+        RoleAcl::Restricted(set) => match role_opt {
+            None | Some("") => set.contains(NONE_ROLE_MARKER),
+            Some(rid) => set.contains(rid),
+        },
+    }
+}
+
+fn role_ids_allowed_for_write(acl: &RoleAcl, role_ids: &[String]) -> bool {
+    match acl {
+        RoleAcl::All => true,
+        RoleAcl::Restricted(set) => {
+            if role_ids.is_empty() {
+                return set.contains(NONE_ROLE_MARKER);
+            }
+            role_ids.iter().all(|role_id| set.contains(role_id))
+        }
+    }
+}
+
+async fn mcp_plugin_enabled(state: &AppState, user_id: &str) -> bool {
+    match state.db.get_setting(user_id, MCP_MODULE_KEY).await {
+        Ok(Some(v)) => v != "false",
+        _ => true,
+    }
+}
+
+async fn get_permission_level(state: &AppState, user_id: &str) -> PermissionLevel {
+    match state.db.get_setting(user_id, "mcp-permission-level").await {
+        Ok(Some(s)) => PermissionLevel::from_setting(&s),
+        _ => PermissionLevel::Read,
+    }
+}
+
+async fn get_role_acl(state: &AppState, user_id: &str) -> RoleAcl {
+    match state.db.get_setting(user_id, "mcp-allowed-roles").await {
+        Ok(Some(s)) => {
+            if let Ok(arr) = serde_json::from_str::<Vec<String>>(&s) {
+                if arr.is_empty() {
+                    return RoleAcl::All;
+                }
+                return RoleAcl::Restricted(arr.into_iter().collect());
+            }
+            RoleAcl::All
+        }
+        _ => RoleAcl::All,
+    }
+}
+
+fn filter_tasks_acl(mut tasks: Vec<Value>, acl: &RoleAcl) -> Vec<Value> {
+    if matches!(acl, RoleAcl::All) {
+        return tasks;
+    }
+    tasks.retain(|t| task_matches_acl(acl, t));
+    tasks
+}
 
 fn data_partition(state: &AppState, auth_user_id: &str) -> String {
     match state.config.auth_mode {
@@ -18,15 +213,21 @@ fn data_partition(state: &AppState, auth_user_id: &str) -> String {
 
 fn normalize_task_for_mcp(mut v: Value) -> Value {
     if let Some(obj) = v.as_object_mut() {
-        if let Some(rid) = obj.remove("role_id") {
-            obj.insert("role".into(), rid);
-        }
         if let Some(ddl) = obj.get("ddl").cloned() {
             if !ddl.is_null() {
                 if let Some(ms) = ddl.as_i64() {
                     obj.insert("ddl".into(), json!(ms_to_iso_z(ms)));
                 } else if let Some(ms) = ddl.as_f64() {
                     obj.insert("ddl".into(), json!(ms_to_iso_z(ms as i64)));
+                }
+            }
+        }
+        if let Some(pa) = obj.get("planned_at").cloned() {
+            if !pa.is_null() {
+                if let Some(ms) = pa.as_i64() {
+                    obj.insert("planned_at".into(), json!(ms_to_iso_z(ms)));
+                } else if let Some(ms) = pa.as_f64() {
+                    obj.insert("planned_at".into(), json!(ms_to_iso_z(ms as i64)));
                 }
             }
         }
@@ -48,12 +249,7 @@ fn parse_iso_to_ms(s: &str) -> Option<i64> {
     let prefix = if s.len() >= 10 { &s[..10] } else { s };
     chrono::NaiveDate::parse_from_str(prefix, "%Y-%m-%d")
         .ok()
-        .map(|d| {
-            d.and_hms_opt(0, 0, 0)
-                .unwrap()
-                .and_utc()
-                .timestamp_millis()
-        })
+        .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc().timestamp_millis())
 }
 
 fn time_hms_from_ms(ms: i64) -> String {
@@ -156,10 +352,41 @@ fn today_date_key() -> String {
 }
 
 fn generate_task_id() -> String {
-    let now = now_iso();
-    let ts = now.replace(['-', ':', '.', 'T', 'Z'], "");
-    let short = &ts[..std::cmp::min(14, ts.len())];
-    format!("task-{}", short)
+    format!("se-{}", Uuid::new_v4())
+}
+
+fn days_overdue(ddl_iso: &str) -> Option<i64> {
+    let today = today_date_key();
+    let ddl_date = ddl_iso.get(..10)?;
+    let t = NaiveDate::parse_from_str(&today, "%Y-%m-%d").ok()?;
+    let d = NaiveDate::parse_from_str(ddl_date, "%Y-%m-%d").ok()?;
+    let diff = t.signed_duration_since(d).num_days();
+    if diff > 0 {
+        Some(diff)
+    } else {
+        None
+    }
+}
+
+fn days_left_until(ddl_iso: &str) -> Option<i64> {
+    let today = today_date_key();
+    let ddl_date = ddl_iso.get(..10)?;
+    let t = NaiveDate::parse_from_str(&today, "%Y-%m-%d").ok()?;
+    let d = NaiveDate::parse_from_str(ddl_date, "%Y-%m-%d").ok()?;
+    let diff = d.signed_duration_since(t).num_days();
+    if diff >= 0 {
+        Some(diff)
+    } else {
+        None
+    }
+}
+
+fn preview_text(s: &str, max: usize) -> String {
+    let t = s.trim();
+    if t.chars().count() <= max {
+        return t.to_string();
+    }
+    t.chars().take(max).collect::<String>() + "…"
 }
 
 // ── MCP Handler ─────────────────────────────────────────────────
@@ -169,6 +396,12 @@ pub async fn handle_mcp(
     axum::Extension(user_id): axum::Extension<String>,
     Json(req): Json<JsonRpcRequest>,
 ) -> (StatusCode, Json<JsonRpcResponse>) {
+    if !mcp_plugin_enabled(&state, &user_id).await {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(err_response(req.id, -32000, "MCP integration is disabled")),
+        );
+    }
     let resp = match req.method.as_str() {
         "initialize" => handle_initialize(req.id),
         "notifications/initialized" => {
@@ -211,23 +444,29 @@ fn all_tool_definitions() -> Vec<Value> {
     vec![
         json!({
             "name": "get_overview",
-            "description": "获取全局概览：各状态任务计数、紧急任务（3天内DDL）、角色列表、日程时段、今日流记录数。这是了解用户当前状况的首选工具。",
+            "description": "全局概览：任务计数、今日/进行中/逾期/即将到期、最近完成、角色、日程、今日流预览、专注会话。首选入口。",
             "inputSchema": { "type": "object", "properties": {} },
         }),
         json!({
             "name": "list_tasks",
-            "description": "列出任务，可按状态和角色筛选。返回紧凑列表（不含正文），每条任务附带 role_name。",
+            "description": "列出任务（轻量摘要，无正文）。支持分页、父任务子任务、按标签与排序。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "status": { "type": "string", "enum": ["inbox", "active", "today", "completed", "archived", "cancelled"], "description": "按状态筛选" },
-                    "role": { "type": "string", "description": "按角色ID筛选" },
+                    "primary_role": { "type": "string", "description": "按主角色筛选" },
+                    "role_ids": { "type": "array", "items": { "type": "string" }, "description": "按任务角色集合筛选，任一匹配即可" },
+                    "parent_id": { "type": "string", "description": "父任务 ID，仅列出直接子任务" },
+                    "tags": { "type": "array", "items": { "type": "string" }, "description": "按标签过滤（任一匹配）" },
+                    "sort": { "type": "string", "enum": ["priority", "ddl", "created"], "description": "排序，默认 created" },
+                    "offset": { "type": "integer", "description": "分页偏移，默认0" },
+                    "limit": { "type": "integer", "description": "每页条数，默认20，最大50" },
                 },
             },
         }),
         json!({
             "name": "get_task",
-            "description": "获取单个任务的完整信息，含正文、提交记录、延期记录。",
+            "description": "单个任务完整信息（含正文）。含子任务与父任务摘要。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -237,42 +476,77 @@ fn all_tool_definitions() -> Vec<Value> {
             },
         }),
         json!({
+            "name": "list_projects",
+            "description": "列出标记为「项目」的任务（非 completed/archived），可选按角色筛选；含子树完成进度。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "primary_role": { "type": "string", "description": "按主角色筛选" },
+                    "role_ids": { "type": "array", "items": { "type": "string" }, "description": "按任务角色集合筛选" },
+                },
+            },
+        }),
+        json!({
+            "name": "get_project_progress",
+            "description": "单个项目任务的子树完成进度（统计所有后代任务，不含根项目自身）。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "项目任务ID" },
+                },
+                "required": ["id"],
+            },
+        }),
+        json!({
+            "name": "get_roles",
+            "description": "角色列表及统计（活跃数、今日/逾期）。",
+            "inputSchema": { "type": "object", "properties": {} },
+        }),
+        json!({
             "name": "create_task",
-            "description": "创建新任务，默认 status=inbox。ddl_type: hard=外部硬截止不可改, commitment=自我承诺改需理由, soft=建议性可随意改。",
+            "description": "创建任务，默认 inbox。ddl_type: hard/commitment/soft。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "title": { "type": "string", "description": "任务标题" },
+                    "body": { "type": "string", "description": "正文/笔记" },
                     "ddl": { "type": "string", "description": "截止时间 ISO 8601" },
                     "ddl_type": { "type": "string", "enum": ["hard", "commitment", "soft"] },
-                    "role": { "type": "string", "description": "角色ID" },
+                    "planned_at": { "type": "string", "description": "计划处理时间 ISO 8601" },
+                    "role_ids": { "type": "array", "items": { "type": "string" }, "description": "任务角色集合" },
+                    "primary_role": { "type": "string", "description": "可选；若同时提供 role_ids，则必须等于 role_ids[0]" },
                     "tags": { "type": "array", "items": { "type": "string" } },
-                    "parent": { "type": "string", "description": "父任务ID（创建子任务时使用）" },
+                    "parent_id": { "type": "string", "description": "父任务 ID" },
+                    "task_type": { "type": "string", "enum": ["task", "project"], "description": "任务或项目容器" },
                 },
                 "required": ["title"],
             },
         }),
         json!({
             "name": "update_task",
-            "description": "更新任务属性或状态。设 status=completed 完成任务，status=cancelled 取消任务。可附 note 说明变更原因。",
+            "description": "更新任务。status=completed 完成；可附 note。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "id": { "type": "string", "description": "任务ID" },
                     "title": { "type": "string" },
+                    "body": { "type": "string", "description": "正文" },
                     "status": { "type": "string", "enum": ["inbox", "active", "today", "completed", "archived", "cancelled"] },
                     "ddl": { "type": "string", "description": "新截止时间 ISO 8601" },
                     "ddl_type": { "type": "string", "enum": ["hard", "commitment", "soft"] },
-                    "role": { "type": "string" },
+                    "planned_at": { "type": "string", "description": "计划时间 ISO 8601" },
+                    "role_ids": { "type": "array", "items": { "type": "string" }, "description": "新的任务角色集合" },
+                    "primary_role": { "type": "string", "description": "可选；若同时提供 role_ids，则必须等于 role_ids[0]" },
                     "tags": { "type": "array", "items": { "type": "string" } },
-                    "note": { "type": "string", "description": "变更备注（如完成说明、延期理由）" },
+                    "note": { "type": "string", "description": "变更备注" },
+                    "task_type": { "type": "string", "enum": ["task", "project"], "description": "设为 project 表示项目容器；task 表示普通任务" },
                 },
                 "required": ["id"],
             },
         }),
         json!({
             "name": "delete_task",
-            "description": "删除一个任务。",
+            "description": "删除任务。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -283,34 +557,71 @@ fn all_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": "add_stream",
-            "description": "添加一条流记录，用于快速捕获想法、笔记、灵感、进展。",
+            "description": "添加流记录。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "content": { "type": "string", "description": "内容（支持 markdown）" },
-                    "role": { "type": "string", "description": "关联角色ID" },
+                    "content": { "type": "string", "description": "内容（markdown）" },
+                    "role_id": { "type": "string", "description": "stream 主角色" },
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                    "entry_type": { "type": "string", "enum": ["spark", "task", "log"], "description": "条目类型，默认 spark" },
                 },
                 "required": ["content"],
             },
         }),
         json!({
             "name": "list_stream",
-            "description": "列出最近的流记录。",
+            "description": "列出流记录，支持分页与按角色/类型过滤。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "days": { "type": "integer", "description": "回溯天数，默认7" },
+                    "limit": { "type": "integer", "description": "每页条数，默认20，最大50" },
+                    "offset": { "type": "integer", "description": "分页偏移，默认0" },
+                    "role_id": { "type": "string", "description": "按 stream 主角色筛选" },
+                    "entry_type": { "type": "string", "enum": ["spark", "task", "log"], "description": "条目类型" },
                 },
             },
         }),
         json!({
-            "name": "search",
-            "description": "全文搜索任务和流记录。",
+            "name": "update_stream_entry",
+            "description": "更新流记录内容、角色或类型。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "搜索关键词" },
-                    "scope": { "type": "string", "enum": ["all", "tasks", "stream"], "description": "搜索范围，默认 all" },
+                    "id": { "type": "string", "description": "流条目ID" },
+                    "content": { "type": "string" },
+                    "role_id": { "type": "string", "description": "stream 主角色" },
+                    "entry_type": { "type": "string", "enum": ["spark", "task", "log"] },
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                },
+                "required": ["id"],
+            },
+        }),
+        json!({
+            "name": "manage_role",
+            "description": "创建、更新或删除角色。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["create", "update", "delete"] },
+                    "id": { "type": "string", "description": "角色ID（update/delete）" },
+                    "name": { "type": "string", "description": "名称（create）" },
+                    "color": { "type": "string" },
+                    "icon": { "type": "string" },
+                },
+                "required": ["action"],
+            },
+        }),
+        json!({
+            "name": "search",
+            "description": "在任务 title/body 与流 content 上结构化子串搜索（不扫整段 JSON）。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "关键词" },
+                    "scope": { "type": "string", "enum": ["all", "tasks", "stream"], "description": "默认 all" },
+                    "limit": { "type": "integer", "description": "最大结果数，默认10，上限100" },
                 },
                 "required": ["query"],
             },
@@ -320,11 +631,12 @@ fn all_tool_definitions() -> Vec<Value> {
 
 async fn handle_tools_list(state: &AppState, user_id: &str, id: Option<Value>) -> JsonRpcResponse {
     let disabled = get_disabled_tools(state, user_id).await;
+    let level = get_permission_level(state, user_id).await;
     let tools: Vec<Value> = all_tool_definitions()
         .into_iter()
         .filter(|t| {
             let name = t.get("name").and_then(|n| n.as_str()).unwrap_or("");
-            !disabled.contains(name)
+            !disabled.contains(name) && level.rank() >= tool_min_rank(name)
         })
         .collect();
     ok_response(id, json!({ "tools": tools }))
@@ -336,11 +648,20 @@ async fn handle_tools_call(
     id: Option<Value>,
     params: &Value,
 ) -> JsonRpcResponse {
-    let tool_name = params
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
+
+    let level = get_permission_level(state, user_id).await;
+    if level.rank() < tool_min_rank(tool_name) {
+        return err_response(
+            id,
+            -32601,
+            &format!(
+                "Tool '{}' requires a higher permission level (current: {:?})",
+                tool_name, level
+            ),
+        );
+    }
 
     let disabled = get_disabled_tools(state, user_id).await;
     if disabled.contains(tool_name) {
@@ -355,11 +676,16 @@ async fn handle_tools_call(
         "get_overview" => tool_overview(state, user_id).await,
         "list_tasks" => tool_list_tasks(state, user_id, &args).await,
         "get_task" => tool_get_task(state, user_id, &args).await,
+        "list_projects" => tool_list_projects(state, user_id, &args).await,
+        "get_project_progress" => tool_get_project_progress(state, user_id, &args).await,
+        "get_roles" => tool_get_roles_stats(state, user_id).await,
         "create_task" => tool_create_task(state, user_id, &args).await,
         "update_task" => tool_update_task(state, user_id, &args).await,
         "delete_task" => tool_delete_task(state, user_id, &args).await,
         "add_stream" => tool_add_stream_entry(state, user_id, &args).await,
         "list_stream" => tool_list_stream(state, user_id, &args).await,
+        "update_stream_entry" => tool_update_stream_entry(state, user_id, &args).await,
+        "manage_role" => tool_manage_role(state, user_id, &args).await,
         "search" => tool_search(state, user_id, &args).await,
         _ => Err(format!("Unknown tool: {}", tool_name)),
     };
@@ -418,10 +744,7 @@ async fn handle_resources_read(
     id: Option<Value>,
     params: &Value,
 ) -> JsonRpcResponse {
-    let uri = params
-        .get("uri")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let uri = params.get("uri").and_then(|v| v.as_str()).unwrap_or("");
 
     let result = match uri {
         "tasks://active" => resource_active_tasks(state, user_id).await,
@@ -447,7 +770,10 @@ async fn handle_resources_read(
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-async fn load_role_map(state: &AppState, user_id: &str) -> HashMap<String, (String, Option<String>)> {
+async fn load_role_map(
+    state: &AppState,
+    user_id: &str,
+) -> HashMap<String, (String, Option<String>)> {
     let raw = state.db.get_setting(user_id, "roles").await.ok().flatten();
     let mut map = HashMap::new();
     if let Some(data) = raw {
@@ -468,96 +794,303 @@ async fn load_role_map(state: &AppState, user_id: &str) -> HashMap<String, (Stri
     map
 }
 
+#[allow(dead_code)]
 fn enrich_task_with_role(task: &mut Value, role_map: &HashMap<String, (String, Option<String>)>) {
-    if let Some(role_id) = task.get("role").and_then(|v| v.as_str()) {
-        if let Some((name, _)) = role_map.get(role_id) {
+    if let Some(role_id) = task_primary_role(task) {
+        if let Some((name, _)) = role_map.get(&role_id) {
             task.as_object_mut()
-                .map(|obj| obj.insert("role_name".to_string(), json!(name)));
+                .map(|obj| obj.insert("primary_role_name".to_string(), json!(name)));
         }
     }
 }
 
 // ── Tool Implementations ────────────────────────────────────────
 
+fn subtask_progress_line(task: &Value, all_tasks: &[Value]) -> Option<String> {
+    let ids = json_string_array(task.get("subtask_ids"));
+    if ids.is_empty() {
+        return None;
+    }
+    let mut done = 0u32;
+    for id in &ids {
+        if let Some(st) = all_tasks.iter().find(|t| {
+            t.get("id")
+                .and_then(|x| x.as_str())
+                .map(|tid| tid == id.as_str())
+                .unwrap_or(false)
+        }) {
+            let s = st.get("status").and_then(|x| x.as_str()).unwrap_or("");
+            if s == "completed" || s == "cancelled" || s == "archived" {
+                done += 1;
+            }
+        }
+    }
+    Some(format!("{}/{}", done, ids.len()))
+}
+
+fn task_summary_line(
+    task: &Value,
+    role_map: &HashMap<String, (String, Option<String>)>,
+    extra: Value,
+) -> Value {
+    let mut t = extra;
+    if let Some(role_id) = task_primary_role(task) {
+        t.as_object_mut().map(|o| {
+            o.insert("primary_role".into(), json!(role_id));
+            if let Some((name, _)) = role_map.get(&role_id) {
+                o.insert("primary_role_name".into(), json!(name));
+            }
+        });
+    }
+    t
+}
+
 async fn tool_overview(state: &AppState, user_id: &str) -> Result<Value, String> {
-    let tasks = load_all_tasks(state, user_id).await?;
+    let acl = get_role_acl(state, user_id).await;
+    let mut tasks = load_all_tasks(state, user_id).await?;
+    tasks = filter_tasks_acl(tasks, &acl);
     let role_map = load_role_map(state, user_id).await;
     let today = today_date_key();
+    let week_end = today_plus_days(7);
 
     let mut counts: HashMap<String, u32> = HashMap::new();
-    let mut urgent = Vec::new();
+    for task in &tasks {
+        let status = task
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("unknown");
+        *counts.entry(status.to_string()).or_insert(0) += 1;
+    }
+
+    let mut today_tasks: Vec<Value> = Vec::new();
+    let mut active_tasks: Vec<Value> = Vec::new();
+    let mut overdue: Vec<Value> = Vec::new();
+    let mut upcoming_ddl: Vec<Value> = Vec::new();
 
     for task in &tasks {
-        let status = task.get("status").and_then(|s| s.as_str()).unwrap_or("unknown");
-        *counts.entry(status.to_string()).or_insert(0) += 1;
+        let status = task.get("status").and_then(|s| s.as_str()).unwrap_or("");
+        let id = task.get("id").cloned().unwrap_or(json!(null));
+        let title = task.get("title").cloned().unwrap_or(json!(""));
+        let ddl = task.get("ddl").and_then(|d| d.as_str()).unwrap_or("");
+        let ddl_type = task.get("ddl_type").cloned();
 
-        let dominated = status == "completed" || status == "cancelled" || status == "archived";
-        if !dominated {
-            if let Some(ddl) = task.get("ddl").and_then(|d| d.as_str()) {
-                if ddl.len() >= 10 && ddl[..10] <= *today_plus_days(3) {
-                    let mut t = json!({
-                        "id": task.get("id"),
-                        "title": task.get("title"),
+        if status == "today" {
+            let prog = subtask_progress_line(task, &tasks);
+            let mut row = json!({
+                "id": id,
+                "title": title,
+                "ddl": ddl,
+                "ddl_type": ddl_type,
+                "status": status,
+            });
+            if let Some(p) = prog {
+                row.as_object_mut()
+                    .map(|o| o.insert("subtask_progress".into(), json!(p)));
+            }
+            today_tasks.push(task_summary_line(task, &role_map, row));
+        }
+        if status == "active" && active_tasks.len() < 20 {
+            active_tasks.push(task_summary_line(
+                task,
+                &role_map,
+                json!({
+                    "id": id,
+                    "title": title,
+                    "ddl": ddl,
+                }),
+            ));
+        }
+        let terminal = status == "completed" || status == "cancelled" || status == "archived";
+        if !terminal && !ddl.is_empty() && ddl.len() >= 10 {
+            if let Some(od) = days_overdue(ddl) {
+                overdue.push(task_summary_line(
+                    task,
+                    &role_map,
+                    json!({
+                        "id": id,
+                        "title": title,
                         "ddl": ddl,
-                        "ddl_type": task.get("ddl_type"),
-                        "status": status,
-                    });
-                    if let Some(role_id) = task.get("role").and_then(|v| v.as_str()) {
-                        t.as_object_mut().map(|o| o.insert("role".into(), json!(role_id)));
-                        if let Some((name, _)) = role_map.get(role_id) {
-                            t.as_object_mut().map(|o| o.insert("role_name".into(), json!(name)));
-                        }
+                        "ddl_type": ddl_type,
+                        "days_overdue": od,
+                    }),
+                ));
+            } else if ddl.len() >= 10 {
+                let dd = &ddl[..10];
+                if dd > today.as_str() && dd <= week_end.as_str() {
+                    if let Some(dl) = days_left_until(ddl) {
+                        upcoming_ddl.push(task_summary_line(
+                            task,
+                            &role_map,
+                            json!({
+                                "id": id,
+                                "title": title,
+                                "ddl": ddl,
+                                "ddl_type": ddl_type,
+                                "days_left": dl,
+                            }),
+                        ));
                     }
-                    urgent.push(t);
                 }
             }
         }
     }
 
-    urgent.sort_by(|a, b| {
-        let da = a.get("ddl").and_then(|v| v.as_str()).unwrap_or("9999");
-        let db = b.get("ddl").and_then(|v| v.as_str()).unwrap_or("9999");
+    upcoming_ddl.sort_by(|a, b| {
+        let da = a.get("ddl").and_then(|v| v.as_str()).unwrap_or("");
+        let db = b.get("ddl").and_then(|v| v.as_str()).unwrap_or("");
         da.cmp(db)
     });
-    urgent.truncate(5);
+    upcoming_ddl.truncate(10);
 
-    let roles_json: Vec<Value> = role_map
-        .iter()
-        .map(|(id, (name, color))| {
-            let active = tasks.iter().filter(|t| {
-                let s = t.get("status").and_then(|v| v.as_str()).unwrap_or("");
-                let r = t.get("role").and_then(|v| v.as_str()).unwrap_or("");
-                r == id && s != "completed" && s != "cancelled" && s != "archived"
-            }).count();
-            let mut r = json!({"id": id, "name": name, "active_count": active});
-            if let Some(c) = color {
-                r.as_object_mut().map(|o| o.insert("color".into(), json!(c)));
+    let cutoff = Utc::now().timestamp_millis() - 48 * 3600 * 1000;
+    let mut completed_pool: Vec<Value> = Vec::new();
+    for task in &tasks {
+        if task.get("status").and_then(|s| s.as_str()) != Some("completed") {
+            continue;
+        }
+        let ca = task
+            .get("completed_at")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        if ca >= cutoff {
+            completed_pool.push(json!({
+                "id": task.get("id"),
+                "title": task.get("title"),
+                "completed_at": ms_to_iso_z(ca),
+            }));
+        }
+    }
+    completed_pool.sort_by(|a, b| {
+        let ca = a.get("completed_at").and_then(|v| v.as_str()).unwrap_or("");
+        let cb = b.get("completed_at").and_then(|v| v.as_str()).unwrap_or("");
+        cb.cmp(ca)
+    });
+    let recent_completed: Vec<Value> = completed_pool.into_iter().take(10).collect();
+
+    let mut roles_json: Vec<Value> = Vec::new();
+    for (rid, (name, color)) in &role_map {
+        if let RoleAcl::Restricted(set) = &acl {
+            if !set.contains(rid) {
+                continue;
             }
-            r
-        })
-        .collect();
+        }
+        let active = tasks
+            .iter()
+            .filter(|t| {
+                let s = t.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                task_role_ids(t).iter().any(|task_role| task_role == rid)
+                    && s != "completed"
+                    && s != "cancelled"
+                    && s != "archived"
+            })
+            .count();
+        let today_c = tasks
+            .iter()
+            .filter(|t| {
+                t.get("status").and_then(|v| v.as_str()) == Some("today")
+                    && task_role_ids(t).iter().any(|task_role| task_role == rid)
+            })
+            .count();
+        let overdue_c = tasks
+            .iter()
+            .filter(|t| {
+                let s = t.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                if s == "completed" || s == "cancelled" || s == "archived" {
+                    return false;
+                }
+                task_role_ids(t).iter().any(|task_role| task_role == rid)
+                    && t.get("ddl")
+                        .and_then(|d| d.as_str())
+                        .and_then(days_overdue)
+                        .is_some()
+            })
+            .count();
+        let mut r = json!({
+            "id": rid,
+            "name": name,
+            "active_count": active,
+            "today_count": today_c,
+            "overdue_count": overdue_c,
+        });
+        if let Some(c) = color {
+            r.as_object_mut()
+                .map(|o| o.insert("color".into(), json!(c)));
+        }
+        roles_json.push(r);
+    }
 
-    let schedule_raw = state.db.get_setting(user_id, "schedule-blocks")
-        .await.map_err(|e| e.to_string())?;
+    let schedule_raw = state
+        .db
+        .get_setting(user_id, "schedule-blocks")
+        .await
+        .map_err(|e| e.to_string())?;
     let schedule: Value = schedule_raw
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or(json!([]));
 
     let p = data_partition(state, user_id);
-    let stream_count = state
+    let stream_rows = state
         .db
         .list_stream_day_json(&p, &today)
         .await
-        .map(|rows| rows.len())
-        .unwrap_or(0);
+        .unwrap_or_default();
+    let mut stream_latest: Vec<Value> = Vec::new();
+    let mut stream_count = 0u32;
+    for raw in stream_rows {
+        if let Ok(v) = serde_json::from_str::<Value>(&raw) {
+            if stream_matches_acl(&acl, &v) {
+                stream_count += 1;
+                if stream_latest.len() < 5 {
+                    let ts = v.get("timestamp").and_then(|x| x.as_i64()).unwrap_or(0);
+                    let content = v.get("content").and_then(|x| x.as_str()).unwrap_or("");
+                    stream_latest.push(json!({
+                        "time": time_hms_from_ms(ts),
+                        "content": preview_text(content, 80),
+                    }));
+                }
+            }
+        }
+    }
+
+    let focus_session = state
+        .db
+        .get_setting(user_id, "focus-session")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| {
+            let tid = v.get("taskId").and_then(|x| x.as_str())?;
+            let started_ms = v
+                .get("startedAt")
+                .and_then(|x| x.as_str())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|d| d.timestamp_millis())
+                .or_else(|| v.get("startedAt").and_then(|x| x.as_i64()))?;
+            let started_iso = ms_to_iso_z(started_ms);
+            let elapsed = (Utc::now().timestamp_millis() - started_ms).max(0) / 60000;
+            Some(json!({
+                "task_id": tid,
+                "started_at": started_iso,
+                "elapsed_min": elapsed,
+            }))
+        });
 
     Ok(json!({
         "date": today,
         "counts": counts,
-        "urgent": urgent,
+        "today_tasks": today_tasks,
+        "active_tasks": active_tasks,
+        "overdue": overdue,
+        "upcoming_ddl": upcoming_ddl,
+        "recent_completed": recent_completed,
         "roles": roles_json,
         "schedule": schedule,
-        "stream_today": stream_count,
+        "stream_today": {
+            "count": stream_count,
+            "latest": stream_latest,
+        },
+        "focus_session": focus_session,
     }))
 }
 
@@ -565,80 +1098,352 @@ fn today_plus_days(n: u32) -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_secs() + (n as u64 * 86400);
+        .as_secs()
+        + (n as u64 * 86400);
     let ts = chrono_lite_timestamp(secs as i64);
     ts[..10].to_string()
 }
 
 async fn load_all_tasks(state: &AppState, user_id: &str) -> Result<Vec<Value>, String> {
     let p = data_partition(state, user_id);
-    let rows = state
-        .db
-        .list_tasks_json(&p)
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut tasks = Vec::new();
-    for raw in rows {
-        let v: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-        tasks.push(normalize_task_for_mcp(v));
-    }
-    Ok(tasks)
+    let tasks = task_stream_facade::list_tasks(state.db.as_ref(), &p).await?;
+    Ok(tasks.into_iter().map(normalize_task_for_mcp).collect())
 }
 
-async fn tool_list_tasks(
+fn task_tags_match(task: &Value, wanted: &[String]) -> bool {
+    if wanted.is_empty() {
+        return true;
+    }
+    let tags = json_string_array(task.get("tags"));
+    let lower: Vec<String> = wanted.iter().map(|t| t.to_lowercase()).collect();
+    tags.iter().any(|t| lower.contains(&t.to_lowercase()))
+}
+
+fn sort_tasks_list(tasks: &mut [Value], sort: &str) {
+    match sort {
+        "ddl" => {
+            tasks.sort_by(|a, b| {
+                let da = a
+                    .get("ddl")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("9999-99-99");
+                let db = b
+                    .get("ddl")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("9999-99-99");
+                da.cmp(db)
+            });
+        }
+        "priority" => {
+            tasks.sort_by(|a, b| {
+                let pa = a.get("priority").and_then(|v| v.as_i64()).unwrap_or(-1);
+                let pb = b.get("priority").and_then(|v| v.as_i64()).unwrap_or(-1);
+                pb.cmp(&pa)
+            });
+        }
+        _ => {
+            tasks.sort_by(|a, b| {
+                let ca = a.get("created_at").and_then(|v| v.as_i64()).unwrap_or(0);
+                let cb = b.get("created_at").and_then(|v| v.as_i64()).unwrap_or(0);
+                cb.cmp(&ca)
+            });
+        }
+    }
+}
+
+fn is_descendant_of_project(
+    task: &Value,
+    project_id: &str,
+    id_map: &HashMap<String, &Value>,
+) -> bool {
+    let mut cur = task.get("parent_id").and_then(|p| p.as_str());
+    while let Some(pid) = cur {
+        if pid == project_id {
+            return true;
+        }
+        cur = id_map
+            .get(pid)
+            .and_then(|t| t.get("parent_id"))
+            .and_then(|p| p.as_str());
+    }
+    false
+}
+
+fn project_descendant_stats(project_id: &str, all: &[Value]) -> (usize, usize) {
+    let id_map: HashMap<String, &Value> = all
+        .iter()
+        .filter_map(|t| {
+            t.get("id")
+                .and_then(|x| x.as_str())
+                .map(|id| (id.to_string(), t))
+        })
+        .collect();
+    let mut total = 0usize;
+    let mut completed = 0usize;
+    for t in all {
+        let id = match t.get("id").and_then(|x| x.as_str()) {
+            Some(s) => s,
+            None => continue,
+        };
+        if id == project_id {
+            continue;
+        }
+        if is_descendant_of_project(t, project_id, &id_map) {
+            total += 1;
+            if t.get("status").and_then(|s| s.as_str()) == Some("completed") {
+                completed += 1;
+            }
+        }
+    }
+    (total, completed)
+}
+
+async fn tool_list_projects(
     state: &AppState,
     user_id: &str,
     args: &Value,
 ) -> Result<Value, String> {
-    let mut tasks = load_all_tasks(state, user_id).await?;
-    let role_map = load_role_map(state, user_id).await;
+    let acl = get_role_acl(state, user_id).await;
+    let tasks = load_all_tasks(state, user_id).await?;
+    let tasks = filter_tasks_acl(tasks, &acl);
+    let primary_role_filter = args.get("primary_role").and_then(|v| v.as_str());
+    let role_ids_filter: Vec<String> = args
+        .get("role_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|value| value.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut projects: Vec<Value> = Vec::new();
+    for t in &tasks {
+        if t.get("task_type").and_then(|x| x.as_str()) != Some("project") {
+            continue;
+        }
+        if let Some(rid) = primary_role_filter {
+            if task_primary_role(t).as_deref() != Some(rid) {
+                continue;
+            }
+        }
+        if !role_ids_filter.is_empty()
+            && !task_role_ids(t)
+                .iter()
+                .any(|role_id| role_ids_filter.contains(role_id))
+        {
+            continue;
+        }
+        let status = t.get("status").and_then(|s| s.as_str()).unwrap_or("");
+        if status == "completed" || status == "archived" {
+            continue;
+        }
+        let id = t.get("id").and_then(|x| x.as_str()).unwrap_or("");
+        let (desc_total, desc_done) = project_descendant_stats(id, &tasks);
+        projects.push(json!({
+            "id": id,
+            "title": t.get("title"),
+            "status": status,
+            "role_ids": t.get("role_ids").cloned().unwrap_or_else(|| json!([])),
+            "primary_role": t.get("primary_role").cloned().unwrap_or(Value::Null),
+            "descendants_total": desc_total,
+            "descendants_completed": desc_done,
+        }));
+    }
+    let n = projects.len();
+    Ok(json!({ "projects": projects, "count": n }))
+}
 
-    if let Some(role) = args.get("role").and_then(|v| v.as_str()) {
-        tasks.retain(|t| t.get("role").and_then(|r| r.as_str()) == Some(role));
+async fn tool_get_project_progress(
+    state: &AppState,
+    user_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let project_id = args
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing required parameter: id".to_string())?;
+    let acl = get_role_acl(state, user_id).await;
+    let p = data_partition(state, user_id);
+    let v = task_stream_facade::get_task(state.db.as_ref(), &p, project_id)
+        .await?
+        .ok_or_else(|| format!("Task not found: {}", project_id))?;
+    let v = normalize_task_for_mcp(v);
+    if !task_matches_acl(&acl, &v) {
+        return Err("Task not found or access denied".into());
+    }
+    if v.get("task_type").and_then(|x| x.as_str()) != Some("project") {
+        return Err("task_type is not project".into());
+    }
+    let tasks = load_all_tasks(state, user_id).await?;
+    let tasks = filter_tasks_acl(tasks, &acl);
+    let (desc_total, desc_done) = project_descendant_stats(project_id, &tasks);
+    let pct = if desc_total > 0 {
+        (desc_done as f64 / desc_total as f64) * 100.0
+    } else {
+        0.0
+    };
+    Ok(json!({
+        "id": project_id,
+        "title": v.get("title"),
+        "descendants_total": desc_total,
+        "descendants_completed": desc_done,
+        "percent_done": pct,
+    }))
+}
+
+async fn tool_list_tasks(state: &AppState, user_id: &str, args: &Value) -> Result<Value, String> {
+    let acl = get_role_acl(state, user_id).await;
+    let mut tasks = load_all_tasks(state, user_id).await?;
+    tasks = filter_tasks_acl(tasks, &acl);
+
+    if let Some(primary_role) = args.get("primary_role").and_then(|v| v.as_str()) {
+        tasks.retain(|t| task_primary_role(t).as_deref() == Some(primary_role));
+    }
+    if let Some(arr) = args.get("role_ids").and_then(|v| v.as_array()) {
+        let wanted: Vec<String> = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        if !wanted.is_empty() {
+            tasks.retain(|t| {
+                let roles = task_role_ids(t);
+                roles.iter().any(|role_id| wanted.contains(role_id))
+            });
+        }
     }
     if let Some(status) = args.get("status").and_then(|v| v.as_str()) {
         tasks.retain(|t| t.get("status").and_then(|s| s.as_str()) == Some(status));
     }
+    if let Some(pid) = args
+        .get("parent_id")
+        .or_else(|| args.get("parent"))
+        .and_then(|v| v.as_str())
+    {
+        tasks.retain(|t| t.get("parent_id").and_then(|p| p.as_str()) == Some(pid));
+    }
+    if let Some(arr) = args.get("tags").and_then(|v| v.as_array()) {
+        let wanted: Vec<String> = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        if !wanted.is_empty() {
+            tasks.retain(|t| task_tags_match(t, &wanted));
+        }
+    }
 
-    for task in &mut tasks {
-        enrich_task_with_role(task, &role_map);
+    let sort = args
+        .get("sort")
+        .and_then(|v| v.as_str())
+        .unwrap_or("created");
+    sort_tasks_list(&mut tasks, sort);
+
+    let total = tasks.len();
+    let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(20)
+        .clamp(1, 50) as usize;
+    let end = (offset + limit).min(total);
+    let page: Vec<Value> = if offset < total {
+        tasks[offset..end].to_vec()
+    } else {
+        vec![]
+    };
+
+    let mut out = page;
+    for task in &mut out {
         task.as_object_mut().map(|obj| obj.remove("body"));
     }
 
-    Ok(json!({ "tasks": tasks, "count": tasks.len() }))
+    Ok(json!({
+        "tasks": out,
+        "count": out.len(),
+        "total": total,
+        "has_more": offset + out.len() < total,
+    }))
 }
 
-async fn tool_get_task(
-    state: &AppState,
-    user_id: &str,
-    args: &Value,
-) -> Result<Value, String> {
+async fn tool_get_task(state: &AppState, user_id: &str, args: &Value) -> Result<Value, String> {
     let task_id = args
         .get("id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required parameter: id".to_string())?;
 
+    let acl = get_role_acl(state, user_id).await;
     let p = data_partition(state, user_id);
-    let raw = state
-        .db
-        .get_task_json(&p, task_id)
-        .await
-        .map_err(|e| e.to_string())?
+    let task = task_stream_facade::get_task(state.db.as_ref(), &p, task_id)
+        .await?
         .ok_or_else(|| format!("Task not found: {}", task_id))?;
+    if !task_matches_acl(&acl, &task) {
+        return Err("Task not found or access denied".into());
+    }
+    let mut t = normalize_task_for_mcp(task);
+    let all_tasks = filter_tasks_acl(load_all_tasks(state, user_id).await?, &acl);
 
-    let v: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    Ok(normalize_task_for_mcp(v))
+    if let Some(ids) = t.get("subtask_ids").and_then(|x| x.as_array()) {
+        let mut subtasks = Vec::new();
+        for sid in ids.iter().filter_map(|value| value.as_str()) {
+            if let Some(st) = all_tasks.iter().find(|task| task["id"] == sid) {
+                subtasks.push(json!({
+                    "id": st.get("id"),
+                    "title": st.get("title"),
+                    "status": st.get("status"),
+                }));
+            }
+        }
+        t.as_object_mut()
+            .map(|o| o.insert("subtasks".into(), json!(subtasks)));
+    }
+
+    let parent_id_opt = t
+        .get("parent_id")
+        .and_then(|x| x.as_str())
+        .map(String::from);
+    if let Some(pid) = parent_id_opt {
+        if let Some(parent) = all_tasks.iter().find(|task| task["id"] == pid) {
+            t.as_object_mut().map(|o| {
+                o.insert(
+                    "parent".into(),
+                    json!({
+                        "id": pid,
+                        "title": parent.get("title"),
+                    }),
+                )
+            });
+        }
+    }
+
+    Ok(t)
 }
 
-async fn tool_create_task(
-    state: &AppState,
-    user_id: &str,
-    args: &Value,
-) -> Result<Value, String> {
+async fn tool_create_task(state: &AppState, user_id: &str, args: &Value) -> Result<Value, String> {
+    let acl = get_role_acl(state, user_id).await;
+    if args.get("role").is_some() || args.get("role_id").is_some() || args.get("source_stream_id").is_some() {
+        return Err("Legacy task fields `role`, `role_id`, and `source_stream_id` are not accepted".into());
+    }
     let title = args
         .get("title")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required parameter: title".to_string())?;
+
+    let mut role_ids: Vec<String> = args
+        .get("role_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|value| value.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if role_ids.is_empty() {
+        if let Some(primary_role) = args.get("primary_role").and_then(|v| v.as_str()) {
+            role_ids.push(primary_role.to_string());
+        }
+    }
+    if !role_ids_allowed_for_write(&acl, &role_ids) {
+        return Err("One or more role_ids are not allowed by MCP role ACL".into());
+    }
 
     let id = generate_task_id();
     let now_ms = Utc::now().timestamp_millis();
@@ -647,7 +1452,11 @@ async fn tool_create_task(
         .and_then(|v| v.as_str())
         .and_then(parse_iso_to_ms);
     let ddl_type = args.get("ddl_type").and_then(|v| v.as_str());
-    let role = args.get("role").and_then(|v| v.as_str());
+    let planned_ms = args
+        .get("planned_at")
+        .and_then(|v| v.as_str())
+        .and_then(parse_iso_to_ms);
+    let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("");
     let tags: Vec<String> = args
         .get("tags")
         .and_then(|v| v.as_array())
@@ -658,84 +1467,83 @@ async fn tool_create_task(
         })
         .unwrap_or_default();
 
-    let parent = args.get("parent").and_then(|v| v.as_str());
-    let tags_json = serde_json::to_string(&tags).unwrap_or_else(|_| "[]".into());
+    let parent = args
+        .get("parent_id")
+        .or_else(|| args.get("parent"))
+        .and_then(|v| v.as_str());
+    let task_type_str: Option<&str> = args
+        .get("task_type")
+        .and_then(|v| v.as_str())
+        .filter(|s| *s == "project" || *s == "task");
 
     let task = json!({
         "id": id,
         "title": title,
+        "title_customized": 1,
         "description": null,
         "status": "inbox",
-        "body": "",
+        "body": body,
         "created_at": now_ms,
         "updated_at": now_ms,
         "completed_at": null,
         "ddl": ddl_ms,
         "ddl_type": ddl_type,
-        "planned_at": null,
-        "role_id": role,
+        "planned_at": planned_ms,
+        "role_ids": role_ids,
+        "primary_role": args.get("primary_role").cloned().unwrap_or(Value::Null),
         "parent_id": parent,
-        "source_stream_id": null,
         "priority": null,
         "promoted": null,
         "phase": null,
         "kanban_column": null,
-        "tags": tags_json,
-        "subtask_ids": "[]",
-        "resources": "[]",
-        "reminders": "[]",
-        "submissions": "[]",
-        "postponements": "[]",
-        "status_history": "[]",
-        "progress_logs": "[]",
+        "task_type": task_type_str.unwrap_or("task"),
+        "tags": tags,
+        "subtask_ids": [],
+        "resources": [],
+        "reminders": [],
+        "submissions": [],
+        "postponements": [],
+        "status_history": [],
+        "progress_logs": [],
     });
 
     let p = data_partition(state, user_id);
-    state
-        .db
-        .upsert_task_json(&p, &task.to_string())
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let mut result = json!({
-        "id": id,
-        "title": title,
-        "status": "inbox",
-        "created": ms_to_iso_z(now_ms),
-    });
-    if let Some(p) = parent {
-        result
-            .as_object_mut()
-            .map(|o| o.insert("parent".into(), json!(p)));
-    }
-    Ok(result)
+    let created = task_stream_facade::put_task(state.db.as_ref(), &p, &id, &task).await?;
+    Ok(normalize_task_for_mcp(created))
 }
 
-async fn tool_update_task(
-    state: &AppState,
-    user_id: &str,
-    args: &Value,
-) -> Result<Value, String> {
+async fn tool_update_task(state: &AppState, user_id: &str, args: &Value) -> Result<Value, String> {
+    let acl = get_role_acl(state, user_id).await;
+    if args.get("role").is_some() || args.get("role_id").is_some() || args.get("source_stream_id").is_some() {
+        return Err("Legacy task fields `role`, `role_id`, and `source_stream_id` are not accepted".into());
+    }
     let task_id = args
         .get("id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required parameter: id".to_string())?;
 
     let p = data_partition(state, user_id);
-    let raw = state
-        .db
-        .get_task_json(&p, task_id)
-        .await
-        .map_err(|e| e.to_string())?
+    let existing = task_stream_facade::get_task(state.db.as_ref(), &p, task_id)
+        .await?
         .ok_or_else(|| format!("Task not found: {}", task_id))?;
-
-    let mut task: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    let obj = task.as_object_mut().ok_or("Invalid task")?;
+    if !task_matches_acl(&acl, &existing) {
+        return Err("Task not found or access denied".into());
+    }
 
     let now_ms = Utc::now().timestamp_millis();
+    let mut patch = json!({});
+    let obj = patch.as_object_mut().ok_or("Invalid task patch")?;
 
     if let Some(title) = args.get("title").and_then(|v| v.as_str()) {
         obj.insert("title".into(), json!(title));
+    }
+    if let Some(body) = args.get("body").and_then(|v| v.as_str()) {
+        obj.insert("body".into(), json!(body));
+    }
+    if let Some(pa) = args.get("planned_at").and_then(|v| v.as_str()) {
+        if let Some(ms) = parse_iso_to_ms(pa) {
+            obj.insert("planned_at".into(), json!(ms));
+        }
     }
     if let Some(status) = args.get("status").and_then(|v| v.as_str()) {
         obj.insert("status".into(), json!(status));
@@ -751,18 +1559,33 @@ async fn tool_update_task(
     if let Some(ddl_type) = args.get("ddl_type").and_then(|v| v.as_str()) {
         obj.insert("ddl_type".into(), json!(ddl_type));
     }
-    if let Some(role) = args.get("role").and_then(|v| v.as_str()) {
-        obj.insert("role_id".into(), json!(role));
+    if args.get("primary_role").is_some() && args.get("role_ids").is_none() {
+        return Err("`primary_role` must be supplied together with `role_ids`".into());
+    }
+    if let Some(role_ids) = args.get("role_ids").and_then(|v| v.as_array()) {
+        let role_ids: Vec<String> = role_ids
+            .iter()
+            .filter_map(|value| value.as_str().map(String::from))
+            .collect();
+        if !role_ids_allowed_for_write(&acl, &role_ids) {
+            return Err("One or more role_ids are not allowed by MCP role ACL".into());
+        }
+        obj.insert("role_ids".into(), json!(role_ids));
+        if let Some(primary_role) = args.get("primary_role") {
+            obj.insert("primary_role".into(), primary_role.clone());
+        }
     }
     if let Some(tags) = args.get("tags").and_then(|v| v.as_array()) {
         let tag_strs: Vec<String> = tags
             .iter()
             .filter_map(|v| v.as_str().map(String::from))
             .collect();
-        obj.insert(
-            "tags".into(),
-            json!(serde_json::to_string(&tag_strs).unwrap_or_else(|_| "[]".into())),
-        );
+        obj.insert("tags".into(), json!(tag_strs));
+    }
+    if let Some(tt) = args.get("task_type").and_then(|v| v.as_str()) {
+        if tt == "project" || tt == "task" {
+            obj.insert("task_type".into(), json!(tt));
+        }
     }
 
     if let Some(note_text) = args.get("note").and_then(|v| v.as_str()) {
@@ -772,11 +1595,11 @@ async fn tool_update_task(
         } else {
             "postponements"
         };
-        let existing = obj
+        let mut arr = existing
             .get(subs_key)
-            .and_then(|s| s.as_str())
-            .unwrap_or("[]");
-        let mut arr: Vec<Value> = serde_json::from_str(existing).unwrap_or_default();
+            .and_then(|value| value.as_array())
+            .cloned()
+            .unwrap_or_default();
         let rec = if status == "completed" {
             json!({
                 "timestamp": Utc::now().to_rfc3339(),
@@ -792,66 +1615,119 @@ async fn tool_update_task(
             })
         };
         arr.push(rec);
-        obj.insert(
-            subs_key.into(),
-            json!(serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())),
-        );
+        obj.insert(subs_key.into(), Value::Array(arr));
     }
 
     obj.insert("updated_at".into(), json!(now_ms));
 
-    state
-        .db
-        .upsert_task_json(&p, &serde_json::to_string(&task).map_err(|e| e.to_string())?)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(json!({ "id": task_id, "updated": true }))
+    let updated = task_stream_facade::put_task(state.db.as_ref(), &p, task_id, &patch).await?;
+    Ok(normalize_task_for_mcp(updated))
 }
 
-async fn tool_delete_task(
-    state: &AppState,
-    user_id: &str,
-    args: &Value,
-) -> Result<Value, String> {
+async fn tool_delete_task(state: &AppState, user_id: &str, args: &Value) -> Result<Value, String> {
+    let acl = get_role_acl(state, user_id).await;
     let task_id = args
         .get("id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required parameter: id".to_string())?;
 
     let p = data_partition(state, user_id);
-    state
-        .db
-        .get_task_json(&p, task_id)
-        .await
-        .map_err(|e| e.to_string())?
+    let task = task_stream_facade::get_task(state.db.as_ref(), &p, task_id)
+        .await?
         .ok_or_else(|| format!("Task not found: {}", task_id))?;
+    if !task_matches_acl(&acl, &task) {
+        return Err("Task not found or access denied".into());
+    }
 
-    state
-        .db
-        .delete_task_row(&p, task_id)
-        .await
-        .map_err(|e| e.to_string())?;
+    task_stream_facade::delete_task(state.db.as_ref(), &p, task_id).await?;
 
     Ok(json!({ "id": task_id, "deleted": true }))
 }
 
-async fn tool_list_roles(state: &AppState, user_id: &str) -> Result<Value, String> {
+async fn tool_get_roles_stats(state: &AppState, user_id: &str) -> Result<Value, String> {
+    let acl = get_role_acl(state, user_id).await;
+    let tasks = filter_tasks_acl(load_all_tasks(state, user_id).await?, &acl);
+
     let raw = state
         .db
         .get_setting(user_id, "roles")
         .await
         .map_err(|e| e.to_string())?;
 
-    match raw {
+    let roles_arr: Vec<Value> = match raw {
         Some(data) => {
-            let parsed: Value =
-                serde_json::from_str(&data).unwrap_or(json!({ "roles": [] }));
-            let roles = parsed.get("roles").cloned().unwrap_or(json!([]));
-            Ok(json!({ "roles": roles }))
+            let parsed: Value = serde_json::from_str(&data).unwrap_or(json!({ "roles": [] }));
+            parsed
+                .get("roles")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default()
         }
-        None => Ok(json!({ "roles": [] })),
+        None => vec![],
+    };
+
+    let mut out: Vec<Value> = Vec::new();
+    for r in roles_arr {
+        let id = r.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        if id.is_empty() {
+            continue;
+        }
+        if let RoleAcl::Restricted(set) = &acl {
+            if !set.contains(id) {
+                continue;
+            }
+        }
+        let name = r.get("name").cloned().unwrap_or(json!(""));
+        let color = r.get("color").cloned();
+        let active = tasks
+            .iter()
+            .filter(|t| {
+                let s = t.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                task_role_ids(t).iter().any(|role_id| role_id == id)
+                    && s != "completed"
+                    && s != "cancelled"
+                    && s != "archived"
+            })
+            .count();
+        let today_c = tasks
+            .iter()
+            .filter(|t| {
+                t.get("status").and_then(|v| v.as_str()) == Some("today")
+                    && task_role_ids(t).iter().any(|role_id| role_id == id)
+            })
+            .count();
+        let overdue_c = tasks
+            .iter()
+            .filter(|t| {
+                let s = t.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                if s == "completed" || s == "cancelled" || s == "archived" {
+                    return false;
+                }
+                task_role_ids(t).iter().any(|role_id| role_id == id)
+                    && t.get("ddl")
+                        .and_then(|d| d.as_str())
+                        .and_then(days_overdue)
+                        .is_some()
+            })
+            .count();
+        let mut row = json!({
+            "id": id,
+            "name": name,
+            "active_count": active,
+            "today_count": today_c,
+            "overdue_count": overdue_c,
+        });
+        if let Some(c) = color {
+            row.as_object_mut().map(|o| o.insert("color".into(), c));
+        }
+        out.push(row);
     }
+
+    Ok(json!({ "roles": out }))
+}
+
+async fn tool_list_roles(state: &AppState, user_id: &str) -> Result<Value, String> {
+    tool_get_roles_stats(state, user_id).await
 }
 
 async fn tool_add_stream_entry(
@@ -859,51 +1735,41 @@ async fn tool_add_stream_entry(
     user_id: &str,
     args: &Value,
 ) -> Result<Value, String> {
+    let acl = get_role_acl(state, user_id).await;
     let content = args
         .get("content")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required parameter: content".to_string())?;
-    let role = args.get("role").and_then(|v| v.as_str());
+    if args.get("role").is_some() {
+        return Err("Legacy stream field `role` is not accepted; use `role_id`".into());
+    }
+    let role = args.get("role_id").and_then(|v| v.as_str());
+    if !role_allowed_for_write(&acl, role) {
+        return Err("Role not allowed by MCP role ACL".into());
+    }
 
     let date_key = today_date_key();
-    let id = Uuid::new_v4().to_string();
+    let id = format!("se-{}", Uuid::new_v4());
     let ts = Utc::now().timestamp_millis();
-    let time_part = time_hms_from_ms(ts);
 
     let entry = json!({
         "id": id,
         "content": content,
-        "entry_type": "spark",
+        "entry_type": args.get("entry_type").cloned().unwrap_or_else(|| json!("spark")),
         "timestamp": ts,
         "date_key": date_key,
         "role_id": role,
-        "tags": "[]",
-        "attachments": "[]",
+        "tags": args.get("tags").cloned().unwrap_or_else(|| json!([])),
+        "attachments": [],
     });
 
     let p = data_partition(state, user_id);
-    state
-        .db
-        .upsert_stream_entry_json(&p, &entry.to_string())
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(json!({
-        "date": date_key,
-        "time": time_part,
-        "content": content,
-    }))
+    task_stream_facade::put_stream_entry(state.db.as_ref(), &p, &id, &entry).await
 }
 
-async fn tool_list_stream(
-    state: &AppState,
-    user_id: &str,
-    args: &Value,
-) -> Result<Value, String> {
-    let days = args
-        .get("days")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(7) as i32;
+async fn tool_list_stream(state: &AppState, user_id: &str, args: &Value) -> Result<Value, String> {
+    let acl = get_role_acl(state, user_id).await;
+    let days = args.get("days").and_then(|v| v.as_u64()).unwrap_or(7) as i32;
 
     let p = data_partition(state, user_id);
     let rows = state
@@ -912,65 +1778,120 @@ async fn tool_list_stream(
         .await
         .map_err(|e| e.to_string())?;
 
-    let mut entries = Vec::new();
-    for raw in rows {
-        let v: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-        let date_key = v.get("date_key").and_then(|x| x.as_str()).unwrap_or("");
-        let ts = v.get("timestamp").and_then(|x| x.as_i64()).unwrap_or(0);
-        let text = v.get("content").and_then(|x| x.as_str()).unwrap_or("");
-        entries.push(json!({
-            "date": date_key,
-            "time": time_hms_from_ms(ts),
-            "content": text,
-        }));
+    let mut filtered = task_stream_facade::list_stream_from_rows(state.db.as_ref(), &p, rows).await?;
+    filtered.retain(|entry| stream_matches_acl(&acl, entry));
+    let role_f = args.get("role_id").and_then(|v| v.as_str());
+    let type_f = args
+        .get("entry_type")
+        .or_else(|| args.get("type"))
+        .and_then(|v| v.as_str());
+
+    if let Some(rid) = role_f {
+        filtered.retain(|entry| entry.get("role_id").and_then(|x| x.as_str()) == Some(rid));
+    }
+    if let Some(et) = type_f {
+        filtered.retain(|entry| entry.get("entry_type").and_then(|x| x.as_str()) == Some(et));
     }
 
-    Ok(json!({ "entries": entries, "count": entries.len() }))
+    filtered.sort_by(|a, b| {
+        let ta = a.get("timestamp").and_then(|x| x.as_i64()).unwrap_or(0);
+        let tb = b.get("timestamp").and_then(|x| x.as_i64()).unwrap_or(0);
+        tb.cmp(&ta)
+    });
+
+    let total = filtered.len();
+    let offset = args.get("offset").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(20)
+        .clamp(1, 50) as usize;
+    let end = (offset + limit).min(total);
+    let page: Vec<Value> = if offset < total {
+        filtered[offset..end].to_vec()
+    } else {
+        vec![]
+    };
+
+    Ok(json!({
+        "entries": page,
+        "count": page.len(),
+        "total": total,
+        "has_more": offset + page.len() < total,
+    }))
 }
 
-async fn tool_search(
-    state: &AppState,
-    user_id: &str,
-    args: &Value,
-) -> Result<Value, String> {
+fn task_text_matches(task: &Value, query_lower: &str) -> bool {
+    let title = task
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let body = task
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    title.contains(query_lower) || body.contains(query_lower)
+}
+
+async fn tool_search(state: &AppState, user_id: &str, args: &Value) -> Result<Value, String> {
+    let acl = get_role_acl(state, user_id).await;
     let query = args
         .get("query")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "Missing required parameter: query".to_string())?;
     let scope = args.get("scope").and_then(|v| v.as_str()).unwrap_or("all");
     let query_lower = query.to_lowercase();
+    let max_n = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10)
+        .clamp(1, 100) as usize;
 
     let mut results = Vec::new();
     let p = data_partition(state, user_id);
 
     if scope == "all" || scope == "tasks" {
-        let task_rows = state.db.list_tasks_json(&p).await.unwrap_or_default();
-        for raw in task_rows {
-            if !raw.to_lowercase().contains(&query_lower) {
+        let tasks = filter_tasks_acl(load_all_tasks(state, user_id).await?, &acl);
+        for task in tasks {
+            if results.len() >= max_n {
+                break;
+            }
+            if !task_text_matches(&task, &query_lower) {
                 continue;
             }
-            let task: Value = serde_json::from_str(&raw).unwrap_or(json!({}));
-            let t = normalize_task_for_mcp(task);
             results.push(json!({
                 "type": "task",
-                "id": t.get("id").and_then(|v| v.as_str()).unwrap_or(""),
-                "title": t.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-                "status": t.get("status").and_then(|v| v.as_str()).unwrap_or(""),
+                "id": task.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "title": task.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                "status": task.get("status").and_then(|v| v.as_str()).unwrap_or(""),
+                "primary_role": task.get("primary_role").cloned().unwrap_or(Value::Null),
             }));
         }
     }
 
-    if scope == "all" || scope == "stream" {
-        let stream_rows = state.db.list_all_stream_json(&p).await.unwrap_or_default();
-        for raw in stream_rows {
-            if !raw.to_lowercase().contains(&query_lower) {
+    if (scope == "all" || scope == "stream") && results.len() < max_n {
+        let remaining = max_n - results.len();
+        let stream_rows = state
+            .db
+            .search_stream_json(&p, query, remaining as i64)
+            .await
+            .unwrap_or_default();
+        let entries = task_stream_facade::list_stream_from_rows(state.db.as_ref(), &p, stream_rows).await?;
+        for v in entries {
+            if results.len() >= max_n {
+                break;
+            }
+            if !stream_matches_acl(&acl, &v) {
                 continue;
             }
-            let v: Value = serde_json::from_str(&raw).unwrap_or(json!({}));
+            let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
             let date_key = v.get("date_key").and_then(|x| x.as_str()).unwrap_or("");
             let content = v.get("content").and_then(|x| x.as_str()).unwrap_or("");
             results.push(json!({
                 "type": "stream",
+                "id": id,
                 "date": date_key,
                 "content": content,
             }));
@@ -980,10 +1901,198 @@ async fn tool_search(
     Ok(json!({ "results": results, "count": results.len(), "query": query }))
 }
 
+async fn tool_update_stream_entry(
+    state: &AppState,
+    user_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let acl = get_role_acl(state, user_id).await;
+    if args.get("role").is_some() {
+        return Err("Legacy stream field `role` is not accepted; use `role_id`".into());
+    }
+    let id = args
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing required parameter: id".to_string())?;
+    let p = data_partition(state, user_id);
+    let rows = state
+        .db
+        .list_all_stream_json(&p)
+        .await
+        .map_err(|e| e.to_string())?;
+    let entry = task_stream_facade::list_stream_from_rows(state.db.as_ref(), &p, rows)
+        .await?
+        .into_iter()
+        .find(|entry| entry.get("id").and_then(|value| value.as_str()) == Some(id))
+        .ok_or_else(|| format!("Stream entry not found: {}", id))?;
+    if !stream_matches_acl(&acl, &entry) {
+        return Err("Stream entry not found or access denied".into());
+    }
+    let mut patch = json!({});
+    let obj = patch.as_object_mut().ok_or("Invalid entry patch")?;
+    if let Some(c) = args.get("content").and_then(|v| v.as_str()) {
+        obj.insert("content".into(), json!(c));
+    }
+    if let Some(r) = args.get("role_id").and_then(|v| v.as_str()) {
+        if !role_allowed_for_write(&acl, Some(r)) {
+            return Err("Role not allowed by MCP role ACL".into());
+        }
+        obj.insert("role_id".into(), json!(r));
+    }
+    if let Some(et) = args.get("entry_type").and_then(|v| v.as_str()) {
+        obj.insert("entry_type".into(), json!(et));
+    }
+    if let Some(tags) = args.get("tags").and_then(|v| v.as_array()) {
+        let tag_strs: Vec<String> = tags
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+        obj.insert("tags".into(), json!(tag_strs));
+    }
+    obj.insert("updated_at".into(), json!(Utc::now().timestamp_millis()));
+    task_stream_facade::put_stream_entry(state.db.as_ref(), &p, id, &patch).await
+}
+
+async fn tool_manage_role(state: &AppState, user_id: &str, args: &Value) -> Result<Value, String> {
+    let acl = get_role_acl(state, user_id).await;
+    let action = args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Missing required parameter: action".to_string())?;
+
+    let raw_default =
+        r#"{"roles":[],"settings":{"maxRoles":8,"showCounts":false,"showLandingCard":true}}"#;
+    let raw = state
+        .db
+        .get_setting(user_id, "roles")
+        .await
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| raw_default.to_string());
+
+    let mut parsed: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let roles_arr = parsed
+        .get_mut("roles")
+        .and_then(|v| v.as_array_mut())
+        .ok_or_else(|| "Invalid roles data".to_string())?;
+
+    match action {
+        "create" => {
+            let name = args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Missing name for create".to_string())?;
+            let max_order = roles_arr
+                .iter()
+                .filter_map(|r| r.get("order").and_then(|v| v.as_i64()))
+                .max()
+                .unwrap_or(-1);
+            let id = format!("role-{}", Uuid::new_v4());
+            let mut new_role = json!({
+                "id": id,
+                "name": name,
+                "order": max_order + 1,
+                "createdAt": Utc::now().to_rfc3339(),
+            });
+            if let Some(c) = args.get("color").and_then(|v| v.as_str()) {
+                new_role
+                    .as_object_mut()
+                    .map(|o| o.insert("color".into(), json!(c)));
+            }
+            if let Some(ic) = args.get("icon").and_then(|v| v.as_str()) {
+                new_role
+                    .as_object_mut()
+                    .map(|o| o.insert("icon".into(), json!(ic)));
+            }
+            roles_arr.push(new_role.clone());
+            state
+                .db
+                .put_setting(
+                    user_id,
+                    "roles",
+                    &serde_json::to_string(&parsed).map_err(|e| e.to_string())?,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({ "id": id, "role": new_role }))
+        }
+        "update" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Missing id for update".to_string())?;
+            if let RoleAcl::Restricted(set) = &acl {
+                if !set.contains(id) {
+                    return Err("Role not allowed by MCP role ACL".into());
+                }
+            }
+            let mut hit = false;
+            for r in roles_arr.iter_mut() {
+                if r.get("id").and_then(|v| v.as_str()) != Some(id) {
+                    continue;
+                }
+                hit = true;
+                if let Some(n) = args.get("name").and_then(|v| v.as_str()) {
+                    r.as_object_mut().map(|o| o.insert("name".into(), json!(n)));
+                }
+                if let Some(c) = args.get("color").and_then(|v| v.as_str()) {
+                    r.as_object_mut()
+                        .map(|o| o.insert("color".into(), json!(c)));
+                }
+                if let Some(ic) = args.get("icon").and_then(|v| v.as_str()) {
+                    r.as_object_mut()
+                        .map(|o| o.insert("icon".into(), json!(ic)));
+                }
+                break;
+            }
+            if !hit {
+                return Err(format!("Role not found: {}", id));
+            }
+            state
+                .db
+                .put_setting(
+                    user_id,
+                    "roles",
+                    &serde_json::to_string(&parsed).map_err(|e| e.to_string())?,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({ "id": id, "updated": true }))
+        }
+        "delete" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "Missing id for delete".to_string())?;
+            if let RoleAcl::Restricted(set) = &acl {
+                if !set.contains(id) {
+                    return Err("Role not allowed by MCP role ACL".into());
+                }
+            }
+            let before = roles_arr.len();
+            roles_arr.retain(|r| r.get("id").and_then(|v| v.as_str()) != Some(id));
+            if roles_arr.len() == before {
+                return Err(format!("Role not found: {}", id));
+            }
+            state
+                .db
+                .put_setting(
+                    user_id,
+                    "roles",
+                    &serde_json::to_string(&parsed).map_err(|e| e.to_string())?,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(json!({ "id": id, "deleted": true }))
+        }
+        _ => Err(format!("Unknown action: {}", action)),
+    }
+}
+
 // ── Resource Implementations ────────────────────────────────────
 
 async fn resource_active_tasks(state: &AppState, user_id: &str) -> Result<Value, String> {
-    let tasks = load_all_tasks(state, user_id).await?;
+    let acl = get_role_acl(state, user_id).await;
+    let tasks = filter_tasks_acl(load_all_tasks(state, user_id).await?, &acl);
     let active: Vec<&Value> = tasks
         .iter()
         .filter(|t| {
@@ -996,7 +2105,8 @@ async fn resource_active_tasks(state: &AppState, user_id: &str) -> Result<Value,
 }
 
 async fn resource_today_tasks(state: &AppState, user_id: &str) -> Result<Value, String> {
-    let tasks = load_all_tasks(state, user_id).await?;
+    let acl = get_role_acl(state, user_id).await;
+    let tasks = filter_tasks_acl(load_all_tasks(state, user_id).await?, &acl);
     let today = today_date_key();
     let due_today: Vec<&Value> = tasks
         .iter()

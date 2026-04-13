@@ -4,5 +4,7 @@
   "Tasks": "任务",
   "Settings": "设置",
   "Offline": "离线模式",
-  "Syncing {{count}} changes...": "正在同步 {{count}} 项变更..."
+  "Syncing {{count}} changes...": "正在同步 {{count}} 项变更...",
+  "Main navigation": "主导航",
+  "Loading": "加载中"
 }

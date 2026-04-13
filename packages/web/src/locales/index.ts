@@ -1,9 +1,17 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
+import enAi from './en/ai.json';
 import enBoard from './en/board.json';
 import enCoach from './en/coach.json';
+import enErrors from './en/errors.json';
+import enNav from './en/nav.json';
+import enNow from './en/now.json';
 import enSettings from './en/settings.json';
+import enStream from './en/stream.json';
+import enThink from './en/think.json';
+import enWidget from './en/widget.json';
+import zhAi from './zh-CN/ai.json';
 import zhBoard from './zh-CN/board.json';
 import zhCalendar from './zh-CN/calendar.json';
 import zhCoach from './zh-CN/coach.json';
@@ -18,6 +26,8 @@ import zhRole from './zh-CN/role.json';
 import zhSettings from './zh-CN/settings.json';
 import zhStream from './zh-CN/stream.json';
 import zhTask from './zh-CN/task.json';
+import zhThink from './zh-CN/think.json';
+import zhWidget from './zh-CN/widget.json';
 
 export const defaultNS = 'common' as const;
 
@@ -37,13 +47,17 @@ export const resources = {
     role: zhRole,
     errors: zhErrors,
     coach: zhCoach,
+    think: zhThink,
+    ai: zhAi,
+    widget: zhWidget,
   },
   en: {
     coach: enCoach,
+    widget: enWidget,
     common: {},
-    nav: {},
-    now: {},
-    stream: {},
+    nav: enNav,
+    now: enNow,
+    stream: enStream,
     board: enBoard,
     settings: enSettings,
     task: {},
@@ -52,7 +66,9 @@ export const resources = {
     editor: {},
     calendar: {},
     role: {},
-    errors: {},
+    errors: enErrors,
+    think: enThink,
+    ai: enAi,
   },
 } as const;
 

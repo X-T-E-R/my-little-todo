@@ -54,6 +54,9 @@ export interface ProgressLog {
 /** Optional Kanban column placement (Board planning view). */
 export type KanbanColumn = 'ideas' | 'planned' | 'doing' | 'finishing' | 'done_recent';
 
+/** When `project`, the task is treated as a goal container (Things-style project); UI may show progress and grouping. */
+export type TaskType = 'task' | 'project';
+
 export interface Task {
   id: string;
   title: string;
@@ -100,4 +103,7 @@ export interface Task {
   progressLogs?: ProgressLog[];
   /** Board Kanban column override; when absent, derived from status/phase. */
   kanbanColumn?: KanbanColumn;
+
+  /** Distinguishes a project container from a normal actionable task. */
+  taskType?: TaskType;
 }

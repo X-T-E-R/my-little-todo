@@ -1,113 +1,60 @@
-# My Little Todo — MCP 使用技能
+# My Little Todo — MCP 技能
 
-> 当用户要求你操作他的 todo / 任务 / 流记录 / 执行系统时，使用此技能通过 MCP 工具与 My Little Todo 交互。
+> 通过 MCP 操作用户的 todo / 流 / 角色时遵循本文；工具以服务端 `tools/list` 为准（用户可关插件或限权）。
 
-## 连接信息
+## 连接
 
-- **MCP 服务器名**: `my-little-todo`
-- **协议**: MCP over Streamable HTTP (JSON-RPC 2.0)
-- **端点**: `POST /api/mcp`
-- **认证**: HTTP Header `Authorization: Bearer <jwt-token>`
+`POST /api/mcp`，`Authorization: Bearer <token>`。若用户关闭「MCP 集成」插件，端点不可用。
 
-## 核心概念
+## 权限（用户侧）
 
-这不是传统待办清单，而是**外部执行系统**。核心理念：
+- **等级**：Read / Create / Full — 低等级无法调用高等级工具。
+- **角色 ACL**：可能限制 AI 只能看到部分角色的数据；缺省为全部可见。
+- 具体可用工具以 `tools/list` 为准。
 
-- **先记录再整理**: 用户随手说的话先用 `add_stream` 记下来，有需要再转成任务
-- **DDL 三级硬度**: `hard`(外部硬截止，不可改) / `commitment`(自我承诺，改需理由) / `soft`(建议性，可随意改)
-- **角色驱动**: 用户有多个身份角色（如"研究生""工作""生活"），任务按角色分组
-- **不制造焦虑**: 不要列出"所有未完成任务"来施压，聚焦"此刻能做的"
+## 核心概念（5 行）
 
-## 工具速查
+外部**执行系统**（非简单清单）；**先记流再整理**；**DDL**：`hard` / `commitment` / `soft`；**角色**分组；避免罗列全部任务制造焦虑。
 
-### 读操作
+## 工具速查（按典型等级）
 
 | 工具 | 用途 | 关键参数 |
 |------|------|----------|
-| `get_overview` | 了解用户当前全貌（首选） | 无参数 |
-| `list_tasks` | 浏览/筛选任务列表 | `status?`, `role?` |
-| `get_task` | 查看单个任务完整信息 | `id` |
-| `list_stream` | 查看最近流记录 | `days?` (默认7) |
-| `search` | 全文搜索 | `query`, `scope?` (all/tasks/stream) |
+| `get_overview` | **首选**，一次拿全貌 | 无 |
+| `list_tasks` | 轻量列表（无 body） | `status?`, `role?`, `parent?`, `tags?`, `sort?`, `offset?`, `limit?` |
+| `list_projects` | 项目容器（`task_type=project`）及子树进度 | `role?` |
+| `get_project_progress` | 单项目子树完成度 | `id` |
+| `get_task` | 全文 + 子任务/父摘要 | `id` |
+| `get_roles` | 角色 + 统计 | 无 |
+| `list_stream` | 流记录 | `days?`, `limit?`, `offset?`, `role?`, `type?` |
+| `search` | 标题/正文/内容子串 | `query`, `scope?`, `limit?` |
+| `create_task` | 新建 | `title`, `body?`, `ddl?`, `ddl_type?`, `planned_at?`, `role?`, `parent?`, `task_type?`（`task`/`project`） |
+| `add_stream` | 记一条流 | `content`, `role?` |
+| `update_task` | 改/完成/取消 | `id`, `status?`, `body?`, `planned_at?`, `note?`, `task_type?` … |
+| `delete_task` | 删任务 | `id` |
+| `update_stream_entry` | 改流 | `id`, `content?`, `role?`, `entry_type?` |
+| `manage_role` | 增删改角色 | `action` create/update/delete |
 
-### 写操作
-
-| 工具 | 用途 | 关键参数 |
-|------|------|----------|
-| `create_task` | 创建新任务 | `title`, `ddl?`, `ddl_type?`, `role?`, `tags?`, `parent?` |
-| `update_task` | 更新/完成/取消任务 | `id`, 其他字段可选, `note?` |
-| `delete_task` | 删除任务 | `id` |
-| `add_stream` | 添加流记录 | `content`, `role?` |
-
-## 典型工作流
-
-### "我现在该做什么？"
+## 决策流（简）
 
 ```
-1. get_overview → 拿到紧急任务、角色统计
-2. 基于 urgent 列表和角色上下文给出建议
+用户要现状/安排 → get_overview
+要查某条 → search 或 list_tasks → get_task(id)
+随口一句 → add_stream；确认是任务 → create_task
+完成/改期 → update_task（含 note）
 ```
 
-### 用户随口说了一件事
+## get_overview 要点（无 `urgent` 字段）
 
-```
-1. add_stream(content="用户说的原文") → 先记录
-2. 如果明确是个任务 → create_task(title=..., ddl=..., role=...)
-```
+含 `counts`、`today_tasks`、`active_tasks`、`overdue`、`upcoming_ddl`、`recent_completed`、`roles`、`schedule`、`stream_today`（含 `latest` 预览）、`focus_session`（若有）。
 
-### "帮我把XX标记完成"
+## 反模式
 
-```
-1. 如果不知道任务ID → search(query="XX", scope="tasks") 或 list_tasks()
-2. update_task(id="...", status="completed", note="完成说明")
-```
+- 不要 `list_tasks` 拉全量施压；用 `get_overview` + 分页。
+- 不要未确认就 `delete_task` / `manage_role` delete。
+- 若结果异常少，考虑用户限制了角色 ACL。
 
-### "帮我看看最近在忙什么"
+## 备注
 
-```
-1. get_overview → 今日流记录数 + 任务统计
-2. list_stream(days=7) → 最近7天的详细记录
-```
-
-## 返回值说明
-
-### get_overview 返回结构
-
-```json
-{
-  "date": "2026-03-24",
-  "counts": {"inbox": 3, "active": 5, "today": 1, "completed": 12},
-  "urgent": [
-    {"id": "task-xxx", "title": "...", "ddl": "2026-03-26T17:00:00Z", "ddl_type": "hard", "role_name": "研究生"}
-  ],
-  "roles": [
-    {"id": "role-grad", "name": "研究生", "color": "#4A90D9", "active_count": 3}
-  ],
-  "schedule": [{"name": "上午", "start": "09:00", "end": "12:00"}],
-  "stream_today": 4
-}
-```
-
-### list_tasks 返回结构
-
-任务列表不含 body（正文），已内联 `role_name`：
-
-```json
-{
-  "tasks": [
-    {"id": "task-xxx", "title": "...", "status": "active", "ddl": "2026-03-26", "ddl_type": "hard", "role": "role-grad", "role_name": "研究生"}
-  ],
-  "count": 1
-}
-```
-
-需要正文时调 `get_task(id=...)` 获取完整信息。
-
-## 注意事项
-
-- 所有返回值为 **compact JSON**（无缩进），直接解析即可
-- `list_tasks` 不含 body 字段，如需正文须调 `get_task`
-- `update_task` 的 `note` 参数会写入任务的 Submissions 或 Postponements 记录段
-- 创建子任务时用 `create_task(parent="父任务ID")`
-- 任务状态流转: `inbox` → `active` → `today` → `completed` / `archived` / `cancelled`
-- `search` 默认搜索全部，传 `scope="tasks"` 或 `scope="stream"` 可缩小范围
+- 返回多为单行 JSON 字符串。
+- 子任务：`create_task(parent=...)`；子任务列表在 `get_task` 的 `subtasks`。

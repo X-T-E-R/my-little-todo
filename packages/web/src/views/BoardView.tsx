@@ -1,5 +1,11 @@
 import type { Task } from '@my-little-todo/core';
-import { daysUntil, displayTaskTitle, isOverdue, taskRoleIds, withTaskRoles } from '@my-little-todo/core';
+import {
+  daysUntil,
+  displayTaskTitle,
+  isOverdue,
+  taskRoleIds,
+  withTaskRoles,
+} from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertCircle,
@@ -12,6 +18,7 @@ import {
   List,
   ListPlus,
   Maximize2,
+  Minimize2,
   MoreHorizontal,
   X,
 } from 'lucide-react';
@@ -23,6 +30,7 @@ import { KanbanBoard } from '../components/KanbanBoard';
 import { ParentTaskPicker } from '../components/ParentTaskPicker';
 import { RolePillMulti } from '../components/RolePickerPopover';
 import { TaskContextMenu } from '../components/TaskContextMenu';
+import { useModuleStore } from '../modules';
 import {
   filterByRole,
   formatDdlLabel,
@@ -31,8 +39,8 @@ import {
   getTasksWithoutDdl,
   useNowOverrideStore,
   useRoleStore,
-  useScheduleStore,
   useTaskStore,
+  useTimeAwarenessStore,
 } from '../stores';
 
 const CONFETTI_COLORS = ['#6b8cce', '#5eb376', '#e8a05c', '#d96c6c', '#9b7ed8', '#f0c040'];
@@ -377,6 +385,16 @@ interface TaskGroup {
   color: string;
 }
 
+type ContextMenuTriggerEvent = Pick<React.MouseEvent, 'preventDefault' | 'clientX' | 'clientY'>;
+
+function createContextMenuTriggerEvent(rect: DOMRect): ContextMenuTriggerEvent {
+  return {
+    preventDefault() {},
+    clientX: rect.right,
+    clientY: rect.bottom,
+  };
+}
+
 function groupByTimeHorizon(tasks: Task[], now: Date): TaskGroup[] {
   const overdue: Task[] = [];
   const today: Task[] = [];
@@ -493,7 +511,7 @@ function TaskCard({
   onComplete: (task: Task) => void;
   onPostpone: (task: Task) => void;
   onClick: (task: Task) => void;
-  onContextMenu: (e: React.MouseEvent, task: Task) => void;
+  onContextMenu: (e: ContextMenuTriggerEvent, task: Task) => void;
 }) {
   const { t } = useTranslation('board');
   const days = task.ddl ? daysUntil(task.ddl, now) : null;
@@ -512,6 +530,7 @@ function TaskCard({
     (s) => s.ddl && s.status !== 'completed' && daysUntil(s.ddl, now) <= 3,
   );
   const overdueSubtasks = urgentSubtasks.filter((s) => s.ddl && isOverdue(s.ddl, now));
+  const firstUrgentSubtask = urgentSubtasks[0];
 
   return (
     <motion.div
@@ -578,10 +597,7 @@ function TaskCard({
           onClick={(e) => {
             e.stopPropagation();
             const rect = e.currentTarget.getBoundingClientRect();
-            onContextMenu(
-              { preventDefault: () => {}, clientX: rect.right, clientY: rect.bottom } as any,
-              task,
-            );
+            onContextMenu(createContextMenuTriggerEvent(rect), task);
           }}
           className="rounded-md p-1.5 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
           style={{ color: 'var(--color-text-tertiary)' }}
@@ -634,10 +650,10 @@ function TaskCard({
                 {urgentSubtasks.length === 1
                   ? overdueSubtasks.length > 0
                     ? t('Subtask "{{title}}" is overdue', {
-                        title: displayTaskTitle(urgentSubtasks[0]!).slice(0, 15),
+                        title: displayTaskTitle(firstUrgentSubtask ?? task).slice(0, 15),
                       })
                     : t('Subtask "{{title}}" is due soon', {
-                        title: displayTaskTitle(urgentSubtasks[0]!).slice(0, 15),
+                        title: displayTaskTitle(firstUrgentSubtask ?? task).slice(0, 15),
                       })
                   : overdueSubtasks.length > 0
                     ? t('{{count}} subtasks ({{overdueCount}} overdue)', {
@@ -704,9 +720,11 @@ export function BoardView() {
     addSubtask,
     updateStatus,
     reparentTask,
+    error: taskError,
   } = useTaskStore();
-  const scheduleBlocks = useScheduleStore((s) => s.blocks);
-  const loadSchedules = useScheduleStore((s) => s.load);
+  const scheduleBlocks = useTimeAwarenessStore((s) => s.blocks);
+  const loadTimeAwareness = useTimeAwarenessStore((s) => s.load);
+  const timeAwarenessEnabled = useModuleStore((s) => s.isEnabled('time-awareness'));
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const filtered = useMemo(() => filterByRole(tasks, currentRoleId), [tasks, currentRoleId]);
   const [postponingTask, setPostponingTask] = useState<Task | null>(null);
@@ -715,7 +733,7 @@ export function BoardView() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [showNoDdl, setShowNoDdl] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('kanban');
   const [kanbanFullscreen, setKanbanFullscreen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -727,17 +745,8 @@ export function BoardView() {
 
   useEffect(() => {
     load();
-    loadSchedules();
-  }, [load, loadSchedules]);
-
-  useEffect(() => {
-    if (!kanbanFullscreen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setKanbanFullscreen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [kanbanFullscreen]);
+    loadTimeAwareness();
+  }, [load, loadTimeAwareness]);
 
   const ddlTasks = getTasksWithDdl(filtered);
   const noDdlTasks = getTasksWithoutDdl(filtered);
@@ -745,6 +754,23 @@ export function BoardView() {
   const now = new Date();
   const groups = groupByTimeHorizon(ddlTasks, now);
   const totalActive = ddlTasks.length + noDdlTasks.length;
+
+  useEffect(() => {
+    if (viewMode !== 'kanban' && kanbanFullscreen) {
+      setKanbanFullscreen(false);
+    }
+  }, [kanbanFullscreen, viewMode]);
+
+  useEffect(() => {
+    if (!kanbanFullscreen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setKanbanFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [kanbanFullscreen]);
 
   const handlePostpone = async (reason: string, newDate: Date) => {
     if (!postponingTask) return;
@@ -763,7 +789,7 @@ export function BoardView() {
     selectTask(task.id);
   };
 
-  const handleContextMenu = (e: React.MouseEvent, task: Task) => {
+  const handleContextMenu = (e: ContextMenuTriggerEvent, task: Task) => {
     e.preventDefault();
     setContextMenu({ x: e.clientX, y: e.clientY, task });
   };
@@ -788,13 +814,31 @@ export function BoardView() {
     );
   }
 
+  if (taskError && tasks.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <span className="text-sm" style={{ color: 'var(--color-danger)' }}>
+          {t('Failed to load tasks')}
+        </span>
+        <button
+          type="button"
+          onClick={() => load()}
+          className="rounded-lg px-4 py-1.5 text-xs font-medium"
+          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+        >
+          {t('Retry')}
+        </button>
+      </div>
+    );
+  }
+
   const onTimeCount = completed.filter((t) =>
     t.submissions.length > 0 ? t.submissions[0]?.onTime : true,
   ).length;
   const onTimeRate = completed.length > 0 ? Math.round((onTimeCount / completed.length) * 100) : 0;
 
   return (
-    <DndReparentProvider>
+    <DndReparentProvider enabled={viewMode === 'list'}>
       <div
         className="h-full overflow-y-auto px-4 py-6 scroll-smooth"
         style={{ background: 'var(--color-bg)' }}
@@ -879,69 +923,36 @@ export function BoardView() {
                   <LayoutGrid size={14} />
                 </button>
               </div>
+              {viewMode === 'kanban' && (
+                <button
+                  type="button"
+                  onClick={() => setKanbanFullscreen(true)}
+                  className="ml-2 flex items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--color-bg)]"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)',
+                    background: 'var(--color-surface)',
+                  }}
+                >
+                  <Maximize2 size={13} />
+                  总览
+                </button>
+              )}
             </div>
           </motion.div>
 
           {/* Kanban view */}
-          {viewMode === 'kanban' && !kanbanFullscreen && (
+          {viewMode === 'kanban' && (
             <section>
-              <div className="flex justify-end mb-2">
-                <button
-                  type="button"
-                  onClick={() => setKanbanFullscreen(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--color-bg)]"
-                  style={{
-                    color: 'var(--color-text-secondary)',
-                    border: '1px solid var(--color-border)',
-                  }}
-                >
-                  <Maximize2 size={14} />
-                  {t('Fullscreen board')}
-                </button>
-              </div>
-              <KanbanBoard tasks={filtered} />
+              <KanbanBoard tasks={filtered} presentation="embedded" />
             </section>
-          )}
-
-          {viewMode === 'kanban' && kanbanFullscreen && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.985 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 z-[200] flex flex-col"
-              style={{
-                background: 'var(--color-bg)',
-                paddingTop: 'env(safe-area-inset-top)',
-              }}
-            >
-              <div
-                className="flex shrink-0 items-center justify-between gap-3 px-4 py-2.5 border-b"
-                style={{ borderColor: 'var(--color-border)' }}
-              >
-                <p className="text-sm font-semibold truncate" style={{ color: 'var(--color-text)' }}>
-                  {t('Kanban view')}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setKanbanFullscreen(false)}
-                  className="rounded-lg p-2 transition-colors hover:bg-[var(--color-surface)] shrink-0"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                  aria-label={t('Exit fullscreen')}
-                >
-                  <X size={20} />
-                </button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
-                <KanbanBoard tasks={filtered} />
-              </div>
-            </motion.div>
           )}
 
           {/* Calendar view */}
           {viewMode === 'calendar' && (
             <CalendarView
               tasks={filtered}
-              schedules={scheduleBlocks}
+              schedules={timeAwarenessEnabled ? scheduleBlocks : []}
               onSelectTask={(id) => selectTask(id)}
             />
           )}
@@ -1166,14 +1177,7 @@ export function BoardView() {
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       const rect = e.currentTarget.getBoundingClientRect();
-                                      handleContextMenu(
-                                        {
-                                          preventDefault: () => {},
-                                          clientX: rect.right,
-                                          clientY: rect.bottom,
-                                        } as any,
-                                        task,
-                                      );
+                                      handleContextMenu(createContextMenuTriggerEvent(rect), task);
                                     }}
                                     className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
                                     style={{ color: 'var(--color-text-tertiary)' }}
@@ -1311,14 +1315,7 @@ export function BoardView() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 const rect = e.currentTarget.getBoundingClientRect();
-                                handleContextMenu(
-                                  {
-                                    preventDefault: () => {},
-                                    clientX: rect.right,
-                                    clientY: rect.bottom,
-                                  } as any,
-                                  item,
-                                );
+                                handleContextMenu(createContextMenuTriggerEvent(rect), item);
                               }}
                               className="rounded-md p-1 transition-colors hover:bg-[var(--color-bg)] sm:opacity-0 sm:group-hover:opacity-100"
                               style={{ color: 'var(--color-text-tertiary)' }}
@@ -1363,6 +1360,59 @@ export function BoardView() {
         </AnimatePresence>
 
         {showConfetti && <ConfettiOverlay onDone={() => setShowConfetti(false)} />}
+
+        <AnimatePresence>
+          {kanbanFullscreen && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50"
+              style={{
+                background: 'color-mix(in srgb, var(--color-bg) 94%, transparent)',
+                backdropFilter: 'blur(18px)',
+                WebkitBackdropFilter: 'blur(18px)',
+              }}
+            >
+              <div className="flex h-full flex-col px-4 pb-4 pt-[calc(12px+var(--safe-area-top))]">
+                <div
+                  className="mx-auto mb-3 flex w-full max-w-[1400px] items-center justify-between rounded-[var(--radius-panel)] border px-4 py-3"
+                  style={{
+                    background: 'color-mix(in srgb, var(--color-surface) 94%, var(--color-bg))',
+                    borderColor: 'var(--color-border)',
+                  }}
+                >
+                  <div className="min-w-0">
+                    <p
+                      className="text-[10px] font-semibold uppercase tracking-[0.14em]"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      看板总览
+                    </p>
+                    <h2 className="mt-1 text-base font-semibold" style={{ color: 'var(--color-text)' }}>
+                      全屏看板
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setKanbanFullscreen(false)}
+                    className="flex items-center gap-1 rounded-xl border px-3 py-1.5 text-[11px] font-medium transition-colors hover:bg-[var(--color-bg)]"
+                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  >
+                    <Minimize2 size={13} />
+                    关闭
+                  </button>
+                </div>
+
+                <div className="mx-auto min-h-0 w-full max-w-[1400px] flex-1 overflow-hidden">
+                  <div className="h-full overflow-y-auto">
+                    <KanbanBoard tasks={filtered} presentation="fullscreen" />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {contextMenu && (
           <TaskContextMenu

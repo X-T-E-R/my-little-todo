@@ -1,0 +1,186 @@
+diff --git a/lib/cjs/feature/block-edit/index.js b/lib/cjs/feature/block-edit/index.js
+index 8c5bb0c76c33b6228fb6c1748f62ecb081220852..2171b74e64d751c8b54bc49ce0c603fb576a4117 100644
+--- a/lib/cjs/feature/block-edit/index.js
++++ b/lib/cjs/feature/block-edit/index.js
+@@ -988,6 +988,9 @@ class MenuView {
+     __privateSet$1(this, _slashProvider, new slash.SlashProvider({
+       content: __privateGet$1(this, _content$1),
+       debounce: 20,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       shouldShow(view2) {
+         if (isInCodeBlock(view2.state.selection) || isInList(view2.state.selection))
+           return false;
+@@ -1139,6 +1142,9 @@ class BlockHandleView {
+       ctx,
+       content,
+       getOffset: () => 16,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       getPlacement: ({ active, blockDom }) => {
+         if (active.node.type.name === "heading") return "left";
+         let totalDescendant = 0;
+diff --git a/lib/cjs/feature/toolbar/index.js b/lib/cjs/feature/toolbar/index.js
+index c5069d95686d9c90e24a69366fdbe46402d91cea..f5958bf3aa911f94020432634c0da010702b279b 100644
+--- a/lib/cjs/feature/toolbar/index.js
++++ b/lib/cjs/feature/toolbar/index.js
+@@ -471,6 +471,9 @@ class ToolbarView {
+       content: __privateGet(this, _content),
+       debounce: 20,
+       offset: 10,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       shouldShow(view2) {
+         const { doc, selection } = view2.state;
+         const { empty, from, to } = selection;
+diff --git a/lib/cjs/index.js b/lib/cjs/index.js
+index 9726836fbea853e8be52f11df9b14b5589d457b3..c954ab1b78637f8f378ed2aa23dc782ec4d6f0b0 100644
+--- a/lib/cjs/index.js
++++ b/lib/cjs/index.js
+@@ -1371,6 +1371,9 @@ class MenuView {
+     __privateSet$5(this, _slashProvider, new slash.SlashProvider({
+       content: __privateGet$5(this, _content$3),
+       debounce: 20,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       shouldShow(view2) {
+         if (isInCodeBlock(view2.state.selection) || isInList(view2.state.selection))
+           return false;
+@@ -1522,6 +1525,9 @@ class BlockHandleView {
+       ctx,
+       content,
+       getOffset: () => 16,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       getPlacement: ({ active, blockDom }) => {
+         if (active.node.type.name === "heading") return "left";
+         let totalDescendant = 0;
+@@ -2331,6 +2337,9 @@ class ToolbarView {
+       content: __privateGet$2(this, _content),
+       debounce: 20,
+       offset: 10,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       shouldShow(view2) {
+         const { doc, selection } = view2.state;
+         const { empty, from, to } = selection;
+diff --git a/lib/esm/feature/block-edit/index.js b/lib/esm/feature/block-edit/index.js
+index 5425085b9862d97aa3a5451d13bb9e27bf203cf7..8f43d70f18dc9200fe7075386dbb453431ef8f6c 100644
+--- a/lib/esm/feature/block-edit/index.js
++++ b/lib/esm/feature/block-edit/index.js
+@@ -986,6 +986,9 @@ class MenuView {
+     __privateSet$1(this, _slashProvider, new SlashProvider({
+       content: __privateGet$1(this, _content$1),
+       debounce: 20,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       shouldShow(view2) {
+         if (isInCodeBlock(view2.state.selection) || isInList(view2.state.selection))
+           return false;
+@@ -1137,6 +1140,9 @@ class BlockHandleView {
+       ctx,
+       content,
+       getOffset: () => 16,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       getPlacement: ({ active, blockDom }) => {
+         if (active.node.type.name === "heading") return "left";
+         let totalDescendant = 0;
+diff --git a/lib/esm/feature/toolbar/index.js b/lib/esm/feature/toolbar/index.js
+index fb4d168a050811dc53bd55bcad0ce05c603233b4..bb2159d3a02b35c3045671a6a5c8166dad4b480d 100644
+--- a/lib/esm/feature/toolbar/index.js
++++ b/lib/esm/feature/toolbar/index.js
+@@ -469,6 +469,9 @@ class ToolbarView {
+       content: __privateGet(this, _content),
+       debounce: 20,
+       offset: 10,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       shouldShow(view2) {
+         const { doc, selection } = view2.state;
+         const { empty, from, to } = selection;
+diff --git a/lib/esm/index.js b/lib/esm/index.js
+index ea68de6cfb124faa35d9f047d82788a1043d255c..228be4a77405f32a35e4a402f762465821dc7c1c 100644
+--- a/lib/esm/index.js
++++ b/lib/esm/index.js
+@@ -1369,6 +1369,9 @@ class MenuView {
+     __privateSet$5(this, _slashProvider, new SlashProvider({
+       content: __privateGet$5(this, _content$3),
+       debounce: 20,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       shouldShow(view2) {
+         if (isInCodeBlock(view2.state.selection) || isInList(view2.state.selection))
+           return false;
+@@ -1520,6 +1523,9 @@ class BlockHandleView {
+       ctx,
+       content,
+       getOffset: () => 16,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       getPlacement: ({ active, blockDom }) => {
+         if (active.node.type.name === "heading") return "left";
+         let totalDescendant = 0;
+@@ -2329,6 +2335,9 @@ class ToolbarView {
+       content: __privateGet$2(this, _content),
+       debounce: 20,
+       offset: 10,
++      floatingUIOptions: {
++        strategy: "fixed"
++      },
+       shouldShow(view2) {
+         const { doc, selection } = view2.state;
+         const { empty, from, to } = selection;
+diff --git a/src/feature/block-edit/handle/index.ts b/src/feature/block-edit/handle/index.ts
+index 28a80af28f1ff15e122f3cf59f3d399867fbfd81..26ceda508fec4a9ae01ab90e1368a28a67a7a478 100644
+--- a/src/feature/block-edit/handle/index.ts
++++ b/src/feature/block-edit/handle/index.ts
+@@ -42,6 +42,9 @@ class BlockHandleView implements PluginView {
+       ctx,
+       content,
+       getOffset: () => 16,
++      floatingUIOptions: {
++        strategy: 'fixed',
++      },
+       getPlacement: ({ active, blockDom }) => {
+         if (active.node.type.name === 'heading') return 'left'
+ 
+diff --git a/src/feature/block-edit/menu/index.ts b/src/feature/block-edit/menu/index.ts
+index 7b133fe81d4dfea0e31667c9f7e50105b20c30e5..65e2d2eeb724aa8d7338c3814ee1371e81f9553b 100644
+--- a/src/feature/block-edit/menu/index.ts
++++ b/src/feature/block-edit/menu/index.ts
+@@ -69,6 +69,9 @@ class MenuView implements PluginView {
+     this.#slashProvider = new SlashProvider({
+       content: this.#content,
+       debounce: 20,
++      floatingUIOptions: {
++        strategy: 'fixed',
++      },
+       shouldShow(this: SlashProvider, view: EditorView) {
+         if (
+           isInCodeBlock(view.state.selection) ||
+diff --git a/src/feature/toolbar/index.ts b/src/feature/toolbar/index.ts
+index feb42e813cbb6ce2c0d79b6dedc4d473f818ebb6..da2fffe61c364d3d2957288f8d78ebf7739be09b 100644
+--- a/src/feature/toolbar/index.ts
++++ b/src/feature/toolbar/index.ts
+@@ -58,6 +58,9 @@ class ToolbarView implements PluginView {
+       content: this.#content,
+       debounce: 20,
+       offset: 10,
++      floatingUIOptions: {
++        strategy: 'fixed',
++      },
+       shouldShow(view: EditorView) {
+         const { doc, selection } = view.state
+         const { empty, from, to } = selection

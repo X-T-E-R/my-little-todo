@@ -45,6 +45,8 @@
   "kanban_group_status": "状态",
   "kanban_group_priority": "优先级",
   "kanban_group_role": "角色",
+  "kanban_group_project": "项目",
+  "kanban_group_project_none": "无项目",
   "kanban_pri_low": "低优先级",
   "kanban_pri_mid": "中",
   "kanban_pri_high": "高",
@@ -67,5 +69,7 @@
   "Exit fullscreen": "退出全屏",
   "Collapse column": "折叠列",
   "Expand column": "展开列",
-  "wip_badge": "进行中 {{current}}/{{limit}}"
+  "wip_badge": "进行中 {{current}}/{{limit}}",
+  "Failed to load tasks": "任务加载失败",
+  "Retry": "重试"
 }

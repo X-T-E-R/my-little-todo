@@ -2,9 +2,18 @@
   "$schema": "https://raw.githubusercontent.com/nicegui-dev/nicegui/main/nicegui/resources/capability.schema.json",
   "identifier": "default",
   "description": "Default capabilities for My Little Todo",
-  "windows": ["main"],
+  "windows": ["main", "mlt-widget", "mlt-context-bar", "mlt-annotator"],
   "permissions": [
     "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-set-focus",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-is-visible",
+    "core:window:allow-close",
     "fs:default",
     "fs:allow-appdata-read-recursive",
     "fs:allow-appdata-write-recursive",
@@ -14,6 +23,10 @@
     "sql:allow-execute",
     "sql:allow-select",
     "shell:allow-open",
-    "updater:default"
+    "updater:default",
+    "global-shortcut:allow-is-registered",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-unregister-all"
   ]
 }

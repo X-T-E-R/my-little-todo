@@ -42,5 +42,9 @@
   "Add class schedule, check-in times and other fixed arrangements. The recommendation engine will avoid these time slots.": "添加课表、打卡时间等固定安排。推荐引擎会避开这些时段。",
   "Add": "添加",
   "No fixed arrangements yet": "还没有固定安排",
-  "Click Add above to create your class or schedule": "点击上方\"添加\"来创建你的课表或时间表"
+  "Click Add above to create your class or schedule": "点击上方\"添加\"来创建你的课表或时间表",
+  "time_awareness_schedule_blurb": "可选：课表、会议等固定安排。推荐会参考这些时段；若绑定角色，该时段内同角色任务会更容易被推荐。",
+  "time_awareness_schedule_hint": "只有在你觉得有用时再维护；系统也会从「此刻」的反馈里学习你的节奏。",
+  "Linked role (optional)": "关联角色（可选）",
+  "No role": "不关联"
 }

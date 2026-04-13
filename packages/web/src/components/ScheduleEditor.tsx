@@ -1,10 +1,11 @@
 import { generateId } from '@my-little-todo/core';
+import type { ScheduleBlock } from '@my-little-todo/core';
 import { motion } from 'framer-motion';
 import { Clock, MapPin, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ScheduleBlock } from '../stores/scheduleStore';
-import { useScheduleStore } from '../stores/scheduleStore';
+import { useRoleStore } from '../stores/roleStore';
+import { useTimeAwarenessStore } from '../stores/timeAwarenessStore';
 
 const WEEKDAY_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const PRESET_COLORS = [
@@ -81,7 +82,7 @@ function BlockCard({
                 className="rounded px-1.5 py-0.5 text-[9px] font-bold"
                 style={{ background: `${block.color}20`, color: block.color }}
               >
-                {t(WEEKDAY_KEYS[d]!)}
+                {t(WEEKDAY_KEYS[d] ?? WEEKDAY_KEYS[0])}
               </span>
             ))}
           </div>
@@ -119,12 +120,14 @@ function BlockEditor({
   onCancel: () => void;
 }) {
   const { t } = useTranslation('calendar');
+  const roles = useRoleStore((s) => s.roles);
   const [name, setName] = useState(block?.name ?? '');
   const [startTime, setStartTime] = useState(block?.startTime ?? '08:00');
   const [endTime, setEndTime] = useState(block?.endTime ?? '09:40');
   const [days, setDays] = useState<number[]>(block?.daysOfWeek ?? [1, 2, 3, 4, 5]);
   const [color, setColor] = useState(block?.color ?? PRESET_COLORS[0] ?? '#6b8cce');
   const [location, setLocation] = useState(block?.location ?? '');
+  const [roleId, setRoleId] = useState<string | undefined>(block?.roleId);
 
   const toggleDay = (d: number) => {
     setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort()));
@@ -142,7 +145,7 @@ function BlockEditor({
       daysOfWeek: days,
       exceptions: block?.exceptions ?? [],
       location: location.trim() || undefined,
-      roleId: block?.roleId,
+      roleId: roleId || undefined,
     });
   };
 
@@ -165,12 +168,14 @@ function BlockEditor({
       <div className="flex gap-2">
         <div className="flex-1">
           <label
+            htmlFor="schedule-start-time"
             className="text-[10px] font-medium block mb-1"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
             {t('Start')}
           </label>
           <input
+            id="schedule-start-time"
             type="time"
             value={startTime}
             onChange={(e) => setStartTime(e.target.value)}
@@ -184,12 +189,14 @@ function BlockEditor({
         </div>
         <div className="flex-1">
           <label
+            htmlFor="schedule-end-time"
             className="text-[10px] font-medium block mb-1"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
             {t('End')}
           </label>
           <input
+            id="schedule-end-time"
             type="time"
             value={endTime}
             onChange={(e) => setEndTime(e.target.value)}
@@ -205,12 +212,42 @@ function BlockEditor({
 
       <div>
         <label
+          htmlFor="schedule-role"
+          className="text-[10px] font-medium block mb-1"
+          style={{ color: 'var(--color-text-tertiary)' }}
+        >
+          {t('Linked role (optional)')}
+        </label>
+        <select
+          id="schedule-role"
+          value={roleId ?? ''}
+          onChange={(e) => setRoleId(e.target.value || undefined)}
+          className="w-full rounded-lg px-2 py-1.5 text-[12px] outline-none"
+          style={{
+            background: 'var(--color-bg)',
+            border: '1px solid var(--color-border)',
+            color: 'var(--color-text)',
+          }}
+        >
+          <option value="">{t('No role')}</option>
+          {roles.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label
+          htmlFor="schedule-location"
           className="text-[10px] font-medium block mb-1"
           style={{ color: 'var(--color-text-tertiary)' }}
         >
           {t('Location (optional)')}
         </label>
         <input
+          id="schedule-location"
           value={location}
           onChange={(e) => setLocation(e.target.value)}
           placeholder={t('Classroom/Office...')}
@@ -224,12 +261,12 @@ function BlockEditor({
       </div>
 
       <div>
-        <label
+        <p
           className="text-[10px] font-medium block mb-1.5"
           style={{ color: 'var(--color-text-tertiary)' }}
         >
           {t('Repeat days')}
-        </label>
+        </p>
         <div className="flex gap-1">
           {WEEKDAY_KEYS.map((key, i) => (
             <button
@@ -250,12 +287,12 @@ function BlockEditor({
       </div>
 
       <div>
-        <label
+        <p
           className="text-[10px] font-medium block mb-1.5"
           style={{ color: 'var(--color-text-tertiary)' }}
         >
           {t('Color')}
-        </label>
+        </p>
         <div className="flex gap-1.5">
           {PRESET_COLORS.map((c) => (
             <button
@@ -299,7 +336,7 @@ function BlockEditor({
 
 export function ScheduleEditor() {
   const { t } = useTranslation('calendar');
-  const { blocks, addBlock, updateBlock, removeBlock } = useScheduleStore();
+  const { blocks, addBlock, updateBlock, removeBlock } = useTimeAwarenessStore();
   const [showAdd, setShowAdd] = useState(false);
 
   return (
@@ -310,9 +347,7 @@ export function ScheduleEditor() {
             {t('Schedule')}
           </p>
           <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
-            {t(
-              'Add class schedule, check-in times and other fixed arrangements. The recommendation engine will avoid these time slots.',
-            )}
+            {t('time_awareness_schedule_blurb')}
           </p>
         </div>
         {!showAdd && (

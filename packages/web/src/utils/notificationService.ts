@@ -11,10 +11,20 @@ function isTauriEnv(): boolean {
 // Use variable to prevent Vite from statically analyzing the Tauri import
 const TAURI_NOTIFICATION_PKG = '@tauri-apps/' + 'plugin-notification';
 
-async function loadTauriNotification(): Promise<any | null> {
+type TauriNotificationPermission = 'granted' | 'denied' | 'default' | 'prompt';
+
+type TauriNotificationModule = {
+  isPermissionGranted(): Promise<boolean>;
+  requestPermission(): Promise<TauriNotificationPermission>;
+  sendNotification(options: { title: string; body: string }): Promise<void> | void;
+};
+
+async function loadTauriNotification(): Promise<TauriNotificationModule | null> {
   if (!isTauriEnv()) return null;
   try {
-    return await import(/* @vite-ignore */ TAURI_NOTIFICATION_PKG);
+    return (await import(
+      /* @vite-ignore */ TAURI_NOTIFICATION_PKG
+    )) as unknown as TauriNotificationModule;
   } catch {
     return null;
   }

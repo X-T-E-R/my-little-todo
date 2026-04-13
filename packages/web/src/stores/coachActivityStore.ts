@@ -57,16 +57,24 @@ export function countViewSwitchesInWindow(events: CoachActivityEvent[], windowMs
   return events.filter((e) => e.type === 'view_switch' && e.timestamp.getTime() >= cutoff).length;
 }
 
+let _coachActivityLoadPromise: Promise<void> | null = null;
+
 export const useCoachActivityStore = create<State>((set, get) => ({
   events: [],
 
   load: async () => {
-    try {
-      const raw = await getSetting(KEY);
-      set({ events: raw ? deserialize(raw) : [] });
-    } catch {
-      set({ events: [] });
-    }
+    if (_coachActivityLoadPromise) return _coachActivityLoadPromise;
+    _coachActivityLoadPromise = (async () => {
+      try {
+        const raw = await getSetting(KEY);
+        set({ events: raw ? deserialize(raw) : [] });
+      } catch {
+        set({ events: [] });
+      } finally {
+        _coachActivityLoadPromise = null;
+      }
+    })();
+    return _coachActivityLoadPromise;
   },
 
   record: (partial) => {

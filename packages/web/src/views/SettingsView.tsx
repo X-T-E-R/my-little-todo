@@ -1,11 +1,3 @@
-import {
-  type StreamEntryDbRow,
-  type TaskDbRow,
-  streamEntryFromDbRow,
-  streamEntryToDbRow,
-  taskFromDbRow,
-  taskToDbRow,
-} from '@my-little-todo/core';
 import { motion } from 'framer-motion';
 import {
   Activity,
@@ -31,13 +23,16 @@ import {
   LayoutGrid,
   Loader2,
   LogOut,
+  Monitor,
   Moon,
+  PanelLeft,
   RefreshCw,
   RotateCcw,
   Search,
   Server,
   Shield,
   Sparkles,
+  StickyNote,
   Upload,
   User,
   Wind,
@@ -47,25 +42,55 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
-import { ScheduleEditor } from '../components/ScheduleEditor';
+import { ThirdPartyPluginsPanel } from '../components/ThirdPartyPluginsPanel';
 import i18n from '../locales';
-import { BUILT_IN_MODULES, useModuleStore } from '../modules';
+import {
+  BUILT_IN_MODULES,
+  type BuiltinModuleCategory,
+  type StabilityLevel,
+  useModuleStore,
+} from '../modules';
+import { installedPluginsToAppModules } from '../plugins';
+import { usePluginStore } from '../plugins/pluginStore';
+import { ensureBuiltinSettingsRegistered } from '../settings/registerBuiltinSettings';
+import {
+  getSettingsEntries,
+  getSettingsEntry,
+  subscribeSettingsRegistry,
+} from '../settings/registry';
 import { getDataStore } from '../storage/dataStore';
 import { deleteSetting, getSetting, getSettingsApiBase, putSetting } from '../storage/settingsApi';
 import {
   useRoleStore,
-  useScheduleStore,
   useShortcutStore,
   useStreamStore,
   useTaskStore,
+  useTimeAwarenessStore,
 } from '../stores';
 import { getAuthToken, useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
-import { getSyncEngine, initSyncFromConfig } from '../sync';
+import { getSyncEngine } from '../sync';
 import type { ConflictStrategy } from '../sync';
+import { initSyncFromConfig } from '../sync/syncManager';
+import {
+  type BackupPayload,
+  buildBackupPayload,
+  importPayloadToStore,
+  isLegacyBackupPayload,
+  parseImportPayload,
+} from '../utils/backupPayload';
 import { checkGitHubUpdate } from '../utils/githubUpdater';
+import { mapApiError } from '../utils/i18nErrorMap';
 import {
   canEditBackendUrl,
   canExportToFolder,
@@ -82,24 +107,28 @@ type SettingsTab =
   | 'general'
   | 'account'
   | 'ai'
-  | 'schedule'
   | 'shortcuts'
   | 'sync'
   | 'data'
   | 'plugins'
-  | 'about';
+  | 'about'
+  | `module:${string}`
+  | `plugin:${string}`;
+
+type BaseSettingsTab = Exclude<SettingsTab, `module:${string}` | `plugin:${string}`>;
 
 type NavTab = {
   id: SettingsTab;
   label: string;
   icon: LucideIcon;
+  /** If true, `label` is already human-readable (skip i18n). */
+  rawLabel?: boolean;
 };
 
 const PRIMARY_TABS: NavTab[] = [
   { id: 'general', label: 'General', icon: Moon },
   { id: 'account', label: 'Account', icon: User },
   { id: 'ai', label: 'AI', icon: Sparkles },
-  { id: 'schedule', label: 'Schedule', icon: CalendarClock },
   { id: 'shortcuts', label: 'Shortcuts', icon: Command },
   { id: 'sync', label: 'Sync', icon: Cloud },
   { id: 'data', label: 'Data', icon: FolderOpen },
@@ -108,14 +137,112 @@ const PRIMARY_TABS: NavTab[] = [
 
 const ABOUT_TAB: NavTab = { id: 'about', label: 'About', icon: Info };
 
+function isCrossOriginApiBase(baseUrl: string): boolean {
+  try {
+    return new URL(baseUrl, window.location.origin).origin !== window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function SettingsEntryHost({
+  source,
+  entryId,
+}: {
+  source: 'builtin' | 'plugin';
+  entryId: string;
+}) {
+  const [, setBump] = useState(0);
+  useEffect(() => {
+    return subscribeSettingsRegistry(() => setBump((n) => n + 1));
+  }, []);
+  const Comp = getSettingsEntry(source, entryId)?.component;
+  if (!Comp) {
+    return <p className="text-xs text-[var(--color-text-tertiary)]">{entryId}</p>;
+  }
+  return <Comp />;
+}
+
+const SettingsNavContext = createContext<{
+  setActiveTab: (tab: SettingsTab) => void;
+} | null>(null);
+
+function useSettingsNav() {
+  return useContext(SettingsNavContext);
+}
+
 const PLUGIN_ICONS: Record<string, LucideIcon> = {
+  'ai-agent': Bot,
   kanban: LayoutGrid,
   'time-capsule': Sparkles,
   'ai-coach': Bot,
   'energy-indicator': Zap,
   'brain-dump': Coffee,
   'advanced-filter': Filter,
+  'mcp-integration': Server,
+  'desktop-widget': Monitor,
+  'window-context': StickyNote,
+  'time-awareness': CalendarClock,
+  'stream-context-panel': PanelLeft,
+  'think-session': Coffee,
 };
+
+const MODULE_CATEGORY_ORDER: BuiltinModuleCategory[] = [
+  'views-and-organization',
+  'thinking-and-ai',
+  'capture-and-context',
+  'rhythm-and-feedback',
+  'integrations',
+];
+
+function moduleCategoryLabel(category: BuiltinModuleCategory, zh: boolean): string {
+  if (zh) {
+    switch (category) {
+      case 'views-and-organization':
+        return '视图与组织';
+      case 'thinking-and-ai':
+        return '思考与 AI';
+      case 'capture-and-context':
+        return '捕获与上下文';
+      case 'rhythm-and-feedback':
+        return '节奏与反馈';
+      case 'integrations':
+        return '集成';
+    }
+  }
+
+  switch (category) {
+    case 'views-and-organization':
+      return 'Views & Organization';
+    case 'thinking-and-ai':
+      return 'Thinking & AI';
+    case 'capture-and-context':
+      return 'Capture & Context';
+    case 'rhythm-and-feedback':
+      return 'Rhythm & Feedback';
+    case 'integrations':
+      return 'Integrations';
+  }
+}
+
+function StabilityBadge({ stability }: { stability: StabilityLevel }) {
+  if (stability === 'stable') return null;
+  const label = stability === 'experimental' ? 'Experimental' : 'Beta';
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+      style={{
+        background:
+          stability === 'experimental'
+            ? 'color-mix(in oklab, #f97316 18%, transparent)'
+            : 'color-mix(in oklab, #0284c7 18%, transparent)',
+        color: stability === 'experimental' ? '#c2410c' : '#0369a1',
+      }}
+    >
+      {label}
+    </span>
+  );
+}
 
 function ShortcutRow({
   label,
@@ -216,9 +343,9 @@ function GeneralTab() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       {/* Theme */}
-      <section>
+      <section className="settings-card">
         <div className="flex items-center gap-2 mb-3">
           <Moon size={16} className="text-[var(--color-accent)]" />
           <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Appearance')}</h3>
@@ -260,7 +387,7 @@ function GeneralTab() {
       <hr style={{ borderColor: 'var(--color-border)' }} />
 
       {/* Language */}
-      <section>
+      <section className="settings-card">
         <div className="flex items-center gap-2 mb-3">
           <Globe size={16} className="text-[var(--color-accent)]" />
           <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Language')}</h3>
@@ -674,30 +801,40 @@ function ToggleSwitch({
   );
 }
 
-function TimeCapsuleToggle() {
-  const [enabled, setEnabled] = useState(false);
-  useEffect(() => {
-    getSetting('time-capsule-enabled').then((v) => setEnabled(v === 'true'));
-  }, []);
-  return (
-    <ToggleSwitch
-      checked={enabled}
-      onChange={async (v) => {
-        setEnabled(v);
-        await putSetting('time-capsule-enabled', v ? 'true' : 'false');
-      }}
-    />
-  );
-}
-
 function PluginsTab() {
   const { t } = useTranslation('settings');
   const [subTab, setSubTab] = useState<'core' | 'third-party'>('core');
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<BuiltinModuleCategory, boolean>>({
+    'views-and-organization': false,
+    'thinking-and-ai': false,
+    'capture-and-context': false,
+    'rhythm-and-feedback': false,
+    integrations: false,
+  });
   const moduleHydrated = useModuleStore((s) => s.hydrated);
   const moduleEnabled = useModuleStore((s) => s.enabled);
   const hydrateModules = useModuleStore((s) => s.hydrate);
   const setModuleEnabled = useModuleStore((s) => s.setModuleEnabled);
-  const [expandedPlugin, setExpandedPlugin] = useState<string | null>(null);
+  const nav = useSettingsNav();
+  const zh = i18n.language.startsWith('zh');
+
+  const groupedModules = useMemo(() => {
+    const groups = new Map<BuiltinModuleCategory, (typeof BUILT_IN_MODULES)[number][]>();
+    for (const category of MODULE_CATEGORY_ORDER) {
+      groups.set(category, []);
+    }
+    for (const mod of BUILT_IN_MODULES) {
+      const category = mod.category ?? 'views-and-organization';
+      groups.get(category)?.push(mod);
+    }
+    return MODULE_CATEGORY_ORDER.map((category) => ({
+      category,
+      label: moduleCategoryLabel(category, zh),
+      modules: [...(groups.get(category) ?? [])].sort(
+        (a, b) => (a.categoryOrder ?? 999) - (b.categoryOrder ?? 999),
+      ),
+    })).filter((group) => group.modules.length > 0);
+  }, [zh]);
 
   useEffect(() => {
     void hydrateModules();
@@ -705,22 +842,29 @@ function PluginsTab() {
 
   return (
     <div className="flex flex-col gap-5">
-      <p className="text-xs text-[var(--color-text-tertiary)]">
-        {t('Modules intro')}
+      <p className="text-xs text-[var(--color-text-tertiary)] leading-relaxed">
+        {subTab === 'core' ? t('Modules intro') : t('Plugins thirdparty intro')}
       </p>
 
-      <div className="flex gap-1 rounded-xl bg-[var(--color-bg)] p-1 self-start">
-        {([
+      <div
+        className="flex gap-1 rounded-xl p-1 self-stretch sm:self-start"
+        style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
+        role="tablist"
+        aria-label={t('Plugins')}
+      >
+        {[
           { id: 'core' as const, label: t('Core Plugins') },
           { id: 'third-party' as const, label: t('Third-party Plugins') },
-        ]).map((tab) => (
+        ].map((tab) => (
           <button
             key={tab.id}
             type="button"
+            role="tab"
+            aria-selected={subTab === tab.id}
             onClick={() => setSubTab(tab.id)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`rounded-lg px-3 py-2 text-xs font-medium transition-colors min-w-0 flex-1 sm:flex-none sm:min-w-[8rem] ${
               subTab === tab.id
-                ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm'
+                ? 'bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm ring-1 ring-[var(--color-border)]'
                 : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
             }`}
           >
@@ -730,80 +874,118 @@ function PluginsTab() {
       </div>
 
       {subTab === 'core' && (
-        <div className="space-y-1">
-          {BUILT_IN_MODULES.map((mod) => {
-            const Icon = PLUGIN_ICONS[mod.id] ?? Info;
-            const enabled = moduleEnabled[mod.id] ?? mod.defaultEnabled;
-            const hasExtra = mod.id === 'time-capsule' || mod.id === 'kanban';
-            const isExpanded = expandedPlugin === mod.id;
+        <div className="space-y-3">
+          {groupedModules.map((group) => {
+            const collapsed = collapsedGroups[group.category];
             return (
-              <div
-                key={mod.id}
-                className="rounded-xl border border-[var(--color-border)] overflow-hidden"
-                style={{ background: 'var(--color-surface)' }}
+              <section
+                key={group.category}
+                className="overflow-hidden rounded-2xl border border-[var(--color-border)]"
+                style={{
+                  background: 'color-mix(in srgb, var(--color-surface) 96%, var(--color-bg))',
+                }}
               >
-                <div className="flex items-center gap-3 px-4 py-3">
-                  <Icon size={18} style={{ color: enabled ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-[var(--color-text)]">{t(mod.nameKey)}</p>
-                    <p className="text-[11px] text-[var(--color-text-tertiary)] truncate">{t(mod.descriptionKey)}</p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCollapsedGroups((prev) => ({
+                      ...prev,
+                      [group.category]: !prev[group.category],
+                    }))
+                  }
+                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[var(--color-text)]">{group.label}</p>
+                    <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
+                      {zh
+                        ? `${group.modules.length} 个内置插件`
+                        : `${group.modules.length} built-in modules`}
+                    </p>
                   </div>
-                  {hasExtra && (
-                    <button
-                      type="button"
-                      onClick={() => setExpandedPlugin(isExpanded ? null : mod.id)}
-                      className="shrink-0 rounded-lg p-1.5 transition-colors hover:bg-[var(--color-bg)]"
-                      style={{ color: 'var(--color-text-tertiary)' }}
-                    >
-                      <ChevronDown size={14} className="transition-transform" style={{ transform: isExpanded ? 'rotate(180deg)' : undefined }} />
-                    </button>
-                  )}
-                  <ToggleSwitch
-                    disabled={!moduleHydrated}
-                    checked={enabled}
-                    onChange={(v) => void setModuleEnabled(mod.id, v)}
+                  <ChevronDown
+                    size={16}
+                    className={`shrink-0 transition-transform ${collapsed ? '-rotate-90' : ''}`}
+                    style={{ color: 'var(--color-text-tertiary)' }}
                   />
-                </div>
+                </button>
 
-                {hasExtra && isExpanded && (
-                  <div className="border-t border-[var(--color-border)] px-4 py-3 space-y-3">
-                    {mod.id === 'time-capsule' && (
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-medium text-[var(--color-text)]">
-                            {t('Time capsule (random toasts)')}
-                          </p>
-                          <p className="text-[11px] text-[var(--color-text-tertiary)]">
-                            {t('When enabled, the app may occasionally show an old inspiration in a toast. Default is off.')}
-                          </p>
+                {!collapsed && (
+                  <div className="space-y-1 border-t border-[var(--color-border)] p-1.5">
+                    {group.modules.map((mod) => {
+                      const Icon = PLUGIN_ICONS[mod.id] ?? Info;
+                      const enabled = moduleEnabled[mod.id] ?? mod.defaultEnabled;
+                      return (
+                        <div
+                          key={mod.id}
+                          className="overflow-hidden rounded-xl border border-[var(--color-border)]"
+                          style={{ background: 'var(--color-surface)' }}
+                        >
+                          <div className="flex items-center gap-3 px-4 py-3">
+                            <Icon
+                              size={18}
+                              style={{
+                                color: enabled
+                                  ? 'var(--color-accent)'
+                                  : 'var(--color-text-tertiary)',
+                              }}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="text-sm font-medium text-[var(--color-text)]">
+                                  {t(mod.nameKey)}
+                                </p>
+                                <StabilityBadge stability={mod.stability} />
+                              </div>
+                              <p className="text-[11px] text-[var(--color-text-tertiary)] truncate">
+                                {t(mod.descriptionKey)}
+                              </p>
+                            </div>
+                            <ToggleSwitch
+                              disabled={!moduleHydrated}
+                              checked={enabled}
+                              onChange={(v) => void setModuleEnabled(mod.id, v)}
+                            />
+                          </div>
+
+                          {mod.hasSettingsPage && enabled && (
+                            <div className="px-4 pb-3">
+                              {mod.stability !== 'stable' && (
+                                <p className="mb-2 text-[11px] text-[var(--color-text-tertiary)]">
+                                  This feature is not part of the stable release SLA and should not
+                                  be your only backup path.
+                                </p>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => nav?.setActiveTab(`module:${mod.id}` as SettingsTab)}
+                                className="text-xs font-medium text-[var(--color-accent)] underline-offset-2 hover:underline"
+                              >
+                                {t('Go to plugin settings')}
+                              </button>
+                            </div>
+                          )}
+                          {!mod.hasSettingsPage && (
+                            <div className="px-4 pb-3">
+                              <p className="text-[11px] text-[var(--color-text-tertiary)]">
+                                {mod.id === 'kanban'
+                                  ? t('kanban_plugin_hint')
+                                  : t('No extra settings')}
+                              </p>
+                            </div>
+                          )}
                         </div>
-                        <TimeCapsuleToggle />
-                      </div>
-                    )}
-                    {mod.id === 'kanban' && (
-                      <p className="text-xs text-[var(--color-text-tertiary)]">
-                        {t('kanban_plugin_hint')}
-                      </p>
-                    )}
+                      );
+                    })}
                   </div>
                 )}
-              </div>
+              </section>
             );
           })}
         </div>
       )}
 
-      {subTab === 'third-party' && (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <LayoutGrid size={32} style={{ color: 'var(--color-text-tertiary)', opacity: 0.4 }} />
-          <p className="mt-3 text-sm font-medium text-[var(--color-text-secondary)]">
-            {t('No third-party plugins')}
-          </p>
-          <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
-            {t('Third-party plugin support coming soon')}
-          </p>
-        </div>
-      )}
+      {subTab === 'third-party' && <ThirdPartyPluginsPanel />}
     </div>
   );
 }
@@ -880,9 +1062,7 @@ function ShortcutsTab() {
         if (items.length === 0) return null;
         return (
           <div key={key}>
-            <div
-              className="flex items-center gap-2 mb-2 px-1"
-            >
+            <div className="flex items-center gap-2 mb-2 px-1">
               <p
                 className="text-[11px] font-semibold uppercase tracking-wider"
                 style={{ color: 'var(--color-text-tertiary)' }}
@@ -918,13 +1098,219 @@ function ShortcutsTab() {
 
 const APP_VERSION = __APP_VERSION__;
 
+type DataTabStorageInfo = {
+  db_type?: string;
+  data_dir?: string;
+  auth_mode?: string;
+  admin_export_enabled?: boolean;
+};
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+async function loadDataTabInitialState(
+  setStorageInfo: React.Dispatch<React.SetStateAction<DataTabStorageInfo | null>>,
+  setAutoExportPath: React.Dispatch<React.SetStateAction<string>>,
+  setAutoExportEnabled: React.Dispatch<React.SetStateAction<boolean>>,
+) {
+  if (!isNativeClient()) {
+    try {
+      const token = getAuthToken();
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const apiBase = getSettingsApiBase();
+      const response = await fetch(`${apiBase}/api/admin/storage`, { headers });
+      if (response.ok) {
+        setStorageInfo(await response.json());
+      }
+    } catch {
+      /* not admin or not available */
+    }
+  }
+
+  const savedPath = await getSetting('auto-export-path');
+  if (savedPath) {
+    setAutoExportPath(savedPath);
+    setAutoExportEnabled(true);
+  }
+}
+
+async function collectLocalExportData() {
+  const base = getSettingsApiBase();
+  if (base && getPlatform() !== 'tauri') {
+    const token = getAuthToken();
+    const headers: HeadersInit = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const response = await fetch(`${base}/api/export/json`, { headers });
+    if (!response.ok) throw new Error(`Export failed: ${response.status}`);
+    return await response.json();
+  }
+
+  const store = getDataStore();
+  const allSettings = await store.getAllSettings();
+  const tasks = await store.getAllTasks();
+  const streamEntries = await store.getRecentStream(365 * 10);
+
+  return buildBackupPayload({
+    tasks,
+    streamEntries,
+    settings: allSettings,
+    platform: getPlatform(),
+  });
+}
+
+async function fetchExportPayload(format: 'json' | 'markdown') {
+  if (isNativeClient()) {
+    return await collectLocalExportData();
+  }
+
+  const token = getAuthToken();
+  const headers: HeadersInit = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const apiBase = getSettingsApiBase();
+  const response = await fetch(`${apiBase}/api/export/${format}`, { headers });
+  if (!response.ok) throw new Error(`Export failed: ${response.status}`);
+  return await response.json();
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadZipExport(data: unknown, format: 'json' | 'markdown', dateSuffix: string) {
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+  zip.file(
+    '_meta.json',
+    JSON.stringify(
+      {
+        version: APP_VERSION,
+        exported_at: new Date().toISOString(),
+        format,
+      },
+      null,
+      2,
+    ),
+  );
+
+  if (format === 'json') {
+    zip.file('export.json', JSON.stringify(data, null, 2));
+  } else {
+    const raw = data as { files?: { path: string; content: string }[] };
+    const entries: { path: string; content: string }[] = Array.isArray(data)
+      ? (data as { path: string; content: string }[])
+      : raw.files || [];
+    for (const entry of entries) {
+      zip.file(entry.path, entry.content);
+    }
+  }
+
+  downloadBlob(
+    await zip.generateAsync({ type: 'blob' }),
+    `my-little-todo-${format}-${dateSuffix}-v${APP_VERSION}.zip`,
+  );
+}
+
+function downloadJsonExport(data: unknown, dateSuffix: string) {
+  const withMeta = {
+    ...(data as Record<string, unknown>),
+    _meta: { version: APP_VERSION, exported_at: new Date().toISOString() },
+  };
+  downloadBlob(
+    new Blob([JSON.stringify(withMeta, null, 2)], { type: 'application/json' }),
+    `my-little-todo-export-${dateSuffix}-v${APP_VERSION}.json`,
+  );
+}
+
+function getLegacyImportMessage(t: Translate) {
+  return t(
+    'This backup uses the old file-based format. Please migrate with the migration tool or re-export from a current app version.',
+  );
+}
+
+function getBlobImportMessage(t: Translate) {
+  return t(
+    'This backup contains attachments. Please restore it through the server import path first to avoid losing blob data.',
+  );
+}
+
+function formatImportSummary(t: Translate, tasks: number, stream: number, settingsCount: number) {
+  return t(
+    'Import succeeded: {{tasks}} tasks, {{stream}} stream entries, {{settingsCount}} settings',
+    {
+      tasks,
+      stream,
+      settingsCount,
+    },
+  );
+}
+
+async function importPayloadToLocalStore(payload: BackupPayload) {
+  return importPayloadToStore(getDataStore(), payload);
+}
+
+async function importPayloadToServer(payload: BackupPayload) {
+  const token = getAuthToken();
+  const headers: HeadersInit = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const apiBase = getSettingsApiBase();
+  const response = await fetch(`${apiBase}/api/import/json`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    try {
+      return { ok: false as const, message: JSON.parse(text).error ?? text };
+    } catch {
+      return { ok: false as const, message: text || `HTTP ${response.status}` };
+    }
+  }
+
+  return { ok: true as const, result: await response.json() };
+}
+
+async function reloadCoreData() {
+  await Promise.all([
+    useStreamStore.getState().load(),
+    useTaskStore.getState().load(),
+    useRoleStore.getState().load(),
+    useTimeAwarenessStore.getState().load(),
+    useShortcutStore.getState().load(),
+  ]);
+}
+
+async function exportToServerFolder(dir: string) {
+  const token = getAuthToken();
+  const headers: HeadersInit = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${getSettingsApiBase()}/api/export/disk`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ path: dir }),
+  });
+
+  if (response.ok) {
+    return { ok: true as const, data: await response.json() };
+  }
+
+  const text = await response.text();
+  try {
+    return { ok: false as const, message: JSON.parse(text).error ?? text };
+  } catch {
+    return { ok: false as const, message: text || `HTTP ${response.status}` };
+  }
+}
+
 function DataTab() {
   const { t } = useTranslation('settings');
-  const [storageInfo, setStorageInfo] = useState<{
-    db_type?: string;
-    data_dir?: string;
-    auth_mode?: string;
-  } | null>(null);
+  const [storageInfo, setStorageInfo] = useState<DataTabStorageInfo | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState('');
@@ -944,122 +1330,21 @@ function DataTab() {
   const [fullExportIsError, setFullExportIsError] = useState(false);
 
   useEffect(() => {
-    (async () => {
-      if (!isNativeClient()) {
-        try {
-          const token = getAuthToken();
-          const h: HeadersInit = { 'Content-Type': 'application/json' };
-          if (token) h.Authorization = `Bearer ${token}`;
-          const apiBase = getSettingsApiBase();
-          const res = await fetch(`${apiBase}/api/admin/storage`, { headers: h });
-          if (res.ok) setStorageInfo(await res.json());
-        } catch {
-          /* not admin or not available */
-        }
-      }
-
-      const savedPath = await getSetting('auto-export-path');
-      if (savedPath) {
-        setAutoExportPath(savedPath);
-        setAutoExportEnabled(true);
-      }
-    })();
+    void loadDataTabInitialState(setStorageInfo, setAutoExportPath, setAutoExportEnabled);
   }, []);
 
   const isTauriDataTab = canExportToFolder();
   const showToast = useToastStore((s) => s.showToast);
 
-  const collectLocalExportData = async () => {
-    const base = getSettingsApiBase();
-    if (base && getPlatform() !== 'tauri') {
-      const token = getAuthToken();
-      const h: HeadersInit = {};
-      if (token) h.Authorization = `Bearer ${token}`;
-      const res = await fetch(`${base}/api/export/json`, { headers: h });
-      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
-      return await res.json();
-    }
-
-    const store = getDataStore();
-    const allSettings = await store.getAllSettings();
-    const tasks = await store.getAllTasks();
-    const streamEntries = await store.getRecentStream(365 * 10);
-    const tasksJson = tasks.map((t) => JSON.stringify(taskToDbRow(t, 0, null)));
-    const streamJson = streamEntries.map((e) => JSON.stringify(streamEntryToDbRow(e, 0, null)));
-    return {
-      tasks: tasksJson,
-      stream_entries: streamJson,
-      settings: Object.entries(allSettings),
-    };
-  };
-
   const handleExport = async (format: 'json' | 'markdown', asZip = false) => {
     setExporting(format);
     try {
-      let data: unknown;
-
-      if (isNativeClient()) {
-        data = await collectLocalExportData();
-      } else {
-        const token = getAuthToken();
-        const h: HeadersInit = {};
-        if (token) h.Authorization = `Bearer ${token}`;
-        const apiBase = getSettingsApiBase();
-        const res = await fetch(`${apiBase}/api/export/${format}`, { headers: h });
-        if (!res.ok) throw new Error(`Export failed: ${res.status}`);
-        data = await res.json();
-      }
-
+      const data = await fetchExportPayload(format);
       const dateSuffix = new Date().toISOString().slice(0, 10);
-
       if (format === 'markdown' || asZip) {
-        const JSZip = (await import('jszip')).default;
-        const zip = new JSZip();
-
-        zip.file(
-          '_meta.json',
-          JSON.stringify(
-            {
-              version: APP_VERSION,
-              exported_at: new Date().toISOString(),
-              format,
-            },
-            null,
-            2,
-          ),
-        );
-
-        if (format === 'json') {
-          zip.file('export.json', JSON.stringify(data, null, 2));
-        } else {
-          const raw = data as { files?: { path: string; content: string }[] };
-          const entries: { path: string; content: string }[] = Array.isArray(data)
-            ? (data as { path: string; content: string }[])
-            : raw.files || [];
-          for (const entry of entries) {
-            zip.file(entry.path, entry.content);
-          }
-        }
-
-        const blob = await zip.generateAsync({ type: 'blob' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `my-little-todo-${format}-${dateSuffix}-v${APP_VERSION}.zip`;
-        a.click();
-        URL.revokeObjectURL(url);
+        await downloadZipExport(data, format, dateSuffix);
       } else {
-        const withMeta = {
-          ...(data as Record<string, unknown>),
-          _meta: { version: APP_VERSION, exported_at: new Date().toISOString() },
-        };
-        const blob = new Blob([JSON.stringify(withMeta, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `my-little-todo-export-${dateSuffix}-v${APP_VERSION}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadJsonExport(data, dateSuffix);
       }
       showToast({ type: 'success', message: t('Export completed successfully') });
     } catch (err) {
@@ -1080,139 +1365,44 @@ function DataTab() {
     setImporting(true);
     setImportResult('');
     try {
-      let payload: {
-        tasks?: string[];
-        stream_entries?: string[];
-        files?: { path: string; content: string }[];
-        settings?: [string, string][];
-      };
+      const payload = await parseImportPayload(file);
 
-      if (file.name.endsWith('.zip')) {
-        const JSZip = (await import('jszip')).default;
-        const zip = await JSZip.loadAsync(file);
-        const files: { path: string; content: string }[] = [];
-
-        const metaFile = zip.file('_meta.json');
-        if (metaFile) {
-          const metaText = await metaFile.async('text');
-          try {
-            const meta = JSON.parse(metaText);
-            console.log('[Import] version:', meta.version, 'exported_at:', meta.exported_at);
-          } catch {
-            /* ignore */
-          }
-        }
-
-        const jsonFile = zip.file('export.json');
-        if (jsonFile) {
-          const jsonText = await jsonFile.async('text');
-          payload = JSON.parse(jsonText);
-        } else {
-          for (const [name, entry] of Object.entries(zip.files)) {
-            if (entry.dir || name === '_meta.json') continue;
-            const content = await entry.async('text');
-            files.push({ path: name, content });
-          }
-          payload = { files };
-        }
+      if (isLegacyBackupPayload(payload)) {
+        setImportIsError(true);
+        setImportResult(getLegacyImportMessage(t));
+      } else if (isNativeClient() && (payload.blobs?.length ?? 0) > 0) {
+        setImportIsError(true);
+        setImportResult(getBlobImportMessage(t));
+      } else if (isNativeClient()) {
+        const result = await importPayloadToLocalStore(payload);
+        setImportIsError(false);
+        setImportResult(
+          formatImportSummary(
+            t,
+            result.tasksImported,
+            result.streamImported,
+            result.settingsImported,
+          ),
+        );
       } else {
-        const text = await file.text();
-        payload = JSON.parse(text);
-      }
-
-      if (isNativeClient()) {
-        const store = getDataStore();
-        if (payload.files && payload.files.length > 0 && !payload.tasks?.length) {
+        const response = await importPayloadToServer(payload);
+        if (!response.ok) {
           setImportIsError(true);
-          setImportResult(
-            t(
-              'This backup uses the old file-based format. Please migrate with the migration tool or re-export from a current app version.',
-            ),
-          );
+          setImportResult(t('Error: {{message}}', { message: response.message }));
         } else {
-          let tasksImported = 0;
-          let streamImported = 0;
-          let settingsImported = 0;
-          for (const raw of payload.tasks ?? []) {
-            const row = JSON.parse(raw) as TaskDbRow;
-            await store.putTask(taskFromDbRow(row));
-            tasksImported++;
-          }
-          for (const raw of payload.stream_entries ?? []) {
-            const row = JSON.parse(raw) as StreamEntryDbRow;
-            await store.putStreamEntry(streamEntryFromDbRow(row));
-            streamImported++;
-          }
-          if (payload.settings) {
-            for (const [key, value] of payload.settings) {
-              await store.putSetting(key, value);
-              settingsImported++;
-            }
-          }
           setImportIsError(false);
           setImportResult(
-            t(
-              'Import succeeded: {{tasks}} tasks, {{stream}} stream entries, {{settingsCount}} settings',
-              {
-                tasks: tasksImported,
-                stream: streamImported,
-                settingsCount: settingsImported,
-              },
-            ),
-          );
-        }
-      } else {
-        if (payload.files && payload.files.length > 0 && !payload.tasks?.length) {
-          setImportIsError(true);
-          setImportResult(
-            t(
-              'This backup uses the old file-based format. Please migrate with the migration tool or re-export from a current app version.',
-            ),
-          );
-        } else {
-          const token = getAuthToken();
-          const h: HeadersInit = { 'Content-Type': 'application/json' };
-          if (token) h.Authorization = `Bearer ${token}`;
-          const apiBase = getSettingsApiBase();
-          const res = await fetch(`${apiBase}/api/import/json`, {
-            method: 'POST',
-            headers: h,
-            body: JSON.stringify(payload),
-          });
-          if (!res.ok) {
-            const text = await res.text();
-            let msg: string;
-            try {
-              msg = JSON.parse(text).error ?? text;
-            } catch {
-              msg = text || `HTTP ${res.status}`;
-            }
-            setImportIsError(true);
-            setImportResult(t('Error: {{message}}', { message: msg }));
-            return;
-          }
-          const result = await res.json();
-          setImportIsError(false);
-          setImportResult(
-            t(
-              'Import succeeded: {{tasks}} tasks, {{stream}} stream entries, {{settingsCount}} settings',
-              {
-                tasks: result.tasks_imported ?? 0,
-                stream: result.stream_imported ?? 0,
-                settingsCount: result.settings_imported ?? 0,
-              },
+            formatImportSummary(
+              t,
+              response.result.tasks_imported ?? 0,
+              response.result.stream_imported ?? 0,
+              response.result.settings_imported ?? 0,
             ),
           );
         }
       }
 
-      await Promise.all([
-        useStreamStore.getState().load(),
-        useTaskStore.getState().load(),
-        useRoleStore.getState().load(),
-        useScheduleStore.getState().load(),
-        useShortcutStore.getState().load(),
-      ]);
+      await reloadCoreData();
     } catch (err) {
       setImportIsError(true);
       setImportResult(
@@ -1223,6 +1413,37 @@ function DataTab() {
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleExportToFolder = async () => {
+    const dir = window.prompt(
+      t('Select export folder'),
+      'C:\\Users\\me\\Documents\\my-little-todo-export',
+    );
+    if (!dir) return;
+
+    setExporting('markdown');
+    try {
+      const response = await exportToServerFolder(dir);
+      if (response.ok) {
+        setFullExportIsError(false);
+        setFullExportResult(
+          t('Exported {{count}} files to folder', { count: response.data.files_exported }),
+        );
+      } else {
+        setFullExportIsError(true);
+        setFullExportResult(t('Export failed: {{message}}', { message: response.message }));
+      }
+    } catch (err) {
+      setFullExportIsError(true);
+      setFullExportResult(
+        t('Export failed: {{message}}', {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -1286,13 +1507,13 @@ function DataTab() {
     <div className="flex flex-col gap-6">
       {/* Server storage info */}
       {!native && storageInfo && (
-        <section>
+        <section className="settings-card settings-card--compact">
           <div className="flex items-center gap-2 mb-3">
             <FolderOpen size={16} className="text-[var(--color-accent)]" />
             <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Current Storage')}</h3>
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-3">
             {storageInfo.data_dir && (
               <div>
                 <p className="text-xs font-medium text-[var(--color-text-tertiary)] mb-1">
@@ -1303,7 +1524,7 @@ function DataTab() {
                 </p>
               </div>
             )}
-            <div className="flex gap-4 text-xs text-[var(--color-text-secondary)]">
+            <div className="settings-info-row text-xs text-[var(--color-text-secondary)]">
               <span>
                 {t('Backend Type')}:{' '}
                 <strong>{dbLabel[storageInfo.db_type ?? ''] ?? storageInfo.db_type}</strong>
@@ -1312,18 +1533,24 @@ function DataTab() {
                 {t('Auth Mode')}: <strong>{storageInfo.auth_mode}</strong>
               </span>
             </div>
+            {!storageInfo.admin_export_enabled && (
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                Server-side folder export is disabled until the admin configures
+                `ADMIN_EXPORT_DIRS`.
+              </p>
+            )}
           </div>
         </section>
       )}
 
       {/* Native local storage info */}
       {native && (
-        <section>
+        <section className="settings-card settings-card--compact">
           <div className="flex items-center gap-2 mb-3">
             <HardDriveDownload size={16} className="text-[var(--color-accent)]" />
             <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Current Storage')}</h3>
           </div>
-          <div className="flex gap-4 text-xs text-[var(--color-text-secondary)]">
+          <div className="settings-info-row text-xs text-[var(--color-text-secondary)]">
             <span>
               {t('Backend Type')}: <strong>SQLite</strong>
             </span>
@@ -1360,50 +1587,7 @@ function DataTab() {
           {!native && isTauriDataTab && (
             <button
               type="button"
-              onClick={async () => {
-                const dir = window.prompt(
-                  t('Select export folder'),
-                  'C:\\Users\\me\\Documents\\my-little-todo-export',
-                );
-                if (!dir) return;
-                setExporting('markdown');
-                try {
-                  const token = getAuthToken();
-                  const h: HeadersInit = { 'Content-Type': 'application/json' };
-                  if (token) h.Authorization = `Bearer ${token}`;
-                  const res = await fetch(`${getSettingsApiBase()}/api/export/disk`, {
-                    method: 'POST',
-                    headers: h,
-                    body: JSON.stringify({ path: dir }),
-                  });
-                  if (res.ok) {
-                    const data = await res.json();
-                    setFullExportIsError(false);
-                    setFullExportResult(
-                      t('Exported {{count}} files to folder', { count: data.files_exported }),
-                    );
-                  } else {
-                    const text = await res.text();
-                    let msg: string;
-                    try {
-                      msg = JSON.parse(text).error ?? text;
-                    } catch {
-                      msg = text || `HTTP ${res.status}`;
-                    }
-                    setFullExportIsError(true);
-                    setFullExportResult(t('Export failed: {{message}}', { message: msg }));
-                  }
-                } catch (err) {
-                  setFullExportIsError(true);
-                  setFullExportResult(
-                    t('Export failed: {{message}}', {
-                      message: err instanceof Error ? err.message : String(err),
-                    }),
-                  );
-                } finally {
-                  setExporting(null);
-                }
-              }}
+              onClick={handleExportToFolder}
               disabled={exporting !== null}
               className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] hover:text-[var(--color-text)] disabled:opacity-50"
             >
@@ -1503,10 +1687,14 @@ function DataTab() {
 
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
+              <label
+                htmlFor="migration-target"
+                className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block"
+              >
                 {t('Target Backend')}
               </label>
               <select
+                id="migration-target"
                 value={migrateTarget}
                 onChange={(e) => setMigrateTarget(e.target.value)}
                 className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
@@ -1520,10 +1708,14 @@ function DataTab() {
             {migrateTarget && (
               <>
                 <div>
-                  <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
+                  <label
+                    htmlFor="migration-dir"
+                    className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block"
+                  >
                     {t('Target data directory (optional, leave empty to use current)')}
                   </label>
                   <input
+                    id="migration-dir"
                     type="text"
                     value={migrateDir}
                     onChange={(e) => setMigrateDir(e.target.value)}
@@ -1534,10 +1726,14 @@ function DataTab() {
 
                 {migrateTarget === 'postgres' && (
                   <div>
-                    <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
+                    <label
+                      htmlFor="migration-db-url"
+                      className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block"
+                    >
                       {t('Database Connection URL')}
                     </label>
                     <input
+                      id="migration-db-url"
                       type="text"
                       value={migrateDbUrl}
                       onChange={(e) => setMigrateDbUrl(e.target.value)}
@@ -1612,10 +1808,14 @@ function DataTab() {
             {autoExportEnabled && (
               <>
                 <div>
-                  <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
+                  <label
+                    htmlFor="continuous-export-dir"
+                    className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block"
+                  >
                     {t('Export Directory')}
                   </label>
                   <input
+                    id="continuous-export-dir"
                     type="text"
                     value={autoExportPath}
                     onChange={(e) => setAutoExportPath(e.target.value)}
@@ -1720,6 +1920,92 @@ function WebApiRealtimeSyncSection() {
   );
 }
 
+function SyncIndicatorStyleSection() {
+  const { t } = useTranslation('settings');
+  const [style, setStyle] = useState<'dot' | 'status'>('dot');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getSetting('sync-indicator-style').then((value) => {
+      if (cancelled) return;
+      setStyle(value === 'status' ? 'status' : 'dot');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const updateStyle = useCallback(async (next: 'dot' | 'status') => {
+    setStyle(next);
+    setSaving(true);
+    try {
+      await putSetting('sync-indicator-style', next);
+    } finally {
+      window.setTimeout(() => setSaving(false), 250);
+    }
+  }, []);
+
+  return (
+    <section>
+      <div className="flex items-center gap-2 mb-3">
+        <RefreshCw size={16} className="text-[var(--color-accent)]" />
+        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Sync indicator style')}</h3>
+      </div>
+      <p className="mb-3 text-xs leading-relaxed text-[var(--color-text-tertiary)]">
+        {t('Choose how sync appears in the global status dock.')}
+      </p>
+
+      <div
+        className="inline-flex rounded-xl p-1"
+        style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
+        role="tablist"
+        aria-label={t('Sync indicator style')}
+      >
+        {(
+          [
+            {
+              id: 'dot' as const,
+              label: t('Compact dot'),
+              hint: t('Keep sync quiet when healthy; only expand for attention states.'),
+            },
+            {
+              id: 'status' as const,
+              label: t('Status chip'),
+              hint: t('Show recent sync status in the dock even when everything is healthy.'),
+            },
+          ] as const
+        ).map((option) => {
+          const active = style === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => void updateStyle(option.id)}
+              className="min-w-[9rem] rounded-lg px-3 py-2 text-left transition-colors"
+              style={{
+                background: active ? 'var(--color-surface)' : 'transparent',
+                color: active ? 'var(--color-text)' : 'var(--color-text-secondary)',
+              }}
+            >
+              <div className="text-xs font-medium">{option.label}</div>
+              <div className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-tertiary)]">
+                {option.hint}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {saving ? (
+        <p className="mt-2 text-[11px] text-[var(--color-text-tertiary)]">{t('Saving...')}</p>
+      ) : null}
+    </section>
+  );
+}
+
 function SyncTab() {
   const { t } = useTranslation('settings');
   const platform = getPlatform();
@@ -1765,7 +2051,16 @@ function SyncTab() {
       }
     } catch (err) {
       setTestStatus('error');
-      setTestMsg(err instanceof Error ? err.message : t('Connection failed'));
+      const message = err instanceof Error ? err.message : String(err);
+      if (/failed to fetch/i.test(message) && isCrossOriginApiBase(getSettingsApiBase())) {
+        setTestMsg(
+          t('Cross-origin request blocked. Add {{origin}} to CORS_ALLOWED_ORIGINS on the server.', {
+            origin: window.location.origin,
+          }),
+        );
+        return;
+      }
+      setTestMsg(mapApiError(message || t('Connection failed')));
     }
   };
 
@@ -1879,6 +2174,8 @@ function SyncTab() {
       )}
 
       <hr style={{ borderColor: 'var(--color-border)' }} />
+      <SyncIndicatorStyleSection />
+      <hr style={{ borderColor: 'var(--color-border)' }} />
       {isTauriEnv() ? <CloudSyncSection /> : <WebApiRealtimeSyncSection />}
     </div>
   );
@@ -1944,10 +2241,14 @@ function ApiTokenSection() {
 
       <div className="space-y-3">
         <div>
-          <label className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block">
+          <label
+            htmlFor="token-validity"
+            className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block"
+          >
             {t('Token Validity')}
           </label>
           <select
+            id="token-validity"
             value={duration}
             onChange={(e) => setDuration(e.target.value)}
             className={inputClass}
@@ -2157,8 +2458,11 @@ function CloudSyncSection() {
 
       <div className="space-y-4">
         <div>
-          <label className={labelClass}>{t('Sync Provider')}</label>
+          <label htmlFor="sync-provider" className={labelClass}>
+            {t('Sync Provider')}
+          </label>
           <select
+            id="sync-provider"
             value={provider}
             onChange={(e) => setProvider(e.target.value as '' | 'api-server' | 'webdav')}
             className={inputClass}
@@ -2172,8 +2476,11 @@ function CloudSyncSection() {
         {provider === 'api-server' && (
           <div className="space-y-3">
             <div>
-              <label className={labelClass}>{t('Server URL')}</label>
+              <label htmlFor="sync-server-url" className={labelClass}>
+                {t('Server URL')}
+              </label>
               <input
+                id="sync-server-url"
                 type="url"
                 value={config.endpoint}
                 onChange={(e) => setConfig({ ...config, endpoint: e.target.value })}
@@ -2182,7 +2489,7 @@ function CloudSyncSection() {
               />
             </div>
             <div>
-              <label className={labelClass}>{t('Authentication Mode')}</label>
+              <p className={labelClass}>{t('Authentication Mode')}</p>
               <div className="flex rounded-xl border border-[var(--color-border)] overflow-hidden">
                 <button
                   type="button"
@@ -2211,8 +2518,11 @@ function CloudSyncSection() {
             {apiAuthMode === 'credentials' ? (
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className={labelClass}>{t('Username')}</label>
+                  <label htmlFor="sync-api-username" className={labelClass}>
+                    {t('Username')}
+                  </label>
                   <input
+                    id="sync-api-username"
                     type="text"
                     value={config.username}
                     onChange={(e) => setConfig({ ...config, username: e.target.value })}
@@ -2220,8 +2530,11 @@ function CloudSyncSection() {
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>{t('Password')}</label>
+                  <label htmlFor="sync-api-password" className={labelClass}>
+                    {t('Password')}
+                  </label>
                   <input
+                    id="sync-api-password"
                     type="password"
                     value={config.password}
                     onChange={(e) => setConfig({ ...config, password: e.target.value })}
@@ -2231,8 +2544,11 @@ function CloudSyncSection() {
               </div>
             ) : (
               <div>
-                <label className={labelClass}>{t('Token / API Key')}</label>
+                <label htmlFor="sync-api-token" className={labelClass}>
+                  {t('Token / API Key')}
+                </label>
                 <input
+                  id="sync-api-token"
                   type="password"
                   value={config.token}
                   onChange={(e) => setConfig({ ...config, token: e.target.value })}
@@ -2250,8 +2566,11 @@ function CloudSyncSection() {
         {provider === 'webdav' && (
           <div className="space-y-3">
             <div>
-              <label className={labelClass}>{t('WebDAV URL')}</label>
+              <label htmlFor="sync-webdav-url" className={labelClass}>
+                {t('WebDAV URL')}
+              </label>
               <input
+                id="sync-webdav-url"
                 type="url"
                 value={config.endpoint}
                 onChange={(e) => setConfig({ ...config, endpoint: e.target.value })}
@@ -2261,8 +2580,11 @@ function CloudSyncSection() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className={labelClass}>{t('Username (Optional)')}</label>
+                <label htmlFor="sync-webdav-username" className={labelClass}>
+                  {t('Username (Optional)')}
+                </label>
                 <input
+                  id="sync-webdav-username"
                   type="text"
                   value={config.username}
                   onChange={(e) => setConfig({ ...config, username: e.target.value })}
@@ -2270,8 +2592,11 @@ function CloudSyncSection() {
                 />
               </div>
               <div>
-                <label className={labelClass}>{t('Password (Optional)')}</label>
+                <label htmlFor="sync-webdav-password" className={labelClass}>
+                  {t('Password (Optional)')}
+                </label>
                 <input
+                  id="sync-webdav-password"
                   type="password"
                   value={config.password}
                   onChange={(e) => setConfig({ ...config, password: e.target.value })}
@@ -2286,8 +2611,11 @@ function CloudSyncSection() {
           <>
             <hr style={{ borderColor: 'var(--color-border)' }} />
             <div>
-              <label className={labelClass}>{t('Sync Interval')}</label>
+              <label htmlFor="sync-interval" className={labelClass}>
+                {t('Sync Interval')}
+              </label>
               <select
+                id="sync-interval"
                 value={syncInterval}
                 onChange={(e) => setSyncInterval(e.target.value)}
                 className={inputClass}
@@ -2740,7 +3068,7 @@ function AboutTab() {
               </button>
             </div>
 
-            <label className="flex items-center gap-2 cursor-pointer select-none">
+            <div className="flex items-center gap-2 select-none">
               <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
                 {t('Auto check updates')}
               </span>
@@ -2761,7 +3089,7 @@ function AboutTab() {
                   }}
                 />
               </button>
-            </label>
+            </div>
           </div>
         </div>
       )}
@@ -2788,54 +3116,6 @@ function AboutTab() {
 
 /* ── AI Tab ── */
 
-const MCP_TOOLS = {
-  read: [
-    { name: 'get_overview', desc: 'Global overview' },
-    { name: 'list_tasks', desc: 'List tasks' },
-    { name: 'get_task', desc: 'Get task details' },
-    { name: 'list_stream', desc: 'List stream entries' },
-    { name: 'search', desc: 'Full-text search' },
-  ],
-  write: [
-    { name: 'create_task', desc: 'Create task' },
-    { name: 'update_task', desc: 'Update task' },
-    { name: 'delete_task', desc: 'Delete task' },
-    { name: 'add_stream', desc: 'Add stream entry' },
-  ],
-};
-
-const IDE_CONFIGS: {
-  id: string;
-  label: string;
-  pathHint: string;
-}[] = [
-  {
-    id: 'cursor',
-    label: 'Cursor',
-    pathHint: '.cursor/mcp.json',
-  },
-  {
-    id: 'claude',
-    label: 'Claude Desktop',
-    pathHint: '~/Library/Application Support/Claude/claude_desktop_config.json (macOS)',
-  },
-  {
-    id: 'vscode',
-    label: 'VS Code (Copilot)',
-    pathHint: '.vscode/mcp.json',
-  },
-  {
-    id: 'windsurf',
-    label: 'Windsurf',
-    pathHint: '~/.codeium/windsurf/mcp_config.json',
-  },
-  {
-    id: 'generic',
-    label: 'Generic',
-    pathHint: '',
-  },
-];
-
 const MODEL_SUGGESTIONS = [
   'gpt-4o',
   'gpt-4o-mini',
@@ -2849,7 +3129,6 @@ const MODEL_SUGGESTIONS = [
 function AiTab() {
   const { t } = useTranslation('settings');
   const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false);
-  const showToast = useToastStore((s) => s.showToast);
 
   const [apiKey, setApiKey] = useState('');
   const [apiEndpoint, setApiEndpoint] = useState('https://api.openai.com/v1');
@@ -2866,12 +3145,6 @@ function AiTab() {
   const [adminSharedModel, setAdminSharedModel] = useState('');
   const [adminSaved, setAdminSaved] = useState(false);
 
-  const [selectedIde, setSelectedIde] = useState('cursor');
-  const [copied, setCopied] = useState(false);
-
-  const [disabledTools, setDisabledTools] = useState<string[]>([]);
-  const [toolsSaved, setToolsSaved] = useState(false);
-
   useEffect(() => {
     getSetting('ai-api-key').then((v) => {
       if (v) setApiKey(v);
@@ -2881,15 +3154,6 @@ function AiTab() {
     });
     getSetting('ai-model').then((v) => {
       if (v) setAiModel(v);
-    });
-    getSetting('mcp-disabled-tools').then((v) => {
-      if (v) {
-        try {
-          setDisabledTools(JSON.parse(v));
-        } catch {
-          /* ignore */
-        }
-      }
     });
 
     if (!isNativeClient()) {
@@ -2946,44 +3210,6 @@ function AiTab() {
     setTimeout(() => setAdminSaved(false), 2000);
   };
 
-  const handleToggleTool = async (toolName: string) => {
-    const next = disabledTools.includes(toolName)
-      ? disabledTools.filter((t) => t !== toolName)
-      : [...disabledTools, toolName];
-    setDisabledTools(next);
-    await putSetting('mcp-disabled-tools', JSON.stringify(next));
-    setToolsSaved(true);
-    setTimeout(() => setToolsSaved(false), 1500);
-  };
-
-  const token = getAuthToken();
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
-  const mcpConfig = JSON.stringify(
-    {
-      mcpServers: {
-        'my-little-todo': {
-          url: `${baseUrl}/api/mcp`,
-          headers: {
-            Authorization: `Bearer ${token || '<your-token>'}`,
-          },
-        },
-      },
-    },
-    null,
-    2,
-  );
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(mcpConfig);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      showToast({ type: 'error', message: t('Copy failed') });
-    }
-  };
-
-  const ideConfig = IDE_CONFIGS.find((c) => c.id === selectedIde) ?? IDE_CONFIGS[0];
   const nativeAi = isNativeClient();
   const showUserApiSection = sharedAllowUserKey || !sharedAvailable;
 
@@ -3169,164 +3395,10 @@ function AiTab() {
         </>
       )}
 
-      {/* MCP Integration — server mode only */}
+      {/* API Usage Statistics (placeholder) */}
       {!nativeAi && (
         <>
           <hr style={{ borderColor: 'var(--color-border)' }} />
-
-          <section>
-            <div className="flex items-center gap-2 mb-3">
-              <Server size={16} className="text-[var(--color-accent)]" />
-              <h3 className="text-sm font-bold text-[var(--color-text)]">{t('MCP Integration')}</h3>
-            </div>
-            <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-              {t(
-                'Connect AI agents (Cursor, Claude Desktop, etc.) to your task system via MCP protocol.',
-              )}
-            </p>
-
-            <div className="space-y-3">
-              {/* IDE selector */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-[var(--color-text-secondary)] shrink-0">
-                  {t('IDE')}
-                </span>
-                <select
-                  value={selectedIde}
-                  onChange={(e) => setSelectedIde(e.target.value)}
-                  className="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--color-surface)] text-[var(--color-text)] border border-[var(--color-border)] outline-none"
-                >
-                  {IDE_CONFIGS.map((ide) => (
-                    <option key={ide.id} value={ide.id}>
-                      {ide.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Config preview */}
-              <div className="relative">
-                <pre
-                  className="rounded-xl p-3 text-xs font-mono overflow-x-auto"
-                  style={{
-                    background: 'var(--color-bg)',
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text-secondary)',
-                  }}
-                >
-                  {mcpConfig}
-                </pre>
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="absolute top-2 right-2 rounded-lg p-1.5 transition-colors hover:bg-[var(--color-surface)]"
-                  title={t('Copy')}
-                >
-                  {copied ? (
-                    <CheckCircle size={14} className="text-emerald-500" />
-                  ) : (
-                    <Copy size={14} className="text-[var(--color-text-tertiary)]" />
-                  )}
-                </button>
-              </div>
-
-              {/* Config file path hint */}
-              {ideConfig.pathHint && (
-                <p className="text-[11px] text-[var(--color-text-tertiary)]">
-                  {t('Config file')}: <code className="font-mono">{ideConfig.pathHint}</code>
-                </p>
-              )}
-
-              {/* Skills link */}
-              <a
-                href="https://github.com/X-T-E-R/my-little-todo/blob/main/skills/SKILL.md"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-xs text-[var(--color-accent)] hover:underline w-fit"
-              >
-                <ExternalLink size={12} />
-                {t('View MCP usage guide (Skills)')}
-              </a>
-            </div>
-          </section>
-
-          <hr style={{ borderColor: 'var(--color-border)' }} />
-
-          {/* MCP Tool Toggles */}
-          <section>
-            <div className="flex items-center gap-2 mb-3">
-              <Activity size={16} className="text-[var(--color-accent)]" />
-              <h3 className="text-sm font-bold text-[var(--color-text)]">{t('MCP Tool Access')}</h3>
-            </div>
-            <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-              {t(
-                'Control which MCP tools are available to AI agents. Disabled tools will not appear in tool listings.',
-              )}
-            </p>
-
-            <div className="space-y-4">
-              {/* Read tools */}
-              <div>
-                <p className="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  {t('Read Operations')}
-                </p>
-                <div className="space-y-1">
-                  {MCP_TOOLS.read.map((tool) => (
-                    <div key={tool.name} className="flex items-center justify-between py-1.5">
-                      <div>
-                        <span className="text-sm font-mono text-[var(--color-text)]">
-                          {tool.name}
-                        </span>
-                        <span className="ml-2 text-xs text-[var(--color-text-tertiary)]">
-                          {t(tool.desc)}
-                        </span>
-                      </div>
-                      <ToggleSwitch
-                        checked={!disabledTools.includes(tool.name)}
-                        onChange={() => handleToggleTool(tool.name)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Write tools */}
-              <div>
-                <p className="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
-                  {t('Write Operations')}
-                </p>
-                <div className="space-y-1">
-                  {MCP_TOOLS.write.map((tool) => (
-                    <div key={tool.name} className="flex items-center justify-between py-1.5">
-                      <div>
-                        <span className="text-sm font-mono text-[var(--color-text)]">
-                          {tool.name}
-                        </span>
-                        <span className="ml-2 text-xs text-[var(--color-text-tertiary)]">
-                          {t(tool.desc)}
-                        </span>
-                      </div>
-                      <ToggleSwitch
-                        checked={!disabledTools.includes(tool.name)}
-                        onChange={() => handleToggleTool(tool.name)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {toolsSaved && (
-                <span className="text-xs text-emerald-500 flex items-center gap-1">
-                  <CheckCircle size={12} />
-                  {t('Saved')}
-                </span>
-              )}
-            </div>
-          </section>
-
-          <hr style={{ borderColor: 'var(--color-border)' }} />
-
-          {/* API Usage Statistics (placeholder) */}
           <section>
             <div className="flex items-center gap-2 mb-3">
               <Activity size={16} className="text-[var(--color-accent)]" />
@@ -3359,19 +3431,10 @@ function AiTab() {
 
 /* ── Shared Components ── */
 
-function ScheduleTab() {
-  const { load } = useScheduleStore();
-  useEffect(() => {
-    load();
-  }, [load]);
-  return <ScheduleEditor />;
-}
-
-const TAB_CONTENT: Record<SettingsTab, () => React.JSX.Element> = {
+const TAB_CONTENT: Record<BaseSettingsTab, () => React.JSX.Element> = {
   general: GeneralTab,
   account: AccountTab,
   ai: AiTab,
-  schedule: ScheduleTab,
   shortcuts: ShortcutsTab,
   sync: SyncTab,
   data: DataTab,
@@ -3380,24 +3443,116 @@ const TAB_CONTENT: Record<SettingsTab, () => React.JSX.Element> = {
 };
 
 function renderActiveSettingsTab(tab: SettingsTab): React.ReactNode {
-  const C = TAB_CONTENT[tab];
+  if (tab.startsWith('module:')) {
+    const id = tab.slice('module:'.length);
+    return <SettingsEntryHost source="builtin" entryId={id} />;
+  }
+  if (tab.startsWith('plugin:')) {
+    const id = tab.slice('plugin:'.length);
+    return <SettingsEntryHost source="plugin" entryId={id} />;
+  }
+  const C = TAB_CONTENT[tab as BaseSettingsTab];
   return C ? <C /> : <GeneralTab />;
 }
 
-function getSettingsHeading(tab: SettingsTab, t: (k: string) => string): string {
+function getSettingsHeading(
+  tab: SettingsTab,
+  t: (k: string) => string,
+  pluginHeadingNames: Record<string, string>,
+): string {
+  if (tab.startsWith('module:')) {
+    const id = tab.slice('module:'.length);
+    const mod = BUILT_IN_MODULES.find((m) => m.id === id);
+    return mod ? t(mod.nameKey) : '';
+  }
+  if (tab.startsWith('plugin:')) {
+    const id = tab.slice('plugin:'.length);
+    if (pluginHeadingNames[id]) return pluginHeadingNames[id];
+    return id;
+  }
   const all = [...PRIMARY_TABS, ABOUT_TAB];
   const found = all.find((x) => x.id === tab);
   return found ? t(found.label) : '';
 }
 
+function getSettingsSummary(
+  tab: SettingsTab,
+  t: (k: string) => string,
+  pluginHeadingNames: Record<string, string>,
+): string {
+  const zh = i18n.language.startsWith('zh');
+  if (tab === 'general')
+    return zh
+      ? '主题、语言与日常默认项。'
+      : 'Theme, language, and the everyday defaults that shape the app.';
+  if (tab === 'account')
+    return zh
+      ? '账号状态、个人偏好与账户相关操作。'
+      : 'Authentication status, profile-level preferences, and account links.';
+  if (tab === 'ai')
+    return zh
+      ? 'AI 能力入口、提供方与助手行为。'
+      : 'AI capability toggles, providers, and assistant-related behavior.';
+  if (tab === 'shortcuts')
+    return zh ? '键盘映射与高频操作捷径。' : 'Keyboard mappings and quick control affordances.';
+  if (tab === 'sync')
+    return zh
+      ? '同步目标、冲突处理与数据流转状态。'
+      : 'Sync backend, conflict behavior, and data movement status.';
+  if (tab === 'data')
+    return zh
+      ? '备份、导入导出与本地存储管理。'
+      : 'Backups, imports, exports, and local storage operations.';
+  if (tab === 'plugins')
+    return zh
+      ? '启停模块、查看来源，并确认哪些模块有额外设置。'
+      : 'Enable modules, inspect plugin origin, and see whether extra settings exist.';
+  if (tab === 'about')
+    return zh
+      ? '版本、更新检查与产品信息。'
+      : 'Version info, update checks, and product references.';
+  if (tab.startsWith('module:')) {
+    return zh
+      ? '通过统一设置注册表接入的模块专属配置。'
+      : 'Module-specific controls registered through the unified settings registry.';
+  }
+  if (tab.startsWith('plugin:')) {
+    const id = tab.slice('plugin:'.length);
+    return zh
+      ? `${pluginHeadingNames[id] ?? id} 通过当前插件注册表暴露的设置项。`
+      : `${pluginHeadingNames[id] ?? id} settings exposed by the active plugin registry.`;
+  }
+  return t('Settings');
+}
+
 /* ── Main Settings View ── */
 
 export function SettingsView() {
+  ensureBuiltinSettingsRegistered();
   const { t } = useTranslation('settings');
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [, setSettingsRegistryVersion] = useState(0);
   const isMobile = useIsMobile();
   const authMode = useAuthStore((s) => s.authMode);
   const showShortcuts = hasKeyboardShortcuts();
+  const moduleEnabled = useModuleStore((s) => s.enabled);
+  const installedPlugins = usePluginStore((s) => s.plugins);
+
+  useEffect(() => subscribeSettingsRegistry(() => setSettingsRegistryVersion((v) => v + 1)), []);
+
+  const pluginAppModules = useMemo(
+    () => installedPluginsToAppModules(installedPlugins),
+    [installedPlugins],
+  );
+  const registeredSettingsEntries = getSettingsEntries();
+
+  const pluginHeadingNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const m of pluginAppModules) {
+      if (m.pluginDisplayName) map[m.id] = m.pluginDisplayName;
+    }
+    return map;
+  }, [pluginAppModules]);
 
   const allTabs = [...PRIMARY_TABS, ABOUT_TAB].filter((tab) => {
     if (tab.id === 'shortcuts' && !showShortcuts) return false;
@@ -3405,84 +3560,211 @@ export function SettingsView() {
     return true;
   });
 
-  const heading = getSettingsHeading(activeTab, t);
+  const moduleSettingsTabs: NavTab[] = useMemo(
+    () =>
+      registeredSettingsEntries
+        .filter((entry) => entry.source === 'builtin')
+        .flatMap((entry) => {
+          const mod = BUILT_IN_MODULES.find((candidate) => candidate.id === entry.id);
+          if (!mod) return [];
+          if (!(moduleEnabled[mod.id] ?? mod.defaultEnabled)) return [];
+          return [
+            {
+              id: `module:${mod.id}` as SettingsTab,
+              label: mod.nameKey,
+              icon: PLUGIN_ICONS[mod.id] ?? Info,
+              rawLabel: false as boolean | undefined,
+            },
+          ];
+        }),
+    [moduleEnabled, registeredSettingsEntries],
+  );
+
+  const thirdPartySettingsTabs: NavTab[] = useMemo(
+    () =>
+      registeredSettingsEntries
+        .filter((entry) => entry.source === 'plugin')
+        .flatMap((entry) => {
+          const plugin = pluginAppModules.find((candidate) => candidate.id === entry.id);
+          if (!plugin) return [];
+          if (!(moduleEnabled[plugin.id] ?? plugin.defaultEnabled)) return [];
+          return [
+            {
+              id: `plugin:${plugin.id}` as SettingsTab,
+              label: plugin.pluginDisplayName ?? plugin.id,
+              icon: LayoutGrid,
+              rawLabel: true as boolean | undefined,
+            },
+          ];
+        }),
+    [moduleEnabled, pluginAppModules, registeredSettingsEntries],
+  );
+
+  useEffect(() => {
+    if (activeTab.startsWith('module:')) {
+      const id = activeTab.slice('module:'.length);
+      if (!moduleSettingsTabs.some((tab) => tab.id === activeTab)) {
+        const fallback = BUILT_IN_MODULES.find((mod) => mod.id === id);
+        if (!fallback || !(moduleEnabled[id] ?? fallback.defaultEnabled)) {
+          setActiveTab('plugins');
+        }
+      }
+    }
+    if (
+      activeTab.startsWith('plugin:') &&
+      !thirdPartySettingsTabs.some((tab) => tab.id === activeTab)
+    ) {
+      setActiveTab('plugins');
+    }
+  }, [activeTab, moduleEnabled, moduleSettingsTabs, thirdPartySettingsTabs]);
+
+  const heading = getSettingsHeading(activeTab, t, pluginHeadingNames);
+  const summary = getSettingsSummary(activeTab, t, pluginHeadingNames);
+  const appTabs = allTabs.filter((tab) => tab.id !== 'plugins');
+  const managementTabs = allTabs.filter((tab) => tab.id === 'plugins');
+  const contentWidthClass =
+    activeTab === 'plugins'
+      ? 'max-w-[82rem]'
+      : activeTab.startsWith('module:') || activeTab.startsWith('plugin:')
+        ? 'max-w-[74rem]'
+        : 'max-w-[68rem]';
+
+  const renderNavButton = (tab: NavTab, mobile = false) => {
+    const Icon = tab.icon;
+    const isActive = activeTab === tab.id;
+    return (
+      <button
+        key={tab.id}
+        type="button"
+        onClick={() => setActiveTab(tab.id)}
+        className={
+          mobile
+            ? 'shrink-0 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors select-none outline-none'
+            : 'flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-colors text-left select-none outline-none shrink-0'
+        }
+        style={{
+          background: isActive ? 'var(--color-accent-soft)' : 'transparent',
+          color: isActive ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+        }}
+      >
+        <Icon size={mobile ? 14 : 16} />
+        {tab.rawLabel ? tab.label : t(tab.label)}
+      </button>
+    );
+  };
+
+  const renderSectionLabel = (label: string, mobile = false) => (
+    <div
+      className={
+        mobile
+          ? 'shrink-0 px-1 text-[10px] font-semibold uppercase tracking-[0.18em]'
+          : 'px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.18em]'
+      }
+      style={{ color: 'var(--color-text-tertiary)' }}
+    >
+      {label}
+    </div>
+  );
 
   return (
-    <div className={`flex h-full bg-[var(--color-bg)] ${isMobile ? 'flex-col' : ''}`}>
-      {isMobile ? (
-        <div
-          className="flex items-center gap-0.5 px-2 pt-2 pb-1 overflow-x-auto shrink-0"
-          style={{ borderBottom: '1px solid var(--color-border)' }}
-        >
-          {allTabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className="shrink-0 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors select-none outline-none"
+    <SettingsNavContext.Provider value={{ setActiveTab }}>
+      <div className={`flex h-full bg-[var(--color-bg)] ${isMobile ? 'flex-col' : ''}`}>
+        {isMobile ? (
+          <div
+            className="flex items-center gap-3 px-2 pt-2 pb-1 overflow-x-auto shrink-0"
+            style={{ borderBottom: '1px solid var(--color-border)' }}
+          >
+            <div className="flex items-center gap-1.5">
+              {renderSectionLabel(t('General'), true)}
+              {appTabs.map((tab) => renderNavButton(tab, true))}
+            </div>
+            <div
+              className="flex items-center gap-1.5 border-l pl-3"
+              style={{ borderColor: 'var(--color-border)' }}
+            >
+              {renderSectionLabel(t('Modules'), true)}
+              {managementTabs.map((tab) => renderNavButton(tab, true))}
+              {moduleSettingsTabs.map((tab) => renderNavButton(tab, true))}
+            </div>
+            {thirdPartySettingsTabs.length > 0 && (
+              <div
+                className="flex items-center gap-1.5 border-l pl-3"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                {renderSectionLabel(t('Installed plugins'), true)}
+                {thirdPartySettingsTabs.map((tab) => renderNavButton(tab, true))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <nav
+            className="flex flex-col gap-1 py-8 px-3 shrink-0 overflow-y-auto"
+            style={{ width: '236px', borderRight: '1px solid var(--color-border)' }}
+          >
+            <h1
+              className="px-3 mb-4 text-lg font-bold shrink-0"
+              style={{ color: 'var(--color-text)' }}
+            >
+              {t('Settings')}
+            </h1>
+
+            {renderSectionLabel(t('General'))}
+            {appTabs.map((tab) => renderNavButton(tab))}
+            <hr className="my-2 border-[var(--color-border)]" />
+            {renderSectionLabel(t('Modules'))}
+            {managementTabs.map((tab) => renderNavButton(tab))}
+            {moduleSettingsTabs.map((tab) => renderNavButton(tab))}
+            {thirdPartySettingsTabs.length > 0 && (
+              <>
+                <hr className="my-2 border-[var(--color-border)]" />
+                {renderSectionLabel(t('Installed plugins'))}
+                {thirdPartySettingsTabs.map((tab) => renderNavButton(tab))}
+              </>
+            )}
+          </nav>
+        )}
+
+        <div className={`flex-1 overflow-y-auto ${isMobile ? 'px-4 py-4' : 'px-6 py-7'}`}>
+          <div className={contentWidthClass}>
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, x: 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.15 }}
+              className="settings-page-shell space-y-3"
+            >
+              <header
+                className="settings-page-header rounded-[var(--radius-panel)] border px-5 py-3.5"
                 style={{
-                  background: isActive ? 'var(--color-accent-soft)' : 'transparent',
-                  color: isActive ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+                  borderColor: 'var(--color-border)',
+                  background: 'color-mix(in srgb, var(--color-surface) 94%, var(--color-bg))',
                 }}
               >
-                <Icon size={14} />
-                {t(tab.label)}
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <nav
-          className="flex flex-col gap-1 py-8 px-3 shrink-0 overflow-y-auto"
-          style={{ width: '200px', borderRight: '1px solid var(--color-border)' }}
-        >
-          <h1 className="px-3 mb-4 text-lg font-bold shrink-0" style={{ color: 'var(--color-text)' }}>
-            {t('Settings')}
-          </h1>
-
-          {allTabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            const isAbout = tab.id === 'about';
-            return (
-              <React.Fragment key={tab.id}>
-                {isAbout && <hr className="my-2 border-[var(--color-border)]" />}
-                <button
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-medium transition-colors text-left select-none outline-none shrink-0"
-                  style={{
-                    background: isActive ? 'var(--color-accent-soft)' : 'transparent',
-                    color: isActive ? 'var(--color-accent)' : 'var(--color-text-secondary)',
-                  }}
+                <p
+                  className="text-[11px] font-semibold uppercase tracking-[0.16em]"
+                  style={{ color: 'var(--color-text-tertiary)' }}
                 >
-                  <Icon size={16} />
-                  {t(tab.label)}
-                </button>
-              </React.Fragment>
-            );
-          })}
-        </nav>
-      )}
-
-      <div className={`flex-1 overflow-y-auto ${isMobile ? 'px-4 py-4' : 'py-8 px-8'}`}>
-        <div className="max-w-xl">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, x: 8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.15 }}
-          >
-            <h2 className="text-base font-bold mb-6" style={{ color: 'var(--color-text)' }}>
-              {heading}
-            </h2>
-            {renderActiveSettingsTab(activeTab)}
-          </motion.div>
+                  {activeTab.startsWith('module:') || activeTab.startsWith('plugin:')
+                    ? i18n.language.startsWith('zh')
+                      ? '模块设置'
+                      : 'Module settings'
+                    : t('Settings')}
+                </p>
+                <h2 className="mt-1.5 text-[17px] font-bold" style={{ color: 'var(--color-text)' }}>
+                  {heading}
+                </h2>
+                <p
+                  className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {summary}
+                </p>
+              </header>
+              <div className="settings-page-content">{renderActiveSettingsTab(activeTab)}</div>
+            </motion.div>
+          </div>
         </div>
       </div>
-    </div>
+    </SettingsNavContext.Provider>
   );
 }

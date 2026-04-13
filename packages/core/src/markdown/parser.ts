@@ -12,6 +12,7 @@ import type {
   TaskReminder,
   TaskResource,
   TaskStatus,
+  TaskType,
 } from '../models/task.js';
 import {
   ENTRY_TYPE_REGEX,
@@ -260,6 +261,10 @@ function buildTaskFromMeta(
       ? (rawCol as KanbanColumn)
       : undefined;
 
+  const rawTaskType = meta.task_type as string | undefined;
+  const taskType: TaskType | undefined =
+    rawTaskType === 'project' || rawTaskType === 'task' ? rawTaskType : undefined;
+
   return {
     id: (meta.id as string) ?? '',
     title: (meta.title as string) ?? '',
@@ -289,6 +294,7 @@ function buildTaskFromMeta(
     phase,
     progressLogs: progressLogs.length > 0 ? progressLogs : undefined,
     kanbanColumn,
+    taskType,
   };
 }
 

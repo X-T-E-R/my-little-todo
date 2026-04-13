@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' asset: http://asset.localhost https://asset.localhost; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost http://localhost:5173 ws://localhost:5173; img-src 'self' asset: http://asset.localhost https://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self' data: blob:;"
     }
   },
   "bundle": {
@@ -39,9 +39,7 @@
   },
   "plugins": {
     "sql": {
-      "preload": [
-        "sqlite:data.db"
-      ]
+      "preload": ["sqlite:data.db"]
     },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIzRjk3QkQzMUZBOTlBODgKUldTSW1xa2YwM3Y1czZJZUxpN2g2VFVmZWNxNXNtSmR6TitjejhvcUVJdkQ1QncwUDhkdEZ5NFcK",

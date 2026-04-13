@@ -1,10 +1,9 @@
-import type { Task } from '@my-little-todo/core';
+import type { ScheduleBlock, Task } from '@my-little-todo/core';
 import { displayTaskTitle, isOverdue } from '@my-little-todo/core';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ScheduleBlock } from '../stores/scheduleStore';
 
 const WEEKDAY_KEYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -31,6 +30,192 @@ interface CalendarDay {
   ddlTasks: Task[];
   plannedTasks: Task[];
   scheduleBlocks: ScheduleBlock[];
+}
+
+function DayIndicators({
+  day,
+  hasOverdue,
+}: {
+  day: CalendarDay;
+  hasOverdue: boolean;
+}) {
+  const hasItems =
+    day.ddlTasks.length > 0 || day.plannedTasks.length > 0 || day.scheduleBlocks.length > 0;
+
+  if (!hasItems) return null;
+
+  return (
+    <div className="mt-1 flex gap-0.5">
+      {day.ddlTasks.length > 0 && (
+        <div
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ background: hasOverdue ? 'var(--color-danger)' : 'var(--color-warning)' }}
+        />
+      )}
+      {day.plannedTasks.length > 0 && (
+        <div className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--color-accent)' }} />
+      )}
+      {day.scheduleBlocks.length > 0 && (
+        <div
+          className="h-1.5 w-1.5 rounded-full"
+          style={{ background: 'var(--color-text-tertiary)' }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CalendarDayButton({
+  day,
+  selectedDate,
+  onSelect,
+}: {
+  day: CalendarDay;
+  selectedDate: Date | null;
+  onSelect: (date: Date) => void;
+}) {
+  const isSelected = selectedDate ? isSameDay(day.date, selectedDate) : false;
+  const hasOverdue = day.ddlTasks.some((task) => task.ddl && isOverdue(task.ddl));
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(day.date)}
+      className="relative flex min-h-[56px] flex-col items-center py-2 transition-colors"
+      style={{
+        background: isSelected
+          ? 'var(--color-accent-soft)'
+          : day.isToday
+            ? 'color-mix(in srgb, var(--color-accent) 5%, var(--color-surface))'
+            : 'var(--color-surface)',
+        opacity: day.isCurrentMonth ? 1 : 0.4,
+      }}
+    >
+      <span
+        className={`text-[12px] font-medium ${day.isToday ? 'flex h-6 w-6 items-center justify-center rounded-full' : ''}`}
+        style={{
+          color: isSelected ? 'var(--color-accent)' : day.isToday ? 'white' : 'var(--color-text)',
+          background: day.isToday && !isSelected ? 'var(--color-accent)' : undefined,
+        }}
+      >
+        {day.date.getDate()}
+      </span>
+      <DayIndicators day={day} hasOverdue={hasOverdue} />
+    </button>
+  );
+}
+
+function ScheduleBlockList({ blocks }: { blocks: ScheduleBlock[] }) {
+  if (blocks.length === 0) return null;
+
+  return (
+    <div className="mb-3 space-y-1">
+      {blocks.map((block) => (
+        <div
+          key={block.id}
+          className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px]"
+          style={{
+            background: `${block.color}20`,
+            borderLeft: `3px solid ${block.color}`,
+          }}
+        >
+          <span className="font-medium" style={{ color: block.color }}>
+            {block.startTime}-{block.endTime}
+          </span>
+          <span style={{ color: 'var(--color-text-secondary)' }}>{block.name}</span>
+          {block.location && (
+            <span style={{ color: 'var(--color-text-tertiary)' }}>@ {block.location}</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TaskListSection({
+  title,
+  color,
+  tasks,
+  onSelectTask,
+}: {
+  title: string;
+  color: string;
+  tasks: Task[];
+  onSelectTask: (id: string) => void;
+}) {
+  if (tasks.length === 0) return null;
+
+  return (
+    <div className="space-y-1">
+      <p className="text-[10px] font-medium" style={{ color }}>
+        {title}
+      </p>
+      {tasks.map((task) => (
+        <button
+          key={task.id}
+          type="button"
+          onClick={() => onSelectTask(task.id)}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-[var(--color-bg)]"
+        >
+          <div className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
+          <span className="truncate text-[12px]" style={{ color: 'var(--color-text)' }}>
+            {displayTaskTitle(task)}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SelectedDayDetails({
+  day,
+  onSelectTask,
+  t,
+}: {
+  day: CalendarDay;
+  onSelectTask: (id: string) => void;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}) {
+  const hasContent =
+    day.ddlTasks.length > 0 || day.plannedTasks.length > 0 || day.scheduleBlocks.length > 0;
+
+  if (!hasContent) return null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 10 }}
+      className="mt-4 rounded-xl p-4"
+      style={{
+        background: 'var(--color-surface)',
+        border: '1px solid var(--color-border)',
+      }}
+    >
+      <p className="mb-3 text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
+        {t('{{month}}M {{day}}D', {
+          month: day.date.getMonth() + 1,
+          day: day.date.getDate(),
+        })}
+      </p>
+
+      <ScheduleBlockList blocks={day.scheduleBlocks} />
+
+      <TaskListSection
+        title={t('Due')}
+        color="var(--color-warning)"
+        tasks={day.ddlTasks}
+        onSelectTask={onSelectTask}
+      />
+      {day.ddlTasks.length > 0 && day.plannedTasks.length > 0 && <div className="mb-2" />}
+      <TaskListSection
+        title={t('Planned')}
+        color="var(--color-accent)"
+        tasks={day.plannedTasks}
+        onSelectTask={onSelectTask}
+      />
+    </motion.div>
+  );
 }
 
 function buildCalendarDays(
@@ -211,171 +396,19 @@ export function CalendarView({
         className="grid grid-cols-7 gap-px rounded-xl overflow-hidden"
         style={{ background: 'var(--color-border)' }}
       >
-        {days.map((day) => {
-          const hasItems =
-            day.ddlTasks.length > 0 || day.plannedTasks.length > 0 || day.scheduleBlocks.length > 0;
-          const isSelected = selectedDate && isSameDay(day.date, selectedDate);
-          const hasOverdue = day.ddlTasks.some((t) => t.ddl && isOverdue(t.ddl));
-
-          return (
-            <button
-              key={day.date.toISOString()}
-              type="button"
-              onClick={() => setSelectedDate(day.date)}
-              className="relative flex flex-col items-center py-2 min-h-[56px] transition-colors"
-              style={{
-                background: isSelected
-                  ? 'var(--color-accent-soft)'
-                  : day.isToday
-                    ? 'color-mix(in srgb, var(--color-accent) 5%, var(--color-surface))'
-                    : 'var(--color-surface)',
-                opacity: day.isCurrentMonth ? 1 : 0.4,
-              }}
-            >
-              <span
-                className={`text-[12px] font-medium ${day.isToday ? 'rounded-full w-6 h-6 flex items-center justify-center' : ''}`}
-                style={{
-                  color: isSelected
-                    ? 'var(--color-accent)'
-                    : day.isToday
-                      ? 'white'
-                      : 'var(--color-text)',
-                  background: day.isToday && !isSelected ? 'var(--color-accent)' : undefined,
-                }}
-              >
-                {day.date.getDate()}
-              </span>
-              {hasItems && (
-                <div className="flex gap-0.5 mt-1">
-                  {day.ddlTasks.length > 0 && (
-                    <div
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{
-                        background: hasOverdue ? 'var(--color-danger)' : 'var(--color-warning)',
-                      }}
-                    />
-                  )}
-                  {day.plannedTasks.length > 0 && (
-                    <div
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ background: 'var(--color-accent)' }}
-                    />
-                  )}
-                  {day.scheduleBlocks.length > 0 && (
-                    <div
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ background: 'var(--color-text-tertiary)' }}
-                    />
-                  )}
-                </div>
-              )}
-            </button>
-          );
-        })}
+        {days.map((day) => (
+          <CalendarDayButton
+            key={day.date.toISOString()}
+            day={day}
+            selectedDate={selectedDate}
+            onSelect={setSelectedDate}
+          />
+        ))}
       </div>
 
       {/* Selected date detail */}
       <AnimatePresence>
-        {selectedDay &&
-          (selectedDay.ddlTasks.length > 0 ||
-            selectedDay.plannedTasks.length > 0 ||
-            selectedDay.scheduleBlocks.length > 0) && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-              className="mt-4 rounded-xl p-4"
-              style={{
-                background: 'var(--color-surface)',
-                border: '1px solid var(--color-border)',
-              }}
-            >
-              <p className="text-xs font-semibold mb-3" style={{ color: 'var(--color-text)' }}>
-                {t('{{month}}M {{day}}D', {
-                  month: selectedDay.date.getMonth() + 1,
-                  day: selectedDay.date.getDate(),
-                })}
-              </p>
-
-              {selectedDay.scheduleBlocks.length > 0 && (
-                <div className="mb-3 space-y-1">
-                  {selectedDay.scheduleBlocks.map((block) => (
-                    <div
-                      key={block.id}
-                      className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-[11px]"
-                      style={{
-                        background: `${block.color}20`,
-                        borderLeft: `3px solid ${block.color}`,
-                      }}
-                    >
-                      <span className="font-medium" style={{ color: block.color }}>
-                        {block.startTime}-{block.endTime}
-                      </span>
-                      <span style={{ color: 'var(--color-text-secondary)' }}>{block.name}</span>
-                      {block.location && (
-                        <span style={{ color: 'var(--color-text-tertiary)' }}>
-                          @ {block.location}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {selectedDay.ddlTasks.length > 0 && (
-                <div className="space-y-1 mb-2">
-                  <p className="text-[10px] font-medium" style={{ color: 'var(--color-warning)' }}>
-                    {t('Due')}
-                  </p>
-                  {selectedDay.ddlTasks.map((taskItem) => (
-                    <button
-                      key={taskItem.id}
-                      type="button"
-                      onClick={() => onSelectTask(taskItem.id)}
-                      className="w-full text-left flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-[var(--color-bg)]"
-                    >
-                      <div
-                        className="w-2 h-2 rounded-full shrink-0"
-                        style={{
-                          background:
-                            taskItem.ddl && isOverdue(taskItem.ddl)
-                              ? 'var(--color-danger)'
-                              : 'var(--color-warning)',
-                        }}
-                      />
-                      <span className="text-[12px] truncate" style={{ color: 'var(--color-text)' }}>
-                        {displayTaskTitle(taskItem)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {selectedDay.plannedTasks.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-[10px] font-medium" style={{ color: 'var(--color-accent)' }}>
-                    {t('Planned')}
-                  </p>
-                  {selectedDay.plannedTasks.map((taskItem) => (
-                    <button
-                      key={taskItem.id}
-                      type="button"
-                      onClick={() => onSelectTask(taskItem.id)}
-                      className="w-full text-left flex items-center gap-2 rounded-lg px-3 py-2 transition-colors hover:bg-[var(--color-bg)]"
-                    >
-                      <div
-                        className="w-2 h-2 rounded-full shrink-0"
-                        style={{ background: 'var(--color-accent)' }}
-                      />
-                      <span className="text-[12px] truncate" style={{ color: 'var(--color-text)' }}>
-                        {displayTaskTitle(taskItem)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </motion.div>
-          )}
+        {selectedDay && <SelectedDayDetails day={selectedDay} onSelectTask={onSelectTask} t={t} />}
       </AnimatePresence>
     </div>
   );

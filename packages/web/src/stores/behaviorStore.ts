@@ -40,17 +40,25 @@ function deserializeEvents(raw: string): RecommendationEvent[] {
   }
 }
 
+let _behaviorLoadPromise: Promise<void> | null = null;
+
 export const useBehaviorStore = create<BehaviorState>((set, get) => ({
   events: [],
 
   load: async () => {
-    try {
-      const raw = await getSetting(SETTING_KEY);
-      const events = raw ? deserializeEvents(raw) : [];
-      set({ events });
-    } catch {
-      // keep empty
-    }
+    if (_behaviorLoadPromise) return _behaviorLoadPromise;
+    _behaviorLoadPromise = (async () => {
+      try {
+        const raw = await getSetting(SETTING_KEY);
+        const events = raw ? deserializeEvents(raw) : [];
+        set({ events });
+      } catch {
+        // keep empty
+      } finally {
+        _behaviorLoadPromise = null;
+      }
+    })();
+    return _behaviorLoadPromise;
   },
 
   recordEvent: (partial) => {

@@ -16,7 +16,7 @@
     "build:admin": "pnpm --filter @my-little-todo/admin build",
     "dev:admin": "pnpm --filter @my-little-todo/admin dev",
     "dev:web": "concurrently -n rust,vite -c blue,green \"cargo run -p mlt-server-bin\" \"pnpm --filter @my-little-todo/web dev:vite\"",
-    "typecheck": "pnpm --filter @my-little-todo/core exec tsc --noEmit && pnpm --filter @my-little-todo/web exec tsc -b --noEmit",
+    "typecheck": "pnpm --filter @my-little-todo/core exec tsc --noEmit && pnpm --filter @my-little-todo/plugin-sdk exec tsc --noEmit && pnpm --filter @my-little-todo/web exec tsc -b --noEmit",
     "format": "biome format --write .",
     "bump": "node scripts/bump-version.mjs"
   },
@@ -28,6 +28,9 @@
   },
   "packageManager": "pnpm@10.32.1",
   "pnpm": {
-    "onlyBuiltDependencies": ["@biomejs/biome", "esbuild"]
+    "onlyBuiltDependencies": ["@biomejs/biome", "esbuild"],
+    "patchedDependencies": {
+      "@milkdown/crepe@7.20.0": "patches/@milkdown__crepe@7.20.0.patch"
+    }
   }
 }

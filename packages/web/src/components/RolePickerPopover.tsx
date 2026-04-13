@@ -1,5 +1,6 @@
-import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { useRoleStore } from '../stores';
 
@@ -7,32 +8,84 @@ interface RolePickerPopoverProps {
   currentRoleId?: string;
   onSelect: (roleId: string | undefined) => void;
   onClose: () => void;
+  /** Anchor for fixed positioning (portal); avoids parent overflow clipping */
+  anchorRef: React.RefObject<HTMLElement | null>;
 }
 
-export function RolePickerPopover({ currentRoleId, onSelect, onClose }: RolePickerPopoverProps) {
+export function RolePickerPopover({
+  currentRoleId,
+  onSelect,
+  onClose,
+  anchorRef,
+}: RolePickerPopoverProps) {
   const { t } = useTranslation('role');
   const roles = useRoleStore((s) => s.roles);
   const ref = useRef<HTMLDivElement>(null);
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
+
+  const updatePosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const minW = 140;
+    const maxH = 240;
+    const width = Math.max(rect.width, minW);
+    let left = rect.left;
+    let top = rect.bottom + 4;
+    if (left + width > vw - 8) left = Math.max(8, vw - 8 - width);
+    if (left < 8) left = 8;
+    // Prefer below; flip above if not enough room
+    const estHeight = Math.min(roles.length * 40 + 48, maxH);
+    if (top + estHeight > vh - 8 && rect.top > estHeight + 8) {
+      top = rect.top - 4 - estHeight;
+    }
+    setPopoverStyle({
+      position: 'fixed',
+      top,
+      left,
+      minWidth: minW,
+      width,
+      maxHeight: maxH,
+      zIndex: 9999,
+    });
+  }, [anchorRef, roles.length]);
+
+  useLayoutEffect(() => {
+    updatePosition();
+  }, [updatePosition]);
+
+  useEffect(() => {
+    const onScroll = () => updatePosition();
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [updatePosition]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
+      const t = e.target as Node;
+      if (ref.current?.contains(t)) return;
+      if (anchorRef.current?.contains(t)) return;
+      onClose();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
+  }, [onClose, anchorRef]);
 
-  return (
+  const popover = (
     <motion.div
       ref={ref}
       initial={{ opacity: 0, y: 4, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 4, scale: 0.95 }}
       transition={{ duration: 0.12 }}
-      className="absolute z-50 min-w-[140px] rounded-xl p-1 shadow-lg"
+      className="max-h-[240px] overflow-y-auto rounded-xl p-1 shadow-lg"
       style={{
+        ...popoverStyle,
         background: 'var(--color-surface)',
         border: '1px solid var(--color-border)',
       }}
@@ -81,6 +134,9 @@ export function RolePickerPopover({ currentRoleId, onSelect, onClose }: RolePick
       ))}
     </motion.div>
   );
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(popover, document.body);
 }
 
 interface RolePillProps {
@@ -93,26 +149,72 @@ interface RoleMultiPickerPopoverProps {
   selectedIds: string[];
   onChange: (ids: string[]) => void;
   onClose: () => void;
+  anchorRef: React.RefObject<HTMLElement | null>;
 }
 
 export function RoleMultiPickerPopover({
   selectedIds,
   onChange,
   onClose,
+  anchorRef,
 }: RoleMultiPickerPopoverProps) {
   const { t } = useTranslation('role');
   const roles = useRoleStore((s) => s.roles);
   const ref = useRef<HTMLDivElement>(null);
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
+
+  const updatePosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+    const rect = anchor.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const minW = 180;
+    const maxH = 240;
+    const width = Math.max(rect.width, minW);
+    let left = rect.left;
+    let top = rect.bottom + 4;
+    if (left + width > vw - 8) left = Math.max(8, vw - 8 - width);
+    if (left < 8) left = 8;
+    const estHeight = Math.min(roles.length * 40 + 48, maxH);
+    if (top + estHeight > vh - 8 && rect.top > estHeight + 8) {
+      top = rect.top - 4 - estHeight;
+    }
+    setPopoverStyle({
+      position: 'fixed',
+      top,
+      left,
+      minWidth: minW,
+      width,
+      maxHeight: maxH,
+      zIndex: 9999,
+    });
+  }, [anchorRef, roles.length]);
+
+  useLayoutEffect(() => {
+    updatePosition();
+  }, [updatePosition]);
+
+  useEffect(() => {
+    const onScroll = () => updatePosition();
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [updatePosition]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        onClose();
-      }
+      const t = e.target as Node;
+      if (ref.current?.contains(t)) return;
+      if (anchorRef.current?.contains(t)) return;
+      onClose();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
+  }, [onClose, anchorRef]);
 
   const toggle = (id: string) => {
     const next = selectedIds.includes(id)
@@ -121,15 +223,15 @@ export function RoleMultiPickerPopover({
     onChange(next);
   };
 
-  return (
+  const popover = (
     <motion.div
       ref={ref}
       initial={{ opacity: 0, y: 4, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 4, scale: 0.95 }}
       transition={{ duration: 0.12 }}
-      className="absolute z-50 min-w-[180px] max-h-[240px] overflow-y-auto rounded-xl p-1 shadow-lg"
+      className="overflow-y-auto rounded-xl p-1 shadow-lg"
       style={{
+        ...popoverStyle,
         background: 'var(--color-surface)',
         border: '1px solid var(--color-border)',
       }}
@@ -145,8 +247,7 @@ export function RoleMultiPickerPopover({
         className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition-colors"
         style={{
           color: selectedIds.length === 0 ? 'var(--color-accent)' : 'var(--color-text-secondary)',
-          background:
-            selectedIds.length === 0 ? 'var(--color-accent-soft)' : undefined,
+          background: selectedIds.length === 0 ? 'var(--color-accent-soft)' : undefined,
         }}
       >
         <div
@@ -179,6 +280,9 @@ export function RoleMultiPickerPopover({
       })}
     </motion.div>
   );
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(popover, document.body);
 }
 
 interface RolePillMultiProps {
@@ -192,12 +296,11 @@ export function RolePillMulti({ roleIds, onChangeRoleIds, size = 'sm' }: RolePil
   const { t } = useTranslation('role');
   const roles = useRoleStore((s) => s.roles);
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
 
   if (roles.length === 0) return null;
 
-  const firstResolved = roleIds.length
-    ? roles.find((r) => r.id === roleIds[0])
-    : undefined;
+  const firstResolved = roleIds.length ? roles.find((r) => r.id === roleIds[0]) : undefined;
   const extra = Math.max(0, roleIds.length - 1);
 
   const fontSize = size === 'sm' ? 'text-[10px]' : 'text-xs';
@@ -206,6 +309,7 @@ export function RolePillMulti({ roleIds, onChangeRoleIds, size = 'sm' }: RolePil
   return (
     <span className="relative inline-flex">
       <button
+        ref={anchorRef}
         type="button"
         onClick={(e) => {
           e.stopPropagation();
@@ -236,15 +340,14 @@ export function RolePillMulti({ roleIds, onChangeRoleIds, size = 'sm' }: RolePil
           <span>{t('No role')}</span>
         )}
       </button>
-      <AnimatePresence>
-        {open && (
-          <RoleMultiPickerPopover
-            selectedIds={roleIds}
-            onChange={(ids) => onChangeRoleIds(ids)}
-            onClose={() => setOpen(false)}
-          />
-        )}
-      </AnimatePresence>
+      {open && (
+        <RoleMultiPickerPopover
+          anchorRef={anchorRef}
+          selectedIds={roleIds}
+          onChange={(ids) => onChangeRoleIds(ids)}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </span>
   );
 }
@@ -254,6 +357,7 @@ export function RolePill({ roleId, onChangeRole, size = 'sm' }: RolePillProps) {
   const roles = useRoleStore((s) => s.roles);
   const role = roleId ? roles.find((r) => r.id === roleId) : undefined;
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLButtonElement>(null);
 
   if (roles.length === 0) return null;
 
@@ -263,6 +367,7 @@ export function RolePill({ roleId, onChangeRole, size = 'sm' }: RolePillProps) {
   return (
     <span className="relative inline-flex">
       <button
+        ref={anchorRef}
         type="button"
         onClick={(e) => {
           e.stopPropagation();
@@ -280,15 +385,14 @@ export function RolePill({ roleId, onChangeRole, size = 'sm' }: RolePillProps) {
         />
         {role?.name ?? t('No role')}
       </button>
-      <AnimatePresence>
-        {open && (
-          <RolePickerPopover
-            currentRoleId={roleId}
-            onSelect={onChangeRole}
-            onClose={() => setOpen(false)}
-          />
-        )}
-      </AnimatePresence>
+      {open && (
+        <RolePickerPopover
+          anchorRef={anchorRef}
+          currentRoleId={roleId}
+          onSelect={onChangeRole}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </span>
   );
 }

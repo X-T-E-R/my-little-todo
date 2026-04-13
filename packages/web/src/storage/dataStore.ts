@@ -1,4 +1,11 @@
-import type { StreamEntry, Task } from '@my-little-todo/core';
+import type {
+  StreamEntry,
+  Task,
+  ThinkSession,
+  WindowContext,
+  WorkThread,
+  WorkThreadEvent,
+} from '@my-little-todo/core';
 import type { AttachmentConfig, UploadResult } from './blobApi';
 
 /** Tables that participate in sync replication. */
@@ -29,6 +36,8 @@ export interface DataStore {
   getTask(id: string): Promise<Task | null>;
   putTask(task: Task): Promise<void>;
   deleteTask(id: string): Promise<void>;
+  /** Remove only the task facet, keeping the canonical stream entry. */
+  deleteTaskFacet?(id: string): Promise<void>;
 
   // ── Stream ───────────────────────────────────────────────────────
 
@@ -53,14 +62,44 @@ export interface DataStore {
 
   uploadBlob(file: File): Promise<UploadResult>;
   getBlobUrl(id: string): string;
+  getBlobData(
+    id: string,
+  ): Promise<{ data: Uint8Array; mimeType: string; filename: string } | null>;
   deleteBlob(id: string): Promise<void>;
   getAttachmentConfig(): Promise<AttachmentConfig>;
+
+  // ── Window contexts (Tauri local; optional on API store) ───────
+
+  getAllWindowContexts(): Promise<WindowContext[]>;
+  putWindowContext(ctx: WindowContext): Promise<void>;
+  deleteWindowContext(id: string): Promise<void>;
+
+  // ── Think sessions (理一理) ─────────────────────────────────────
+
+  saveThinkSession(session: ThinkSession): Promise<void>;
+  getThinkSession(id: string): Promise<ThinkSession | null>;
+  listThinkSessions(limit?: number): Promise<ThinkSession[]>;
+  deleteThinkSession(id: string): Promise<void>;
+
+  // Work threads (agent-like process workspace)
+
+  saveWorkThread(thread: WorkThread): Promise<void>;
+  getWorkThread(id: string): Promise<WorkThread | null>;
+  listWorkThreads(limit?: number): Promise<WorkThread[]>;
+  deleteWorkThread(id: string): Promise<void>;
+  appendWorkThreadEvent(event: WorkThreadEvent): Promise<void>;
+  listWorkThreadEvents(threadId: string, limit?: number): Promise<WorkThreadEvent[]>;
 
   // ── Sync (optional: native SQLite stores) ──────────────────────
 
   /** All rows with version > sinceVersion across synced tables. */
   getChangesSince?(sinceVersion: number): Promise<LocalChangeRecord[]>;
   getMaxVersion?(): Promise<number>;
+
+  // Plugin KV helpers (fall back to settings when omitted)
+  getPluginData?(pluginId: string, key: string): Promise<string | null>;
+  putPluginData?(pluginId: string, key: string, value: string): Promise<void>;
+  deletePluginData?(pluginId: string, key: string): Promise<void>;
 }
 
 let _store: DataStore | null = null;
@@ -74,10 +113,11 @@ export function withPluginDataDefaults(store: DataStore): DataStore {
   if (store.getPluginData && store.putPluginData && store.deletePluginData) return store;
   return {
     ...store,
-    getPluginData: async (pluginId, key) => store.getSetting(pluginSettingKey(pluginId, key)),
-    putPluginData: async (pluginId, key, value) =>
+    getPluginData: async (pluginId: string, key: string) =>
+      store.getSetting(pluginSettingKey(pluginId, key)),
+    putPluginData: async (pluginId: string, key: string, value: string) =>
       store.putSetting(pluginSettingKey(pluginId, key), value),
-    deletePluginData: async (pluginId, key) =>
+    deletePluginData: async (pluginId: string, key: string) =>
       store.deleteSetting(pluginSettingKey(pluginId, key)),
   };
 }

@@ -12,5 +12,9 @@
   "Cannot delete yourself": "不能删除自己",
   "Backup provider not configured": "备份提供商未配置",
   "Username or password too long": "用户名或密码过长",
-  "Entry not found": "条目未找到"
+  "Entry not found": "条目未找到",
+  "Something went wrong": "出了点问题",
+  "Unknown error": "未知错误",
+  "Retry": "重试",
+  "Reload page": "刷新页面"
 }

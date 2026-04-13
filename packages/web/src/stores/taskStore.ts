@@ -1,10 +1,11 @@
-import type { Task, TaskStatus } from '@my-little-todo/core';
+import type { ScheduleBlock, StreamEntry, Task, TaskStatus } from '@my-little-todo/core';
 import {
   daysUntil,
   displayTaskTitle,
   estimateTaskProgress,
   isNearFinishing,
   isSmallTask,
+  taskRoleIds,
 } from '@my-little-todo/core';
 import { create } from 'zustand';
 import i18n from '../locales';
@@ -19,7 +20,13 @@ import {
   submitTask as submitInRepo,
   updateTaskStatus as updateStatusInRepo,
 } from '../storage/taskRepo';
+import {
+  computeHourlyAcceptancePatterns,
+  getHourPreferenceBoost,
+} from '../utils/timeAwarenessPatterns';
+import type { RecommendationEvent } from './behaviorStore';
 import type { EnergyLevel } from './execCoachStore';
+import { isInScheduleBlock, minutesUntilNextBlockStart } from './timeAwarenessStore';
 
 interface TaskState {
   tasks: Task[];
@@ -56,6 +63,19 @@ interface TaskState {
 let _taskLoadPromise: Promise<void> | null = null;
 const _statusVersions = new Map<string, number>();
 
+function toStreamEntry(task: Task): StreamEntry {
+  return {
+    id: task.sourceStreamId ?? task.id,
+    content: task.body,
+    timestamp: task.createdAt,
+    tags: task.tags ?? [],
+    attachments: [],
+    extractedTaskId: task.id,
+    roleId: taskRoleIds(task)[0],
+    entryType: 'task',
+  };
+}
+
 export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   loading: false,
@@ -85,6 +105,15 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   createTask: async (title, opts) => {
     const task = await createTaskInRepo(title, opts);
     set((state) => ({ tasks: [...state.tasks, task] }));
+    const { useStreamStore } = await import('./streamStore');
+    const streamEntry = toStreamEntry(task);
+    useStreamStore.setState((state) => ({
+      entries: state.entries.find((entry) => entry.id === streamEntry.id)
+        ? state.entries.map((entry) =>
+            entry.id === streamEntry.id ? { ...entry, ...streamEntry } : entry,
+          )
+        : [...state.entries, streamEntry],
+    }));
     return task;
   },
 
@@ -322,6 +351,40 @@ export interface PickRecommendationOptions {
   energyLevel?: EnergyLevel;
   /** Full task list for subtask / progress heuristics (defaults to `tasks`). */
   allTasks?: Task[];
+  /** When enabled, uses fixed blocks + learned hourly acceptance from behavior events. */
+  timeAwareness?: {
+    enabled: boolean;
+    blocks: ScheduleBlock[];
+    behaviorEvents?: RecommendationEvent[];
+  };
+}
+
+function timeAwarenessScoreDelta(
+  task: Task,
+  now: Date,
+  ta: NonNullable<PickRecommendationOptions['timeAwareness']>,
+): number {
+  if (!ta.enabled) return 0;
+  const { blocks, behaviorEvents = [] } = ta;
+  let delta = 0;
+  const patterns = computeHourlyAcceptancePatterns(behaviorEvents);
+  delta += getHourPreferenceBoost(now.getHours(), patterns);
+
+  const inBlock = isInScheduleBlock(blocks, now);
+  if (inBlock) {
+    const roles = taskRoleIds(task);
+    if (inBlock.roleId && roles.includes(inBlock.roleId)) {
+      delta += 40;
+    } else {
+      delta -= 35;
+    }
+  }
+
+  if (minutesUntilNextBlockStart(blocks, now, 15) !== null && isSmallTask(task)) {
+    delta += 28;
+  }
+
+  return delta;
 }
 
 function energyBoost(task: Task, allTasks: Task[], energy: EnergyLevel, base: number): number {
@@ -349,11 +412,15 @@ export function pickRecommendation(tasks: Task[], opts?: PickRecommendationOptio
   const now = new Date();
   const energy = opts?.energyLevel ?? 'normal';
   const allTasks = opts?.allTasks ?? tasks;
+  const ta = opts?.timeAwareness;
 
-  const scored = active.map((task) => ({
-    task,
-    score: energyBoost(task, allTasks, energy, recommendationScore(task, now)),
-  }));
+  const scored = active.map((task) => {
+    let score = energyBoost(task, allTasks, energy, recommendationScore(task, now));
+    if (ta?.enabled) {
+      score += timeAwarenessScoreDelta(task, now, ta);
+    }
+    return { task, score };
+  });
 
   scored.sort((a, b) => b.score - a.score);
   return scored[0]?.task ?? null;

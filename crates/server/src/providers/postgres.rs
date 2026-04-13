@@ -1,10 +1,12 @@
 use async_trait::async_trait;
-use sqlx::Postgres;
 use sqlx::postgres::{PgPool, PgPoolOptions};
+use sqlx::Postgres;
 
 use super::traits::{BlobMeta, ChangeRecord, DatabaseProvider, NewUser, User};
 
-async fn bump_version_pg<'e, E: sqlx::Executor<'e, Database = Postgres>>(e: E) -> anyhow::Result<i64> {
+async fn bump_version_pg<'e, E: sqlx::Executor<'e, Database = Postgres>>(
+    e: E,
+) -> anyhow::Result<i64> {
     let row: (i64,) = sqlx::query_as(
         "UPDATE version_seq SET current_version = current_version + 1 WHERE id = 1 RETURNING current_version",
     )
@@ -25,15 +27,17 @@ async fn upsert_task_json_tx(
         r#"INSERT INTO tasks (
                 user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
                 ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+                task_type,
                 tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
                 version, deleted_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
             ON CONFLICT(user_id, id) DO UPDATE SET
                 title=EXCLUDED.title, title_customized=EXCLUDED.title_customized, description=EXCLUDED.description, status=EXCLUDED.status, body=EXCLUDED.body,
                 created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at, completed_at=EXCLUDED.completed_at,
                 ddl=EXCLUDED.ddl, ddl_type=EXCLUDED.ddl_type, planned_at=EXCLUDED.planned_at,
                 role_id=EXCLUDED.role_id, role_ids=EXCLUDED.role_ids, parent_id=EXCLUDED.parent_id, source_stream_id=EXCLUDED.source_stream_id,
                 priority=EXCLUDED.priority, promoted=EXCLUDED.promoted, phase=EXCLUDED.phase, kanban_column=EXCLUDED.kanban_column,
+                task_type=EXCLUDED.task_type,
                 tags=EXCLUDED.tags, subtask_ids=EXCLUDED.subtask_ids, resources=EXCLUDED.resources,
                 reminders=EXCLUDED.reminders, submissions=EXCLUDED.submissions, postponements=EXCLUDED.postponements,
                 status_history=EXCLUDED.status_history, progress_logs=EXCLUDED.progress_logs,
@@ -60,6 +64,7 @@ async fn upsert_task_json_tx(
     .bind(v["promoted"].as_i64())
     .bind(v["phase"].as_str())
     .bind(v["kanban_column"].as_str())
+    .bind(v["task_type"].as_str())
     .bind(v["tags"].as_str().unwrap_or("[]"))
     .bind(v["subtask_ids"].as_str().unwrap_or("[]"))
     .bind(v["resources"].as_str().unwrap_or("[]"))
@@ -195,7 +200,20 @@ async fn apply_remote_change_tx(
                 .await?;
             }
         }
-        "blobs" => {}
+        "blobs" => {
+            if change.deleted_at.is_some() {
+                let next_ver = bump_version_pg(&mut **tx).await?;
+                sqlx::query(
+                    "UPDATE blobs SET deleted_at = NOW()::text, version = $1
+                     WHERE owner = $2 AND id = $3 AND deleted_at IS NULL",
+                )
+                .bind(next_ver)
+                .bind(user_id)
+                .bind(&change.key)
+                .execute(&mut **tx)
+                .await?;
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -206,7 +224,7 @@ pub struct PostgresProvider {
 }
 
 /// Schema migrations: 1=initial, 2=blobs, 3=sync columns+version_seq, 4=tasks+stream_entries, 5=stream updated_at, 6=align, 7=tasks.role_ids
-const CURRENT_SCHEMA_VERSION: i64 = 8;
+const CURRENT_SCHEMA_VERSION: i64 = 10;
 
 impl PostgresProvider {
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
@@ -224,13 +242,12 @@ impl PostgresProvider {
         .execute(&pool)
         .await?;
 
-        let current_version: i64 = sqlx::query_as::<_, (i64,)>(
-            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
-        )
-        .fetch_one(&pool)
-        .await
-        .map(|r| r.0)
-        .unwrap_or(0);
+        let current_version: i64 =
+            sqlx::query_as::<_, (i64,)>("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+                .fetch_one(&pool)
+                .await
+                .map(|r| r.0)
+                .unwrap_or(0);
 
         if current_version < 1 {
             sqlx::query(
@@ -307,16 +324,20 @@ impl PostgresProvider {
             sqlx::query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS deleted_at TEXT")
                 .execute(&pool)
                 .await?;
-            sqlx::query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0")
-                .execute(&pool)
-                .await?;
+            sqlx::query(
+                "ALTER TABLE settings ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0",
+            )
+            .execute(&pool)
+            .await?;
 
             sqlx::query("ALTER TABLE blobs ADD COLUMN IF NOT EXISTS deleted_at TEXT")
                 .execute(&pool)
                 .await?;
-            sqlx::query("ALTER TABLE blobs ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0")
-                .execute(&pool)
-                .await?;
+            sqlx::query(
+                "ALTER TABLE blobs ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0",
+            )
+            .execute(&pool)
+            .await?;
 
             sqlx::query(
                 "CREATE TABLE IF NOT EXISTS version_seq (
@@ -429,9 +450,11 @@ impl PostgresProvider {
             sqlx::query("ALTER TABLE stream_entries ADD COLUMN IF NOT EXISTS updated_at BIGINT")
                 .execute(&pool)
                 .await?;
-            sqlx::query(r#"UPDATE stream_entries SET updated_at = "timestamp" WHERE updated_at IS NULL"#)
-                .execute(&pool)
-                .await?;
+            sqlx::query(
+                r#"UPDATE stream_entries SET updated_at = "timestamp" WHERE updated_at IS NULL"#,
+            )
+            .execute(&pool)
+            .await?;
             sqlx::query("INSERT INTO schema_version (version) VALUES (5) ON CONFLICT DO NOTHING")
                 .execute(&pool)
                 .await?;
@@ -473,15 +496,51 @@ impl PostgresProvider {
             .unwrap_or(false);
 
             if !has_title_customized {
-                sqlx::query("ALTER TABLE tasks ADD COLUMN title_customized BIGINT NOT NULL DEFAULT 0")
-                    .execute(&pool)
-                    .await?;
-                sqlx::query("UPDATE tasks SET title = '', title_customized = 0")
+                sqlx::query(
+                    "ALTER TABLE tasks ADD COLUMN title_customized BIGINT NOT NULL DEFAULT 0",
+                )
+                .execute(&pool)
+                .await?;
+                sqlx::query(
+                    "UPDATE tasks SET title_customized = CASE WHEN trim(title) <> '' THEN 1 ELSE 0 END",
+                )
                     .execute(&pool)
                     .await?;
             }
 
             sqlx::query("INSERT INTO schema_version (version) VALUES (8) ON CONFLICT DO NOTHING")
+                .execute(&pool)
+                .await?;
+        }
+
+        if current_version < 9 {
+            sqlx::query(
+                "UPDATE tasks SET title_customized = 1 WHERE trim(title) <> '' AND title_customized = 0",
+            )
+            .execute(&pool)
+            .await?;
+
+            sqlx::query("INSERT INTO schema_version (version) VALUES (9) ON CONFLICT DO NOTHING")
+                .execute(&pool)
+                .await?;
+        }
+
+        if current_version < 10 {
+            let has_task_type: bool = sqlx::query_as::<_, (i64,)>(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'tasks' AND column_name = 'task_type'",
+            )
+            .fetch_one(&pool)
+            .await
+            .map(|r| r.0 > 0)
+            .unwrap_or(false);
+
+            if !has_task_type {
+                sqlx::query("ALTER TABLE tasks ADD COLUMN task_type TEXT")
+                    .execute(&pool)
+                    .await?;
+            }
+
+            sqlx::query("INSERT INTO schema_version (version) VALUES (10) ON CONFLICT DO NOTHING")
                 .execute(&pool)
                 .await?;
         }
@@ -501,6 +560,7 @@ impl DatabaseProvider for PostgresProvider {
                 'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
                 'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                 'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                'task_type', task_type,
                 'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                 'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
                 'status_history', status_history, 'progress_logs', progress_logs,
@@ -521,6 +581,7 @@ impl DatabaseProvider for PostgresProvider {
                 'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
                 'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                 'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                'task_type', task_type,
                 'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                 'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
                 'status_history', status_history, 'progress_logs', progress_logs,
@@ -542,15 +603,17 @@ impl DatabaseProvider for PostgresProvider {
             r#"INSERT INTO tasks (
                 user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
                 ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+                task_type,
                 tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
                 version, deleted_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
             ON CONFLICT(user_id, id) DO UPDATE SET
                 title=EXCLUDED.title, title_customized=EXCLUDED.title_customized, description=EXCLUDED.description, status=EXCLUDED.status, body=EXCLUDED.body,
                 created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at, completed_at=EXCLUDED.completed_at,
                 ddl=EXCLUDED.ddl, ddl_type=EXCLUDED.ddl_type, planned_at=EXCLUDED.planned_at,
                 role_id=EXCLUDED.role_id, role_ids=EXCLUDED.role_ids, parent_id=EXCLUDED.parent_id, source_stream_id=EXCLUDED.source_stream_id,
                 priority=EXCLUDED.priority, promoted=EXCLUDED.promoted, phase=EXCLUDED.phase, kanban_column=EXCLUDED.kanban_column,
+                task_type=EXCLUDED.task_type,
                 tags=EXCLUDED.tags, subtask_ids=EXCLUDED.subtask_ids, resources=EXCLUDED.resources,
                 reminders=EXCLUDED.reminders, submissions=EXCLUDED.submissions, postponements=EXCLUDED.postponements,
                 status_history=EXCLUDED.status_history, progress_logs=EXCLUDED.progress_logs,
@@ -577,6 +640,7 @@ impl DatabaseProvider for PostgresProvider {
         .bind(v["promoted"].as_i64())
         .bind(v["phase"].as_str())
         .bind(v["kanban_column"].as_str())
+        .bind(v["task_type"].as_str())
         .bind(v["tags"].as_str().unwrap_or("[]"))
         .bind(v["subtask_ids"].as_str().unwrap_or("[]"))
         .bind(v["resources"].as_str().unwrap_or("[]"))
@@ -611,7 +675,11 @@ impl DatabaseProvider for PostgresProvider {
         Ok(())
     }
 
-    async fn list_stream_day_json(&self, user_id: &str, date_key: &str) -> anyhow::Result<Vec<String>> {
+    async fn list_stream_day_json(
+        &self,
+        user_id: &str,
+        date_key: &str,
+    ) -> anyhow::Result<Vec<String>> {
         let rows: Vec<(String,)> = sqlx::query_as(
             r#"SELECT json_build_object(
                 'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', "timestamp",
@@ -627,7 +695,11 @@ impl DatabaseProvider for PostgresProvider {
         Ok(rows.into_iter().map(|r| r.0).collect())
     }
 
-    async fn list_stream_recent_json(&self, user_id: &str, days: i32) -> anyhow::Result<Vec<String>> {
+    async fn list_stream_recent_json(
+        &self,
+        user_id: &str,
+        days: i32,
+    ) -> anyhow::Result<Vec<String>> {
         let d = days.max(1);
         let rows: Vec<(String,)> = sqlx::query_as(
             r#"SELECT json_build_object(
@@ -671,7 +743,12 @@ impl DatabaseProvider for PostgresProvider {
         Ok(rows.into_iter().map(|r| r.0).collect())
     }
 
-    async fn search_stream_json(&self, user_id: &str, q: &str, limit: i64) -> anyhow::Result<Vec<String>> {
+    async fn search_stream_json(
+        &self,
+        user_id: &str,
+        q: &str,
+        limit: i64,
+    ) -> anyhow::Result<Vec<String>> {
         let needle = q.trim();
         if needle.is_empty() {
             return Ok(vec![]);
@@ -981,7 +1058,11 @@ impl DatabaseProvider for PostgresProvider {
             .collect())
     }
 
-    async fn get_changes_since(&self, user_id: &str, since_version: i64) -> anyhow::Result<Vec<ChangeRecord>> {
+    async fn get_changes_since(
+        &self,
+        user_id: &str,
+        since_version: i64,
+    ) -> anyhow::Result<Vec<ChangeRecord>> {
         let mut changes = Vec::new();
 
         let task_rows: Vec<(String, String, i64, i64, Option<String>)> = sqlx::query_as(
@@ -992,6 +1073,7 @@ impl DatabaseProvider for PostgresProvider {
                     'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
                     'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
                     'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                    'task_type', task_type,
                     'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
                     'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
                     'status_history', status_history, 'progress_logs', progress_logs,
@@ -1009,11 +1091,7 @@ impl DatabaseProvider for PostgresProvider {
             changes.push(ChangeRecord {
                 table: "tasks".into(),
                 key: r.0,
-                data: if r.4.is_some() {
-                    None
-                } else {
-                    Some(r.1)
-                },
+                data: if r.4.is_some() { None } else { Some(r.1) },
                 version: r.2,
                 updated_at: r.3.to_string(),
                 deleted_at: r.4,
@@ -1042,25 +1120,22 @@ impl DatabaseProvider for PostgresProvider {
             changes.push(ChangeRecord {
                 table: "stream_entries".into(),
                 key: r.0,
-                data: if r.4.is_some() {
-                    None
-                } else {
-                    Some(r.1)
-                },
+                data: if r.4.is_some() { None } else { Some(r.1) },
                 version: r.2,
                 updated_at: r.3.to_string(),
                 deleted_at: r.4,
             });
         }
 
-        let setting_rows: Vec<(String, Option<String>, i64, String, Option<String>)> = sqlx::query_as(
-            "SELECT key, value, version, updated_at::text, deleted_at
+        let setting_rows: Vec<(String, Option<String>, i64, String, Option<String>)> =
+            sqlx::query_as(
+                "SELECT key, value, version, updated_at::text, deleted_at
              FROM settings WHERE user_id = $1 AND version > $2 ORDER BY version",
-        )
-        .bind(user_id)
-        .bind(since_version)
-        .fetch_all(&self.pool)
-        .await?;
+            )
+            .bind(user_id)
+            .bind(since_version)
+            .fetch_all(&self.pool)
+            .await?;
 
         for r in setting_rows {
             let payload = r.1.as_ref().map(|val| {
@@ -1131,14 +1206,22 @@ impl DatabaseProvider for PostgresProvider {
         Ok(row.0)
     }
 
-    async fn apply_remote_change(&self, user_id: &str, change: &ChangeRecord) -> anyhow::Result<()> {
+    async fn apply_remote_change(
+        &self,
+        user_id: &str,
+        change: &ChangeRecord,
+    ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         apply_remote_change_tx(&mut tx, user_id, change).await?;
         tx.commit().await?;
         Ok(())
     }
 
-    async fn apply_remote_changes_batch(&self, user_id: &str, changes: &[ChangeRecord]) -> anyhow::Result<()> {
+    async fn apply_remote_changes_batch(
+        &self,
+        user_id: &str,
+        changes: &[ChangeRecord],
+    ) -> anyhow::Result<()> {
         let mut tx = self.pool.begin().await?;
         for change in changes {
             apply_remote_change_tx(&mut tx, user_id, change).await?;
