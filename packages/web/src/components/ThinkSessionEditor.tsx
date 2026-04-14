@@ -1,11 +1,14 @@
 import { forwardRef, useEffect, useState } from 'react';
 import {
-  RichMarkdownEditor,
+  type TaskRefRenderMode,
+  loadThinkSessionSettings,
+} from '../features/think-session/ThinkSessionSettings';
+import {
   type MarkdownSlashCommand,
   type MarkdownSlashCommandSelection,
+  RichMarkdownEditor,
   type RichMarkdownEditorHandle,
 } from './RichMarkdownEditor';
-import { type TaskRefRenderMode, loadThinkSessionSettings } from './ThinkSessionSettings';
 
 export type ThinkSessionEditorHandle = RichMarkdownEditorHandle;
 

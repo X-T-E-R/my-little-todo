@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AI_PERSONAS, type AiPersona, isAiPersona } from '../ai/types';
-import { getSetting, putSetting } from '../storage/settingsApi';
+import { AI_PERSONAS, type AiPersona, isAiPersona } from '../../ai/types';
+import { getSetting, putSetting } from '../../storage/settingsApi';
 
 const PERSONA_UI_ORDER: AiPersona[] = AI_PERSONAS;
 

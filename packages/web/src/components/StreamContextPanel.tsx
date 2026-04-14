@@ -4,11 +4,11 @@ import { motion } from 'framer-motion';
 import { Check, ChevronDown, ChevronRight, ExternalLink, Tag, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { filterByRole, formatDdlLabel } from '../stores';
 import {
   type StreamContextPanelWidth,
   loadStreamContextPanelSettings,
-} from './StreamContextPanelSettings';
+} from '../features/stream-context-panel/StreamContextPanelSettings';
+import { filterByRole, formatDdlLabel } from '../stores';
 
 const SECTIONS_KEY = 'mlt-stream-context-sections';
 

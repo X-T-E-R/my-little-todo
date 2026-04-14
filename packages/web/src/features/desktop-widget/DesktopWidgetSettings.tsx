@@ -1,9 +1,9 @@
 import { Monitor } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSetting, putSetting } from '../storage/settingsApi';
-import type { WidgetDisplayMode } from '../utils/desktopWidget';
-import { isTauriEnv } from '../utils/platform';
+import { getSetting, putSetting } from '../../storage/settingsApi';
+import type { WidgetDisplayMode } from '../../utils/desktopWidget';
+import { isTauriEnv } from '../../utils/platform';
 
 const MODE_KEY = 'plugin:desktop-widget:display-mode';
 const DENSITY_KEY = 'desktop-widget:density';
@@ -85,22 +85,22 @@ export function DesktopWidgetSettings() {
   const tauri = isTauriEnv();
 
   const openWidget = async () => {
-    const mod = await import('../utils/desktopWidget');
+    const mod = await import('../../utils/desktopWidget');
     await mod.ensureWidgetWindow(mode);
   };
 
   const closeWidget = async () => {
-    const mod = await import('../utils/desktopWidget');
+    const mod = await import('../../utils/desktopWidget');
     await mod.closeWidgetWindow();
   };
 
   const openContextBar = async () => {
-    const mod = await import('../utils/desktopWidget');
+    const mod = await import('../../utils/desktopWidget');
     await mod.ensureContextBarWindow();
   };
 
   const closeContextBar = async () => {
-    const mod = await import('../utils/desktopWidget');
+    const mod = await import('../../utils/desktopWidget');
     await mod.closeContextBarWindow();
   };
 

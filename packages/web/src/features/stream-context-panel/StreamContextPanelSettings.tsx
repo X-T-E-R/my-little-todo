@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSetting, putSetting } from '../storage/settingsApi';
+import { getSetting, putSetting } from '../../storage/settingsApi';
 
 const KEY_SHOW_PROJECTS = 'stream-context-panel:show-projects';
 const KEY_SHOW_TODAY = 'stream-context-panel:show-today';
@@ -38,8 +38,10 @@ export async function loadStreamContextPanelSettings(): Promise<{
     showTags: sg !== 'false',
     showCompleted: sc === 'true',
     panelWidth: pw === 'compact' || pw === 'wide' || pw === 'normal' ? pw : 'normal',
-    sortMode: sortMode === 'recent' || sortMode === 'due' || sortMode === 'smart' ? sortMode : 'smart',
-    density: density === 'airy' || density === 'dense' || density === 'balanced' ? density : 'balanced',
+    sortMode:
+      sortMode === 'recent' || sortMode === 'due' || sortMode === 'smart' ? sortMode : 'smart',
+    density:
+      density === 'airy' || density === 'dense' || density === 'balanced' ? density : 'balanced',
   };
 }
 
@@ -126,11 +128,7 @@ export function StreamContextPanelSettings() {
     });
   }, []);
 
-  const persistBool = async (
-    setter: (value: boolean) => void,
-    key: string,
-    value: boolean,
-  ) => {
+  const persistBool = async (setter: (value: boolean) => void, key: string, value: boolean) => {
     setter(value);
     await putSetting(key, value ? 'true' : 'false');
   };

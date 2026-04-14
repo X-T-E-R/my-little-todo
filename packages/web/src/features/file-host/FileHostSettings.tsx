@@ -1,11 +1,18 @@
-import type { FileCategory, FileHostProviderId, FileRoutingRule } from '../fileHost/types';
-import { CloudUpload, FolderArchive, Image as ImageIcon, Link2, Server, Settings2 } from 'lucide-react';
+import {
+  CloudUpload,
+  FolderArchive,
+  Image as ImageIcon,
+  Link2,
+  Server,
+  Settings2,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { loadFileHostConfig, saveFileHostConfig } from '../fileHost/config';
-import { useAuthStore } from '../stores/authStore';
-import { getSetting, putSetting } from '../storage/settingsApi';
-import { isNativeClient } from '../utils/platform';
+import { loadFileHostConfig, saveFileHostConfig } from '../../fileHost/config';
+import type { FileCategory, FileHostProviderId, FileRoutingRule } from '../../fileHost/types';
+import { getSetting, putSetting } from '../../storage/settingsApi';
+import { useAuthStore } from '../../stores/authStore';
+import { isNativeClient } from '../../utils/platform';
 
 function Toggle({
   checked,
@@ -140,9 +147,9 @@ export function FileHostSettings() {
 
   const routingByCategory = useMemo(
     () =>
-      Object.fromEntries(
-        routing.map((rule) => [rule.category, rule.provider] as const),
-      ) as Partial<Record<FileCategory, FileHostProviderId>>,
+      Object.fromEntries(routing.map((rule) => [rule.category, rule.provider] as const)) as Partial<
+        Record<FileCategory, FileHostProviderId>
+      >,
     [routing],
   );
 
@@ -177,10 +184,16 @@ export function FileHostSettings() {
     if (isAdmin && !isNativeClient()) {
       await Promise.all([
         putSetting('admin:file-host:enabled', String(serverEnabled)),
-        putSetting('admin:file-host:max-size', String(Math.max(1, Number(serverMaxSizeMb || '10')) * 1024 * 1024)),
+        putSetting(
+          'admin:file-host:max-size',
+          String(Math.max(1, Number(serverMaxSizeMb || '10')) * 1024 * 1024),
+        ),
         putSetting('admin:file-host:public-base-url', serverPublicBaseUrl),
         putSetting('admin:allow-attachments', String(serverEnabled)),
-        putSetting('admin:attachment-max-size', String(Math.max(1, Number(serverMaxSizeMb || '10')) * 1024 * 1024)),
+        putSetting(
+          'admin:attachment-max-size',
+          String(Math.max(1, Number(serverMaxSizeMb || '10')) * 1024 * 1024),
+        ),
         putSetting('admin:image-host-url', serverPublicBaseUrl),
       ]);
     }
@@ -220,7 +233,10 @@ export function FileHostSettings() {
       </section>
 
       <section className="space-y-3">
-        <div className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+        <div
+          className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+        >
           <div>
             <p className="text-sm font-medium text-[var(--color-text)]">{t('Enable file host')}</p>
             <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
@@ -230,7 +246,10 @@ export function FileHostSettings() {
           <Toggle checked={enabled} onChange={setEnabled} />
         </div>
 
-        <div className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+        <div
+          className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+        >
           <div>
             <p className="text-sm font-medium text-[var(--color-text)]">
               {t('Allow clipboard images')}
@@ -262,7 +281,10 @@ export function FileHostSettings() {
           <p className="text-sm font-semibold text-[var(--color-text)]">{t('Category routing')}</p>
         </div>
         {categories.map((category) => (
-          <div key={category.id} className="grid gap-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:items-center">
+          <div
+            key={category.id}
+            className="grid gap-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:items-center"
+          >
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
               {category.label}
             </label>
@@ -305,7 +327,10 @@ export function FileHostSettings() {
         />
       </section>
 
-      <section className="space-y-3 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+      <section
+        className="space-y-3 rounded-2xl border p-4"
+        style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+      >
         <div className="flex items-center gap-2">
           <Server size={15} className="text-[var(--color-accent)]" />
           <p className="text-sm font-semibold text-[var(--color-text)]">
@@ -321,7 +346,9 @@ export function FileHostSettings() {
         />
         <select
           value={mltAuthMode}
-          onChange={(event) => setMltAuthMode(event.target.value as 'session' | 'token' | 'credentials')}
+          onChange={(event) =>
+            setMltAuthMode(event.target.value as 'session' | 'token' | 'credentials')
+          }
           className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
         >
           <option value="session">{t('Reuse current session')}</option>
@@ -357,7 +384,10 @@ export function FileHostSettings() {
         ) : null}
       </section>
 
-      <section className="space-y-3 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+      <section
+        className="space-y-3 rounded-2xl border p-4"
+        style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+      >
         <div className="flex items-center gap-2">
           <Link2 size={15} className="text-[var(--color-accent)]" />
           <p className="text-sm font-semibold text-[var(--color-text)]">{t('WebDAV provider')}</p>
@@ -402,12 +432,20 @@ export function FileHostSettings() {
       </section>
 
       {isAdmin && !isNativeClient() && (
-        <section className="space-y-3 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+        <section
+          className="space-y-3 rounded-2xl border p-4"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+        >
           <div className="flex items-center gap-2">
             <Settings2 size={15} className="text-[var(--color-accent)]" />
-            <p className="text-sm font-semibold text-[var(--color-text)]">{t('Server file host')}</p>
+            <p className="text-sm font-semibold text-[var(--color-text)]">
+              {t('Server file host')}
+            </p>
           </div>
-          <div className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}>
+          <div
+            className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3"
+            style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}
+          >
             <div>
               <p className="text-sm font-medium text-[var(--color-text)]">
                 {t('Enable server uploads')}

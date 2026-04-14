@@ -51,7 +51,9 @@ function getBuiltinSettingsComponentFiles(): string[] {
     .map((statement) => statement.moduleSpecifier)
     .filter(ts.isStringLiteral)
     .map((specifier) => specifier.text)
-    .filter((specifier) => specifier.startsWith('../components/'))
+    .filter(
+      (specifier) => specifier.startsWith('../components/') || specifier.startsWith('../features/'),
+    )
     .map((specifier) => path.resolve(path.dirname(builtinRegistryFile), `${specifier}.tsx`));
 }
 

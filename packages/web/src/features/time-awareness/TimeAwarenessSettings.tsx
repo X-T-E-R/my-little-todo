@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSetting, putSetting } from '../storage/settingsApi';
-import { useBehaviorStore } from '../stores/behaviorStore';
+import { ScheduleEditor } from '../../components/ScheduleEditor';
+import { getSetting, putSetting } from '../../storage/settingsApi';
+import { useBehaviorStore } from '../../stores/behaviorStore';
 import {
   computeHourlyAcceptancePatterns,
   getLearnedTimeSummary,
   useTimeAwarenessStore,
-} from '../stores/timeAwarenessStore';
-import { ScheduleEditor } from './ScheduleEditor';
+} from '../../stores/timeAwarenessStore';
 
 type TimeSensitivity = 'gentle' | 'balanced' | 'high';
 type ReminderIntensity = 'subtle' | 'standard' | 'strong';
@@ -94,7 +94,9 @@ export function TimeAwarenessSettings() {
       getSetting('time-awareness-learning-enabled'),
     ]).then(([sensitivityValue, reminderValue, learningValue]) => {
       setSensitivity(
-        sensitivityValue === 'gentle' || sensitivityValue === 'high' || sensitivityValue === 'balanced'
+        sensitivityValue === 'gentle' ||
+          sensitivityValue === 'high' ||
+          sensitivityValue === 'balanced'
           ? sensitivityValue
           : 'balanced',
       );

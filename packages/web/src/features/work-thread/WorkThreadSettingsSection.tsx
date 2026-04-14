@@ -1,22 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSetting, putSetting } from '../storage/settingsApi';
-import { useWorkThreadStore } from '../stores';
-import {
-  MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY,
-  NOW_DEFAULT_VIEW_KEY,
-  NOW_SHOW_AUTO_VIEW_KEY,
-  THREAD_OPEN_MODE_KEY,
-  THREAD_RUNTIME_SIDEBAR_DEFAULT_KEY,
-  type NowViewMode,
-  type RuntimeSidebarDefault,
-  type ThreadOpenMode,
-} from '../utils/workThreadUiPrefs';
+import { getSetting, putSetting } from '../../storage/settingsApi';
+import { useWorkThreadStore } from '../../stores';
 import {
   WORK_THREAD_MARKDOWN_AUTO_IMPORT_KEY,
   WORK_THREAD_MARKDOWN_SYNC_ENABLED_KEY,
   WORK_THREAD_MARKDOWN_SYNC_ROOT_KEY,
-} from '../utils/workThreadSync';
+} from '../../utils/workThreadSync';
+import {
+  MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY,
+  NOW_DEFAULT_VIEW_KEY,
+  NOW_SHOW_AUTO_VIEW_KEY,
+  type NowViewMode,
+  type RuntimeSidebarDefault,
+  THREAD_OPEN_MODE_KEY,
+  THREAD_RUNTIME_SIDEBAR_DEFAULT_KEY,
+  type ThreadOpenMode,
+} from '../../utils/workThreadUiPrefs';
 
 type SchedulerPolicy = 'manual' | 'coach' | 'semi_auto';
 
@@ -50,18 +50,29 @@ export function WorkThreadSettingsSection() {
       getSetting(WORK_THREAD_MARKDOWN_SYNC_ENABLED_KEY),
       getSetting(WORK_THREAD_MARKDOWN_SYNC_ROOT_KEY),
       getSetting(WORK_THREAD_MARKDOWN_AUTO_IMPORT_KEY),
-    ]).then(([view, autoView, openMode, runtimeDefault, materialOpen, syncEnabled, syncRoot, autoImport]) => {
-      setNowDefaultView(view === 'thread' || view === 'auto' ? view : 'task');
-      setShowAutoView(autoView !== 'false');
-      setThreadOpenMode(openMode === 'board-first' ? 'board-first' : 'resume-last');
-      setRuntimeSidebarDefault(
-        runtimeDefault === 'open' || runtimeDefault === 'closed' ? runtimeDefault : 'remember',
-      );
-      setMaterialSidebarDefaultOpen(materialOpen !== 'false');
-      setMarkdownSyncEnabled(syncEnabled === 'true');
-      setMarkdownSyncRoot(syncRoot ?? '');
-      setMarkdownAutoImport(autoImport !== 'false');
-    });
+    ]).then(
+      ([
+        view,
+        autoView,
+        openMode,
+        runtimeDefault,
+        materialOpen,
+        syncEnabled,
+        syncRoot,
+        autoImport,
+      ]) => {
+        setNowDefaultView(view === 'thread' || view === 'auto' ? view : 'task');
+        setShowAutoView(autoView !== 'false');
+        setThreadOpenMode(openMode === 'board-first' ? 'board-first' : 'resume-last');
+        setRuntimeSidebarDefault(
+          runtimeDefault === 'open' || runtimeDefault === 'closed' ? runtimeDefault : 'remember',
+        );
+        setMaterialSidebarDefaultOpen(materialOpen !== 'false');
+        setMarkdownSyncEnabled(syncEnabled === 'true');
+        setMarkdownSyncRoot(syncRoot ?? '');
+        setMarkdownAutoImport(autoImport !== 'false');
+      },
+    );
   }, [loadSchedulerPolicy]);
 
   return (
@@ -121,8 +132,10 @@ export function WorkThreadSettingsSection() {
                 }}
                 className="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
                 style={{
-                  background: nowDefaultView === item ? 'var(--color-accent-soft)' : 'var(--color-bg)',
-                  color: nowDefaultView === item ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                  background:
+                    nowDefaultView === item ? 'var(--color-accent-soft)' : 'var(--color-bg)',
+                  color:
+                    nowDefaultView === item ? 'var(--color-accent)' : 'var(--color-text-secondary)',
                   border: `1px solid ${
                     nowDefaultView === item ? 'var(--color-accent)' : 'var(--color-border)'
                   }`,
@@ -134,7 +147,10 @@ export function WorkThreadSettingsSection() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}>
+        <div
+          className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}
+        >
           <div>
             <p className="text-sm font-medium text-[var(--color-text)]">
               {t('work_thread_settings_show_auto_title')}
@@ -169,10 +185,12 @@ export function WorkThreadSettingsSection() {
             {t('work_thread_settings_thread_open_mode')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([
-              ['resume-last', t('work_thread_settings_thread_open_resume_last')],
-              ['board-first', t('work_thread_settings_thread_open_board_first')],
-            ] as const).map(([id, label]) => (
+            {(
+              [
+                ['resume-last', t('work_thread_settings_thread_open_resume_last')],
+                ['board-first', t('work_thread_settings_thread_open_board_first')],
+              ] as const
+            ).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -182,8 +200,10 @@ export function WorkThreadSettingsSection() {
                 }}
                 className="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
                 style={{
-                  background: threadOpenMode === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
-                  color: threadOpenMode === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                  background:
+                    threadOpenMode === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
+                  color:
+                    threadOpenMode === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
                   border: `1px solid ${threadOpenMode === id ? 'var(--color-accent)' : 'var(--color-border)'}`,
                 }}
               >
@@ -198,11 +218,13 @@ export function WorkThreadSettingsSection() {
             {t('work_thread_settings_runtime_sidebar_default')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([
-              ['remember', t('work_thread_settings_runtime_sidebar_remember')],
-              ['open', t('work_thread_settings_runtime_sidebar_open')],
-              ['closed', t('work_thread_settings_runtime_sidebar_closed')],
-            ] as const).map(([id, label]) => (
+            {(
+              [
+                ['remember', t('work_thread_settings_runtime_sidebar_remember')],
+                ['open', t('work_thread_settings_runtime_sidebar_open')],
+                ['closed', t('work_thread_settings_runtime_sidebar_closed')],
+              ] as const
+            ).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -229,7 +251,10 @@ export function WorkThreadSettingsSection() {
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}>
+        <div
+          className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}
+        >
           <div>
             <p className="text-sm font-medium text-[var(--color-text)]">
               {t('work_thread_settings_material_sidebar_title')}
@@ -259,7 +284,10 @@ export function WorkThreadSettingsSection() {
           </button>
         </div>
 
-        <div className="rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}>
+        <div
+          className="rounded-2xl border px-4 py-3"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}
+        >
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="text-sm font-medium text-[var(--color-text)]">
@@ -297,7 +325,9 @@ export function WorkThreadSettingsSection() {
               <input
                 value={markdownSyncRoot}
                 onChange={(event) => setMarkdownSyncRoot(event.target.value)}
-                onBlur={() => void putSetting(WORK_THREAD_MARKDOWN_SYNC_ROOT_KEY, markdownSyncRoot.trim())}
+                onBlur={() =>
+                  void putSetting(WORK_THREAD_MARKDOWN_SYNC_ROOT_KEY, markdownSyncRoot.trim())
+                }
                 placeholder={t('work_thread_settings_markdown_root_placeholder')}
                 className="mt-2 w-full rounded-xl border px-3 py-2 text-sm outline-none"
                 style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}

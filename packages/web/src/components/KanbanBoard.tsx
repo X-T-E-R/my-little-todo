@@ -21,6 +21,12 @@ import { ChevronDown, ChevronLeft, ChevronRight, FolderKanban } from 'lucide-rea
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  type KanbanDoneRailMode,
+  type KanbanEmptyLaneMode,
+  type KanbanSummaryDensity,
+  loadKanbanSettings,
+} from '../features/kanban/KanbanSettings';
 import { useExecCoachStore, useKanbanUiStore, useRoleStore, useTaskStore } from '../stores';
 import { countWipTasks } from '../stores/taskStore';
 import type { KanbanGroupMode } from '../utils/kanbanUtils';
@@ -31,12 +37,6 @@ import {
   deriveKanbanColumn,
   groupColumnTasksByProject,
 } from '../utils/kanbanUtils';
-import {
-  type KanbanDoneRailMode,
-  type KanbanEmptyLaneMode,
-  type KanbanSummaryDensity,
-  loadKanbanSettings,
-} from './KanbanSettings';
 import { ProgressRing } from './ProgressRing';
 
 function KanbanCard({

@@ -1,10 +1,10 @@
 import { CheckCircle, Copy, ExternalLink, Server } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSetting, getSettingsApiBase, putSetting } from '../storage/settingsApi';
-import { useRoleStore } from '../stores';
-import { getAuthToken } from '../stores/authStore';
-import { isTauriEnv } from '../utils/platform';
+import { getSetting, getSettingsApiBase, putSetting } from '../../storage/settingsApi';
+import { useRoleStore } from '../../stores';
+import { getAuthToken } from '../../stores/authStore';
+import { isTauriEnv } from '../../utils/platform';
 
 /** Embedded Axum MCP server in desktop (see `src-tauri/src/lib.rs`). */
 const TAURI_EMBEDDED_MCP_BASE = 'http://127.0.0.1:23981';

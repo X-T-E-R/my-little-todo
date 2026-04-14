@@ -3,9 +3,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useRoleStore } from '../stores';
-import { useWindowContextStore } from '../stores/windowContextStore';
-import { isTauriEnv } from '../utils/platform';
+import { useRoleStore } from '../../stores';
+import { useWindowContextStore } from '../../stores/windowContextStore';
+import { isTauriEnv } from '../../utils/platform';
 
 type FgPayload = {
   title: string;

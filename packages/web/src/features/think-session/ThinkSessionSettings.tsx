@@ -2,8 +2,8 @@ import type { ThinkSessionStartMode } from '@my-little-todo/core';
 import { NotebookPen } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSetting, putSetting } from '../storage/settingsApi';
-import { MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY } from '../utils/workThreadUiPrefs';
+import { getSetting, putSetting } from '../../storage/settingsApi';
+import { MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY } from '../../utils/workThreadUiPrefs';
 
 export type TaskRefRenderMode = 'inline-chip' | 'mini-card' | 'highlight-only';
 export type ThinkSessionEditorDensity = 'balanced' | 'focused';
@@ -117,11 +117,13 @@ export function ThinkSessionSettings() {
             {t('think_session_task_reference_label')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([
-              ['inline-chip', t('think_session_task_reference_inline_chip')],
-              ['mini-card', t('think_session_task_reference_mini_card')],
-              ['highlight-only', t('think_session_task_reference_highlight_only')],
-            ] as const).map(([id, label]) => (
+            {(
+              [
+                ['inline-chip', t('think_session_task_reference_inline_chip')],
+                ['mini-card', t('think_session_task_reference_mini_card')],
+                ['highlight-only', t('think_session_task_reference_highlight_only')],
+              ] as const
+            ).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -131,8 +133,12 @@ export function ThinkSessionSettings() {
                 }}
                 className="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
                 style={{
-                  background: taskRefRenderMode === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
-                  color: taskRefRenderMode === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                  background:
+                    taskRefRenderMode === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
+                  color:
+                    taskRefRenderMode === id
+                      ? 'var(--color-accent)'
+                      : 'var(--color-text-secondary)',
                   border: `1px solid ${
                     taskRefRenderMode === id ? 'var(--color-accent)' : 'var(--color-border)'
                   }`,
@@ -149,11 +155,13 @@ export function ThinkSessionSettings() {
             {t('think_session_default_mode_label')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([
-              ['blank', t('think_session_default_mode_free_write')],
-              ['discovery', t('think_session_default_mode_discovery')],
-              ['arrange', t('think_session_default_mode_arrange')],
-            ] as const).map(([id, label]) => (
+            {(
+              [
+                ['blank', t('think_session_default_mode_free_write')],
+                ['discovery', t('think_session_default_mode_discovery')],
+                ['arrange', t('think_session_default_mode_arrange')],
+              ] as const
+            ).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -201,10 +209,12 @@ export function ThinkSessionSettings() {
             {t('think_session_editor_density_label')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([
-              ['balanced', t('think_session_editor_density_balanced')],
-              ['focused', t('think_session_editor_density_focused')],
-            ] as const).map(([id, label]) => (
+            {(
+              [
+                ['balanced', t('think_session_editor_density_balanced')],
+                ['focused', t('think_session_editor_density_focused')],
+              ] as const
+            ).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -215,7 +225,8 @@ export function ThinkSessionSettings() {
                 className="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
                 style={{
                   background: editorDensity === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
-                  color: editorDensity === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                  color:
+                    editorDensity === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
                   border: `1px solid ${editorDensity === id ? 'var(--color-accent)' : 'var(--color-border)'}`,
                 }}
               >

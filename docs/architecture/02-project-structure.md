@@ -147,7 +147,13 @@ packages/web/
 │   │   ├── LoginView.tsx            #   登录页 (lazy-loaded, Web 专用)
 │   │   └── OnboardingView.tsx       #   启动引导
 │   │
-│   ├── components/                  # 通用 UI 组件
+│   ├── features/                    # 功能聚合目录（内建模块、设置页、局部 feature UI）
+│   │   ├── kanban/                  #   看板模块
+│   │   ├── think-session/           #   理一理模块
+│   │   ├── work-thread/             #   工作线程模块
+│   │   └── ...
+│   │
+│   ├── components/                  # 共享 / 跨 feature UI 组件
 │   │   ├── RoleSidebar.tsx          #   角色侧栏
 │   │   ├── RoleLandingCard.tsx      #   角色着陆卡片
 │   │   ├── CreateTaskDialog.tsx     #   新建任务弹窗
@@ -298,7 +304,9 @@ packages/admin/
 
 - `core` 不依赖 `web` / `admin` / `mobile`
 - `web` 可以导入 `core`
-- `stores/` 调用 `storage/`，`views/` 使用 `stores/` + `components/`
+- `features/` 优先收纳模块专属 UI、设置页与局部 helper
+- `components/` 保持共享组件定位，避免继续堆积模块专属实现
+- `stores/` 调用 `storage/`，`views/` 使用 `stores/` + `features/` + `components/`
 - `sync/` 调用 `storage/`（DataStore 接口）
 - Rust: `crates/server-bin` 依赖 `crates/server`
 - Tauri `src-tauri` **不再** 依赖 `crates/server`（纯插件配置）

@@ -1,7 +1,7 @@
 import { Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSetting, putSetting } from '../storage/settingsApi';
+import { getSetting, putSetting } from '../../storage/settingsApi';
 
 type CapsuleLookback = '14' | '30' | '90';
 type CapsuleFrequency = 'gentle' | 'regular' | 'frequent';
@@ -103,11 +103,13 @@ export function TimeCapsuleSettings() {
             {t('Lookback window')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([
-              ['14', t('2 weeks')],
-              ['30', t('30 days')],
-              ['90', t('90 days')],
-            ] as const).map(([id, label]) => (
+            {(
+              [
+                ['14', t('2 weeks')],
+                ['30', t('30 days')],
+                ['90', t('90 days')],
+              ] as const
+            ).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -117,8 +119,10 @@ export function TimeCapsuleSettings() {
                 }}
                 className="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
                 style={{
-                  background: lookbackWindow === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
-                  color: lookbackWindow === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                  background:
+                    lookbackWindow === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
+                  color:
+                    lookbackWindow === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
                   border: `1px solid ${
                     lookbackWindow === id ? 'var(--color-accent)' : 'var(--color-border)'
                   }`,
@@ -135,11 +139,13 @@ export function TimeCapsuleSettings() {
             {t('Surfacing rhythm')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([
-              ['gentle', t('Gentle')],
-              ['regular', t('Regular')],
-              ['frequent', t('Frequent')],
-            ] as const).map(([id, label]) => (
+            {(
+              [
+                ['gentle', t('Gentle')],
+                ['regular', t('Regular')],
+                ['frequent', t('Frequent')],
+              ] as const
+            ).map(([id, label]) => (
               <button
                 key={id}
                 type="button"

@@ -1,14 +1,14 @@
-import { AiAgentSettings } from '../components/AiAgentSettings';
-import { DesktopWidgetSettings } from '../components/DesktopWidgetSettings';
-import { FileHostSettings } from '../components/FileHostSettings';
-import { KanbanSettings } from '../components/KanbanSettings';
-import { McpIntegrationSettings } from '../components/McpIntegrationSettings';
-import { StreamContextPanelSettings } from '../components/StreamContextPanelSettings';
-import { ThinkSessionSettings } from '../components/ThinkSessionSettings';
-import { TimeAwarenessSettings } from '../components/TimeAwarenessSettings';
-import { TimeCapsuleSettings } from '../components/TimeCapsuleSettings';
-import { WindowContextSettings } from '../components/WindowContextSettings';
-import { WorkThreadSettingsSection } from '../components/WorkThreadSettingsSection';
+import { AiAgentSettings } from '../features/ai-agent/AiAgentSettings';
+import { DesktopWidgetSettings } from '../features/desktop-widget/DesktopWidgetSettings';
+import { FileHostSettings } from '../features/file-host/FileHostSettings';
+import { KanbanSettings } from '../features/kanban/KanbanSettings';
+import { McpIntegrationSettings } from '../features/mcp-integration/McpIntegrationSettings';
+import { StreamContextPanelSettings } from '../features/stream-context-panel/StreamContextPanelSettings';
+import { ThinkSessionSettings } from '../features/think-session/ThinkSessionSettings';
+import { TimeAwarenessSettings } from '../features/time-awareness/TimeAwarenessSettings';
+import { TimeCapsuleSettings } from '../features/time-capsule/TimeCapsuleSettings';
+import { WindowContextSettings } from '../features/window-context/WindowContextSettings';
+import { WorkThreadSettingsSection } from '../features/work-thread/WorkThreadSettingsSection';
 import { registerSettingsEntry } from './registry';
 
 const BUILTIN_SETTINGS = [

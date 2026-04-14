@@ -1,7 +1,7 @@
 import { LayoutGrid } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getSetting, putSetting } from '../storage/settingsApi';
+import { getSetting, putSetting } from '../../storage/settingsApi';
 
 export type KanbanSummaryDensity = 'compact' | 'rich';
 export type KanbanEmptyLaneMode = 'compressed' | 'full';
@@ -111,10 +111,12 @@ export function KanbanSettings() {
             {t('kanban_summary_density_label')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([
-              ['compact', t('kanban_summary_density_compact')],
-              ['rich', t('kanban_summary_density_rich')],
-            ] as const).map(([id, label]) => (
+            {(
+              [
+                ['compact', t('kanban_summary_density_compact')],
+                ['rich', t('kanban_summary_density_rich')],
+              ] as const
+            ).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -124,8 +126,10 @@ export function KanbanSettings() {
                 }}
                 className="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
                 style={{
-                  background: summaryDensity === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
-                  color: summaryDensity === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                  background:
+                    summaryDensity === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
+                  color:
+                    summaryDensity === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
                   border: `1px solid ${summaryDensity === id ? 'var(--color-accent)' : 'var(--color-border)'}`,
                 }}
               >
@@ -140,10 +144,12 @@ export function KanbanSettings() {
             {t('kanban_empty_lane_label')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([
-              ['compressed', t('kanban_empty_lane_compressed')],
-              ['full', t('kanban_empty_lane_full')],
-            ] as const).map(([id, label]) => (
+            {(
+              [
+                ['compressed', t('kanban_empty_lane_compressed')],
+                ['full', t('kanban_empty_lane_full')],
+              ] as const
+            ).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -154,7 +160,8 @@ export function KanbanSettings() {
                 className="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
                 style={{
                   background: emptyLaneMode === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
-                  color: emptyLaneMode === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                  color:
+                    emptyLaneMode === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
                   border: `1px solid ${emptyLaneMode === id ? 'var(--color-accent)' : 'var(--color-border)'}`,
                 }}
               >
@@ -169,10 +176,12 @@ export function KanbanSettings() {
             {t('kanban_done_rail_label')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([
-              ['rail', t('kanban_done_rail_compact')],
-              ['expanded', t('kanban_done_rail_expanded')],
-            ] as const).map(([id, label]) => (
+            {(
+              [
+                ['rail', t('kanban_done_rail_compact')],
+                ['expanded', t('kanban_done_rail_expanded')],
+              ] as const
+            ).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -183,7 +192,8 @@ export function KanbanSettings() {
                 className="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
                 style={{
                   background: doneRailMode === id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
-                  color: doneRailMode === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+                  color:
+                    doneRailMode === id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
                   border: `1px solid ${doneRailMode === id ? 'var(--color-accent)' : 'var(--color-border)'}`,
                 }}
               >
