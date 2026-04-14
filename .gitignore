@@ -33,6 +33,7 @@ data/
 import-legacy-data.json
 .playwright-cli/
 output/
+.worktrees/
 
 # Internal docs (not for public release)
 参考资料/
