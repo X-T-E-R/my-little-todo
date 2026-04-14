@@ -109,6 +109,7 @@ export interface WorkThreadSuggestion {
 export type WorkThreadEventType =
   | 'created'
   | 'renamed'
+  | 'raw_capture_added'
   | 'context_added'
   | 'checkpoint_saved'
   | 'decision_recorded'

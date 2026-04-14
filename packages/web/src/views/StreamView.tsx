@@ -48,7 +48,6 @@ import { useFileHostUpload } from '../fileHost/useFileHostUpload';
 import { RolePill } from '../components/RolePickerPopover';
 import { StreamContextPanel } from '../components/StreamContextPanel';
 import { ThinkSessionView } from '../components/ThinkSessionView';
-import { WorkThreadView } from '../components/WorkThreadView';
 import { useModuleStore } from '../modules';
 import { getSetting } from '../storage/settingsApi';
 import { pickTimeCapsuleEntry } from '../storage/streamRepo';
@@ -714,7 +713,6 @@ export function StreamView() {
   const streamContextPanelEnabled = useModuleStore((s) => s.isEnabled('stream-context-panel'));
   const isMobile = useIsMobile();
   const thinkSessionEnabled = useModuleStore((s) => s.isEnabled('think-session'));
-  const workThreadEnabled = useModuleStore((s) => s.isEnabled('work-thread'));
   const aiAgentEnabled = useModuleStore((s) => s.isEnabled('ai-agent'));
   const openAiChat = useOpenAiChat();
   const { t: tAi } = useTranslation('ai');
@@ -1538,7 +1536,7 @@ export function StreamView() {
       className="relative flex h-full min-h-0 flex-col"
       style={{ background: 'var(--color-bg)' }}
     >
-      {(thinkSessionEnabled || workThreadEnabled) && (
+      {thinkSessionEnabled && (
         <div className="border-b border-[var(--color-border)] px-4 py-2">
           <div className="mx-auto flex max-w-4xl justify-center xl:max-w-5xl">
             <div
@@ -1574,33 +1572,12 @@ export function StreamView() {
                   {t('mode_think')}
                 </button>
               )}
-              {workThreadEnabled && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStreamPanelMode('work-thread');
-                  }}
-                  className={`rounded-[var(--radius-pill)] px-4 py-1.5 text-[11px] font-semibold transition-colors ${
-                    streamPanelMode === 'work-thread'
-                      ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                      : 'text-[var(--color-text-tertiary)]'
-                  }`}
-                >
-                  工作线程
-                </button>
-              )}
             </div>
           </div>
         </div>
       )}
       {thinkSessionEnabled && streamPanelMode === 'think-session' ? (
         <ThinkSessionView
-          onGoNow={() =>
-            window.dispatchEvent(new CustomEvent('mlt-navigate', { detail: { view: 'now' } }))
-          }
-        />
-      ) : workThreadEnabled && streamPanelMode === 'work-thread' ? (
-        <WorkThreadView
           onGoNow={() =>
             window.dispatchEvent(new CustomEvent('mlt-navigate', { detail: { view: 'now' } }))
           }

@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useStreamStore } from '../stores';
+import { useStreamStore, useWorkThreadStore } from '../stores';
 import { useToastStore } from '../stores/toastStore';
 
 interface BrainDumpOverlayProps {
@@ -10,38 +10,54 @@ interface BrainDumpOverlayProps {
   onClose: () => void;
 }
 
+type BrainDumpTarget = 'stream' | 'thread';
+
 export function BrainDumpOverlay({ open, onClose }: BrainDumpOverlayProps) {
   const { t } = useTranslation('coach');
   const addEntry = useStreamStore((s) => s.addEntry);
+  const currentThread = useWorkThreadStore((s) => s.currentThread);
+  const captureToCurrentThread = useWorkThreadStore((s) => s.captureToCurrentThread);
   const showToast = useToastStore((s) => s.showToast);
   const [line, setLine] = useState('');
   const [count, setCount] = useState(0);
+  const [target, setTarget] = useState<BrainDumpTarget>('stream');
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (open) {
       setCount(0);
       setLine('');
+      setTarget(currentThread ? 'thread' : 'stream');
       setTimeout(() => inputRef.current?.focus(), 80);
     }
-  }, [open]);
+  }, [open, currentThread]);
 
   const flushLine = useCallback(async () => {
     const trimmed = line.trim();
     if (!trimmed) return;
-    await addEntry(trimmed, false, { entryType: 'spark' });
+    if (target === 'thread' && currentThread) {
+      await captureToCurrentThread(trimmed, 'brain-dump');
+    } else {
+      await addEntry(trimmed, false, { entryType: 'spark' });
+    }
     setCount((c) => c + 1);
     setLine('');
-  }, [line, addEntry]);
+  }, [line, addEntry, captureToCurrentThread, currentThread, target]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      flushLine();
+      void flushLine();
     }
     if (e.key === 'Escape') {
       if (count > 0) {
-        showToast({ message: t('brain_dump_captured', { count }), type: 'success' });
+        showToast({
+          message:
+            target === 'thread' && currentThread
+              ? t('brain_dump_captured_thread', { count, title: currentThread.title })
+              : t('brain_dump_captured', { count }),
+          type: 'success',
+        });
       }
       onClose();
     }
@@ -49,7 +65,13 @@ export function BrainDumpOverlay({ open, onClose }: BrainDumpOverlayProps) {
 
   const handleClose = () => {
     if (count > 0) {
-      showToast({ message: t('brain_dump_captured', { count }), type: 'success' });
+      showToast({
+        message:
+          target === 'thread' && currentThread
+            ? t('brain_dump_captured_thread', { count, title: currentThread.title })
+            : t('brain_dump_captured', { count }),
+        type: 'success',
+      });
     }
     onClose();
   };
@@ -89,12 +111,55 @@ export function BrainDumpOverlay({ open, onClose }: BrainDumpOverlayProps) {
             <p className="mt-1 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               {t('brain_dump_hint')}
             </p>
+            {currentThread && (
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <div
+                  className="flex items-center rounded-full border p-0.5"
+                  style={{ borderColor: 'var(--color-border)' }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setTarget('thread')}
+                    className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                      target === 'thread'
+                        ? 'bg-[var(--color-accent)] text-white'
+                        : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
+                    }`}
+                    title={currentThread.title}
+                  >
+                    {t('brain_dump_target_thread')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTarget('stream')}
+                    className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                      target === 'stream'
+                        ? 'bg-[var(--color-accent)] text-white'
+                        : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
+                    }`}
+                  >
+                    {t('brain_dump_target_stream')}
+                  </button>
+                </div>
+                <p
+                  className="min-w-0 truncate text-[11px]"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                  title={currentThread.title}
+                >
+                  {t('brain_dump_targeting_thread', { title: currentThread.title })}
+                </p>
+              </div>
+            )}
             <textarea
               ref={inputRef}
               value={line}
               onChange={(e) => setLine(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={t('brain_dump_placeholder')}
+              placeholder={
+                currentThread && target === 'thread'
+                  ? t('brain_dump_placeholder_thread')
+                  : t('brain_dump_placeholder')
+              }
               rows={4}
               className="mt-4 w-full resize-none rounded-2xl px-4 py-3 text-[15px] leading-relaxed outline-none"
               style={{

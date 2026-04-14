@@ -27,7 +27,7 @@ export function WorkThreadSettingsSection() {
   const loadSchedulerPolicy = useWorkThreadStore((s) => s.loadSchedulerPolicy);
   const setSchedulerPolicy = useWorkThreadStore((s) => s.setSchedulerPolicy);
   const [policy, setPolicy] = useState<SchedulerPolicy>('coach');
-  const [nowDefaultView, setNowDefaultView] = useState<NowViewMode>('task');
+  const [nowDefaultView, setNowDefaultView] = useState<NowViewMode>('auto');
   const [showAutoView, setShowAutoView] = useState(true);
   const [threadOpenMode, setThreadOpenMode] = useState<ThreadOpenMode>('resume-last');
   const [runtimeSidebarDefault, setRuntimeSidebarDefault] =
@@ -61,7 +61,7 @@ export function WorkThreadSettingsSection() {
         syncRoot,
         autoImport,
       ]) => {
-        setNowDefaultView(view === 'thread' || view === 'auto' ? view : 'task');
+        setNowDefaultView(view === 'thread' || view === 'auto' ? view : 'auto');
         setShowAutoView(autoView !== 'false');
         setThreadOpenMode(openMode === 'board-first' ? 'board-first' : 'resume-last');
         setRuntimeSidebarDefault(
@@ -122,7 +122,7 @@ export function WorkThreadSettingsSection() {
             {t('work_thread_settings_now_default_view')}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {(['task', 'thread', 'auto'] as const).map((item) => (
+            {(['auto', 'thread', 'task'] as const).map((item) => (
               <button
                 key={item}
                 type="button"

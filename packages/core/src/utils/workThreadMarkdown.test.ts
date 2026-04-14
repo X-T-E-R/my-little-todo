@@ -47,8 +47,8 @@ describe('workThreadMarkdown', () => {
     const markdown = serializeWorkThreadToMarkdown(thread);
     expect(markdown).toContain('title: "COMSOL case"');
     expect(markdown).toContain('- [ ] Run the sample once');
-    expect(markdown).toContain('> [!waiting:file] Sample export');
-    expect(markdown).toContain('> [!interrupt:manual] Reply to message');
+    expect(markdown).toContain('### Waiting · file: Sample export');
+    expect(markdown).toContain('### Interrupt · manual: Reply to message');
   });
 
   it('parses markdown into editable runtime patches', () => {
@@ -72,13 +72,15 @@ roleId: "arch"
 
 ## Waiting
 
-> [!waiting:person] Product answer
-> Need final wording
+### Waiting · person: Product answer
+
+Need final wording
 
 ## Interrupts
 
-> [!interrupt:manual] Inbox ping
-> Capture and return
+### Interrupt · manual: Inbox ping
+
+Capture and return
 `);
 
     expect(patch.frontmatter.title).toBe('Gateway thread');

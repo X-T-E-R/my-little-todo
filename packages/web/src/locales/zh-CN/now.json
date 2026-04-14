@@ -61,11 +61,11 @@
   "now_task_fallback_title": "任务兜底",
   "now_thread_mode_coach": "教练模式优先建议线程",
   "now_thread_mode_semi_auto": "半自动模式优先线程",
-  "now_view_task": "任务",
-  "now_view_thread": "线程",
-  "now_view_auto": "自动",
-  "now_thread_tab_title": "恢复一个线程",
-  "now_thread_tab_hint": "保留原来的任务推荐视图，但当你想按线程恢复上下文时，这里给你一个更轻的线程列表。",
+  "now_view_task": "任务兜底",
+  "now_view_thread": "线程总览",
+  "now_view_auto": "恢复",
+  "now_thread_tab_title": "线程总览",
+  "now_thread_tab_hint": "先看所有活跃线程的状态、断点和下一步，再决定切回哪一条工作线。",
   "now_thread_tab_empty": "还没有可恢复的线程。",
   "What you can do next": "接下来可以怎么做",
   "Need a different shape?": "要不换种方式往前推？",
@@ -76,5 +76,5 @@
   "Chosen by you": "这是你自己选的",
   "Failed to load tasks": "任务加载失败",
   "Retry": "重试",
-  "now_intro_tip": "这是 <strong>此刻视图</strong>，只显示当前最值得做的一件事。接受就开始，不想做就说原因，系统会慢慢学习你的偏好。"
+  "now_intro_tip": "这是 <strong>Meta / Now</strong>。默认先帮你恢复最值得继续的线程，也保留线程总览和任务兜底视图。"
 }

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { CheckSquare, Focus, Loader2, Settings, Wind } from 'lucide-react';
+import { CheckSquare, FileText, Focus, Loader2, Settings, Wind } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreateTaskDialog } from './components/CreateTaskDialog';
@@ -56,11 +56,14 @@ const SettingsView = React.lazy(() =>
 const StreamView = React.lazy(() =>
   import('./views/StreamView').then((m) => ({ default: m.StreamView })),
 );
+const WorkThreadView = React.lazy(() =>
+  import('./components/WorkThreadView').then((m) => ({ default: m.WorkThreadView })),
+);
 const TaskDetailPanel = React.lazy(() =>
   import('./components/TaskDetailPanel').then((m) => ({ default: m.TaskDetailPanel })),
 );
 
-type View = 'now' | 'stream' | 'board' | 'settings';
+type View = 'now' | 'thread' | 'stream' | 'board' | 'settings';
 type ShowToast = ReturnType<typeof useToastStore.getState>['showToast'];
 
 function ForegroundBridgeHost() {
@@ -82,6 +85,7 @@ function LoadingScreen({ label }: { label: string }) {
 
 const TAB_CONFIG = [
   { key: 'now' as const, labelKey: 'Now', icon: Focus },
+  { key: 'thread' as const, labelKey: 'Thread', icon: FileText },
   { key: 'stream' as const, labelKey: 'Stream', icon: Wind },
   { key: 'board' as const, labelKey: 'Tasks', icon: CheckSquare },
   { key: 'settings' as const, labelKey: 'Settings', icon: Settings },
@@ -346,8 +350,7 @@ function openWorkThread(handleViewChange: (view: View) => void, threadId?: strin
   if (threadId) {
     void useWorkThreadStore.getState().dispatchThread(threadId, 'now');
   }
-  useThinkSessionStore.getState().setStreamMode('work-thread');
-  handleViewChange('stream');
+  handleViewChange('thread');
 }
 
 function AppViewContent({
@@ -402,6 +405,11 @@ function AppViewContent({
         {currentView === 'stream' && (
           <React.Suspense fallback={<LoadingScreen label={t('Loading')} />}>
             <StreamView />
+          </React.Suspense>
+        )}
+        {currentView === 'thread' && (
+          <React.Suspense fallback={<LoadingScreen label={t('Loading')} />}>
+            <WorkThreadView onGoNow={() => handleViewChange('now')} />
           </React.Suspense>
         )}
         {currentView === 'board' && (
@@ -504,8 +512,13 @@ export function App() {
   const thinkSessionEnabled = useModuleStore((s) => s.isEnabled('think-session'));
   const workThreadEnabled = useModuleStore((s) => s.isEnabled('work-thread'));
   const visibleTabs = useMemo(
-    () => TAB_CONFIG.filter((tab) => tab.key !== 'board' || kanbanEnabled),
-    [kanbanEnabled],
+    () =>
+      TAB_CONFIG.filter((tab) => {
+        if (tab.key === 'board') return kanbanEnabled;
+        if (tab.key === 'thread') return workThreadEnabled;
+        return true;
+      }),
+    [kanbanEnabled, workThreadEnabled],
   );
 
   const { authMode, token, loading: authLoading, checkAuthMode, checkAuth } = useAuthStore();
@@ -528,11 +541,14 @@ export function App() {
 
   const handleViewChange = useCallback((newView: View) => {
     if (newView === 'board' && !useModuleStore.getState().isEnabled('kanban')) return;
+    if (newView === 'thread' && !useModuleStore.getState().isEnabled('work-thread')) return;
     setCurrentView((previousView) => {
       if (newView === previousView) return previousView;
-      const tabs = TAB_CONFIG.filter(
-        (tab) => tab.key !== 'board' || useModuleStore.getState().isEnabled('kanban'),
-      );
+      const tabs = TAB_CONFIG.filter((tab) => {
+        if (tab.key === 'board') return useModuleStore.getState().isEnabled('kanban');
+        if (tab.key === 'thread') return useModuleStore.getState().isEnabled('work-thread');
+        return true;
+      });
       const currentIndex = tabs.findIndex((tab) => tab.key === previousView);
       const newIndex = tabs.findIndex((tab) => tab.key === newView);
       setDirection(newIndex > currentIndex ? 1 : -1);
@@ -564,6 +580,10 @@ export function App() {
   }, [kanbanEnabled, currentView, handleViewChange]);
 
   useEffect(() => {
+    if (!workThreadEnabled && currentView === 'thread') handleViewChange('now');
+  }, [workThreadEnabled, currentView, handleViewChange]);
+
+  useEffect(() => {
     touchAppOpen();
   }, [touchAppOpen]);
 
@@ -579,6 +599,9 @@ export function App() {
     () => ({
       'app.newTask': () => handleNewTask(),
       'app.viewNow': () => handleViewChange('now'),
+      'app.viewThread': () => {
+        if (useModuleStore.getState().isEnabled('work-thread')) handleViewChange('thread');
+      },
       'app.viewStream': () => handleViewChange('stream'),
       'app.viewBoard': () => {
         if (useModuleStore.getState().isEnabled('kanban')) handleViewChange('board');

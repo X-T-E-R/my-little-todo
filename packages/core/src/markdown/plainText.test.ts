@@ -16,6 +16,10 @@ describe('markdownToPlainText', () => {
     );
   });
 
+  it('removes inline html breaks and tags from summaries', () => {
+    expect(markdownToPlainText('Alpha<br />Beta<div>Gamma</div>')).toBe('Alpha Beta Gamma');
+  });
+
   it('counts readable characters instead of raw markdown source', () => {
     expect(countMarkdownText('Hello **world**')).toBe(10);
     expect(countMarkdownText('中文 **加粗** [链接](https://example.com)')).toBe(6);

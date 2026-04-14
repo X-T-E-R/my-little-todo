@@ -45,7 +45,7 @@ export function resolveWorkThreadUiPrefs(
     nowDefaultView:
       raw.nowDefaultView === 'thread' || raw.nowDefaultView === 'auto'
         ? raw.nowDefaultView
-        : 'task',
+        : 'auto',
     nowShowAutoView: raw.nowShowAutoView !== false,
     threadOpenMode: raw.threadOpenMode === 'board-first' ? 'board-first' : 'resume-last',
     materialSidebarDefaultOpen: raw.materialSidebarDefaultOpen !== false,
@@ -59,7 +59,7 @@ export function resolveWorkThreadUiPrefs(
 export function getAvailableNowViews(
   prefs: Pick<WorkThreadUiPrefs, 'nowShowAutoView'>,
 ): NowViewMode[] {
-  return prefs.nowShowAutoView ? ['task', 'thread', 'auto'] : ['task', 'thread'];
+  return prefs.nowShowAutoView ? ['auto', 'thread', 'task'] : ['thread', 'task'];
 }
 
 export function decideInitialThreadRoute({

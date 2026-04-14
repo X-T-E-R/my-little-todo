@@ -1,44 +1,46 @@
 import type { MarkdownSlashCommand } from '../RichMarkdownEditor';
 import { useTranslation } from 'react-i18next';
 
-export const WORK_THREAD_SLASH_COMMANDS: MarkdownSlashCommand[] = [
-  {
-    id: 'next-action',
-    title: 'Next action',
-    description: 'Add a concrete next step for this thread',
-    keywords: ['todo', 'step', 'action'],
-  },
-  {
-    id: 'waiting',
-    title: 'Waiting condition',
-    description: 'Capture what this thread is waiting on',
-    keywords: ['blocked', 'dependency', 'wait'],
-  },
-  {
-    id: 'interrupt',
-    title: 'Interrupt',
-    description: 'Record a new interrupt without losing context',
-    keywords: ['distraction', 'interrupt'],
-  },
-  {
-    id: 'note-context',
-    title: 'Pinned note',
-    description: 'Add a short note into the thread context',
-    keywords: ['context', 'note'],
-  },
-  {
-    id: 'link-context',
-    title: 'Link context',
-    description: 'Attach a URL to the working context',
-    keywords: ['url', 'reference', 'link'],
-  },
-  {
-    id: 'checkpoint',
-    title: 'Checkpoint',
-    description: 'Save a resume checkpoint right now',
-    keywords: ['resume', 'save'],
-  },
-];
+export function getWorkThreadSlashCommands(t: (key: string) => string): MarkdownSlashCommand[] {
+  return [
+    {
+      id: 'next-action',
+      title: t('thread_slash_next_action_title'),
+      description: t('thread_slash_next_action_description'),
+      keywords: ['todo', 'step', 'action'],
+    },
+    {
+      id: 'waiting',
+      title: t('thread_slash_waiting_title'),
+      description: t('thread_slash_waiting_description'),
+      keywords: ['blocked', 'dependency', 'wait'],
+    },
+    {
+      id: 'interrupt',
+      title: t('thread_slash_interrupt_title'),
+      description: t('thread_slash_interrupt_description'),
+      keywords: ['distraction', 'interrupt'],
+    },
+    {
+      id: 'note-context',
+      title: t('thread_slash_note_title'),
+      description: t('thread_slash_note_description'),
+      keywords: ['context', 'note'],
+    },
+    {
+      id: 'link-context',
+      title: t('thread_slash_link_title'),
+      description: t('thread_slash_link_description'),
+      keywords: ['url', 'reference', 'link'],
+    },
+    {
+      id: 'checkpoint',
+      title: t('thread_slash_checkpoint_title'),
+      description: t('thread_slash_checkpoint_description'),
+      keywords: ['resume', 'save'],
+    },
+  ];
+}
 
 export function WorkThreadInlineMenu({
   onOpenCommand,
@@ -46,6 +48,7 @@ export function WorkThreadInlineMenu({
   onOpenCommand: (commandId: string) => void;
 }) {
   const { t } = useTranslation('think');
+  const commands = getWorkThreadSlashCommands(t);
 
   return (
     <div
@@ -58,7 +61,7 @@ export function WorkThreadInlineMenu({
       <span className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
         {t('thread_inline_menu_label')}
       </span>
-      {WORK_THREAD_SLASH_COMMANDS.slice(0, 4).map((command) => (
+      {commands.slice(0, 4).map((command) => (
         <button
           key={command.id}
           type="button"
