@@ -100,7 +100,7 @@ export function NowView({
   const [celebrateLine, setCelebrateLine] = useState<string | null>(null);
   const [focusStoreHydrated, setFocusStoreHydrated] = useState(false);
   const [chosenByUserTaskId, setChosenByUserTaskId] = useState<string | null>(null);
-  const [nowViewMode, setNowViewMode] = useState<NowViewMode>('task');
+  const [nowViewMode, setNowViewMode] = useState<NowViewMode>('auto');
   const [showAutoView, setShowAutoView] = useState(true);
   const session = useFocusSessionStore((s) => s.session);
   const setSession = useFocusSessionStore((s) => s.setSession);

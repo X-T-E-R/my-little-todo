@@ -722,6 +722,69 @@ button:focus-visible,
   z-index: 9999 !important;
 }
 
+.work-thread-editor.markdown-editor {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--color-surface);
+  overflow: visible;
+}
+
+.work-thread-editor .milkdown {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+.work-thread-editor .milkdown .milkdown-top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--color-surface) 96%, var(--color-bg));
+}
+
+.work-thread-editor .milkdown .ProseMirror {
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 20px 24px 28px;
+  overflow-y: auto;
+}
+
+.work-thread-editor .milkdown .ProseMirror h2 {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 90%, transparent);
+}
+
+.work-thread-editor .milkdown .ProseMirror h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.32rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 18%, var(--color-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-accent-soft) 88%, var(--color-surface));
+  color: var(--color-text);
+  font-size: 0.96em;
+  letter-spacing: 0.01em;
+}
+
+.work-thread-editor .milkdown .ProseMirror h3 + p,
+.work-thread-editor .milkdown .ProseMirror h3 + ul,
+.work-thread-editor .milkdown .ProseMirror h3 + ol {
+  margin-top: 0.7rem;
+}
+
+.work-thread-editor .task-ref-autocomplete-panel {
+  max-height: min(24rem, calc(100% - 1.5rem));
+  overflow-y: auto;
+}
+
 .stream-composer-editor .milkdown .milkdown-top-bar {
   border-bottom-color: transparent;
   background: transparent;

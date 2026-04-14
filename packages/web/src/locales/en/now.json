@@ -61,11 +61,11 @@
   "now_task_fallback_title": "Task fallback",
   "now_thread_mode_coach": "Coach suggests thread first",
   "now_thread_mode_semi_auto": "Semi-auto prefers thread",
-  "now_view_task": "Task",
-  "now_view_thread": "Thread",
-  "now_view_auto": "Auto",
-  "now_thread_tab_title": "Resume a thread",
-  "now_thread_tab_hint": "Keep the old task recommendation view, but surface resumable contexts in a lighter list when you want to think in threads.",
+  "now_view_task": "Task fallback",
+  "now_view_thread": "Thread overview",
+  "now_view_auto": "Resume",
+  "now_thread_tab_title": "Thread overview",
+  "now_thread_tab_hint": "Scan active threads, breakpoints, and next steps before deciding which workline to re-enter.",
   "now_thread_tab_empty": "No resumable threads yet.",
   "What you can do next": "What you can do next",
   "Need a different shape?": "Need a different shape?",
@@ -76,5 +76,5 @@
   "Chosen by you": "Chosen by you",
   "Failed to load tasks": "Failed to load tasks",
   "Retry": "Retry",
-  "now_intro_tip": "This is the <strong>Now view</strong>. It shows the one thing most worth doing right now. Accept it to start, or reject it with a reason so the system can learn your preference over time."
+  "now_intro_tip": "This is <strong>Meta / Now</strong>. It defaults to the most resumable thread, while still keeping thread overview and task fallback views available."
 }

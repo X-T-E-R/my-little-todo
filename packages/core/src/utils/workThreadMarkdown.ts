@@ -24,6 +24,8 @@ export interface WorkThreadMarkdownPatch {
 
 const WAITING_PREFIX = '[!waiting';
 const INTERRUPT_PREFIX = '[!interrupt';
+const STRUCTURED_HEADING_RE =
+  /^#{3,6}\s+(waiting|interrupt|等待|中断)\s*[·•|-]\s*([a-z]+)\s*[:：]\s*(.+)$/i;
 
 function quoteYaml(value: string): string {
   return JSON.stringify(value);
@@ -46,7 +48,7 @@ function parseScalar(value: string): string {
 }
 
 function normalizeLineBreaks(markdown: string): string {
-  return markdown.replace(/\r\n/g, '\n');
+  return markdown.replace(/\r\n/g, '\n').replace(/<br\s*\/?>/gi, '\n');
 }
 
 function buildFrontmatter(thread: WorkThread): string {
@@ -66,27 +68,15 @@ function buildFrontmatter(thread: WorkThread): string {
 }
 
 function formatWaitingBlock(item: WorkThreadWaitingCondition): string {
-  const head = `> ${WAITING_PREFIX}:${item.kind}] ${item.title}`;
-  const detail = item.detail?.trim()
-    ? item.detail
-        .trim()
-        .split('\n')
-        .map((line) => `> ${line}`)
-        .join('\n')
-    : '';
-  return detail ? `${head}\n${detail}` : head;
+  const head = `### Waiting · ${item.kind}: ${item.title}`;
+  const detail = item.detail?.trim() ? item.detail.trim() : '';
+  return detail ? `${head}\n\n${detail}` : head;
 }
 
 function formatInterruptBlock(item: WorkThreadInterrupt): string {
-  const head = `> ${INTERRUPT_PREFIX}:${item.source}] ${item.title}`;
-  const detail = item.content?.trim()
-    ? item.content
-        .trim()
-        .split('\n')
-        .map((line) => `> ${line}`)
-        .join('\n')
-    : '';
-  return detail ? `${head}\n${detail}` : head;
+  const head = `### Interrupt · ${item.source}: ${item.title}`;
+  const detail = item.content?.trim() ? item.content.trim() : '';
+  return detail ? `${head}\n\n${detail}` : head;
 }
 
 function replaceSection(markdown: string, heading: string, content: string): string {
@@ -195,6 +185,32 @@ function parseBlockMetadata(line: string, prefix: string): { kind: string; title
   };
 }
 
+function parseStructuredHeadingMetadata(
+  line: string,
+):
+  | {
+      type: 'waiting' | 'interrupt';
+      kind: string;
+      title: string;
+    }
+  | null {
+  const normalized = line.trim();
+  const match = STRUCTURED_HEADING_RE.exec(normalized);
+  if (!match) return null;
+  const rawType = match[1]?.trim().toLowerCase();
+  const kind = match[2]?.trim().toLowerCase();
+  const title = match[3]?.trim();
+  if (!rawType || !kind || !title) return null;
+  const type =
+    rawType === 'waiting' || rawType === '等待'
+      ? 'waiting'
+      : rawType === 'interrupt' || rawType === '中断'
+        ? 'interrupt'
+        : null;
+  if (!type) return null;
+  return { type, kind, title };
+}
+
 function parseQuotedBlocks(markdown: string) {
   const lines = normalizeLineBreaks(markdown).split('\n');
   const waitingFor: WorkThread['waitingFor'] = [];
@@ -205,19 +221,37 @@ function parseQuotedBlocks(markdown: string) {
     if (currentLine === undefined) break;
     const waitingMeta = parseBlockMetadata(currentLine, '\\[!waiting');
     const interruptMeta = parseBlockMetadata(currentLine, '\\[!interrupt');
-    if (!waitingMeta && !interruptMeta) {
+    const structuredHeadingMeta = parseStructuredHeadingMetadata(currentLine);
+    if (!waitingMeta && !interruptMeta && !structuredHeadingMeta) {
       i += 1;
       continue;
     }
     const detailLines: string[] = [];
     let j = i + 1;
-    while (j < lines.length) {
-      const detailLine = lines[j];
-      if (detailLine === undefined || !detailLine.startsWith('> ')) {
-        break;
+    if (structuredHeadingMeta) {
+      while (j < lines.length) {
+        const detailLine = lines[j];
+        if (detailLine === undefined) break;
+        const trimmed = detailLine.trim();
+        if (
+          /^#{2,6}\s+/.test(trimmed) ||
+          /^> \[!waiting:/i.test(trimmed) ||
+          /^> \[!interrupt:/i.test(trimmed)
+        ) {
+          break;
+        }
+        detailLines.push(detailLine);
+        j += 1;
       }
-      detailLines.push(detailLine.slice(2));
-      j += 1;
+    } else {
+      while (j < lines.length) {
+        const detailLine = lines[j];
+        if (detailLine === undefined || !detailLine.startsWith('> ')) {
+          break;
+        }
+        detailLines.push(detailLine.slice(2));
+        j += 1;
+      }
     }
     const detail = detailLines.join('\n').trim() || undefined;
     if (waitingMeta) {
@@ -236,6 +270,27 @@ function parseQuotedBlocks(markdown: string) {
         id: `md-interrupt-${i}`,
         source: interruptMeta.kind as WorkThreadInterruptSource,
         title: interruptMeta.title,
+        content: detail,
+        capturedAt: Date.now(),
+        resolved: false,
+      });
+    }
+    if (structuredHeadingMeta?.type === 'waiting') {
+      waitingFor.push({
+        id: `md-waiting-${i}`,
+        kind: structuredHeadingMeta.kind as WorkThreadWaitingKind,
+        title: structuredHeadingMeta.title,
+        detail,
+        satisfied: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    }
+    if (structuredHeadingMeta?.type === 'interrupt') {
+      interrupts.push({
+        id: `md-interrupt-${i}`,
+        source: structuredHeadingMeta.kind as WorkThreadInterruptSource,
+        title: structuredHeadingMeta.title,
         content: detail,
         capturedAt: Date.now(),
         resolved: false,

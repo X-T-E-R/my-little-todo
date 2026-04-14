@@ -18,6 +18,13 @@ function stripTaskRefs(markdown: string): string {
   return markdown.replace(/\[\[task:[^|\]]+\|([^\]]+)\]\]/gi, '$1');
 }
 
+function stripHtml(markdown: string): string {
+  return markdown
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/?(?:div|p|span|section|article|aside|main|header|footer|blockquote|li|ul|ol|h[1-6])[^>]*>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ');
+}
+
 function stripFormatting(markdown: string): string {
   return markdown
     .replace(/^>\s?/gm, '')
@@ -33,7 +40,7 @@ function stripFormatting(markdown: string): string {
 
 export function markdownToPlainText(markdown: string): string {
   return stripFormatting(
-    stripTaskRefs(stripLinks(stripImages(stripInlineCode(stripFenceBlocks(markdown))))),
+    stripHtml(stripTaskRefs(stripLinks(stripImages(stripInlineCode(stripFenceBlocks(markdown)))))),
   )
     .replace(/\r\n/g, '\n')
     .replace(/\n+/g, ' ')

@@ -47,6 +47,12 @@ import {
   WORK_THREAD_MARKDOWN_SYNC_ENABLED_KEY,
   WORK_THREAD_MARKDOWN_SYNC_ROOT_KEY,
 } from '../utils/workThreadSync';
+import {
+  appendRawCaptureToMarkdown,
+  buildRawCaptureEvent,
+  buildRawCaptureEvents,
+  type WorkThreadRawCaptureSource,
+} from '../utils/workThreadCaptures';
 import { useStreamStore } from './streamStore';
 import { useTaskStore } from './taskStore';
 
@@ -120,6 +126,7 @@ interface WorkThreadState {
   syncStatus: 'idle' | 'syncing' | 'synced' | 'external-change' | 'disabled' | 'error';
   syncMessage: string | null;
   pendingExternalThread: WorkThread | null;
+  persistedDocMarkdown: string;
 
   loadThreads: () => Promise<void>;
   loadUiPrefs: () => Promise<void>;
@@ -155,6 +162,10 @@ interface WorkThreadState {
   addLinkContext: (title: string, url: string) => Promise<void>;
   addTaskToThread: (task: Task, mode?: ExternalTargetMode) => Promise<void>;
   addStreamToThread: (entry: StreamEntry, mode?: ExternalTargetMode) => Promise<void>;
+  captureToCurrentThread: (
+    content: string,
+    source?: WorkThreadRawCaptureSource,
+  ) => Promise<boolean>;
 
   addDecision: (title: string, detailMarkdown?: string) => Promise<void>;
   addNextAction: (text: string, source?: 'user' | 'ai') => Promise<void>;
@@ -303,6 +314,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
   syncStatus: 'idle',
   syncMessage: null,
   pendingExternalThread: null,
+  persistedDocMarkdown: '',
 
   loadThreads: async () => {
     if (loadPromise) return loadPromise;
@@ -406,6 +418,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       threadListOpen: false,
       pendingExternalThread: null,
       syncMessage: null,
+      persistedDocMarkdown: thread.docMarkdown,
     });
     await rememberThreadOpenState(id);
     await get().loadThreads();
@@ -437,6 +450,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       syncStatus: 'synced',
       syncMessage: null,
       pendingExternalThread: null,
+      persistedDocMarkdown: savedThread.docMarkdown,
     }));
     await rememberThreadOpenState(savedThread.id);
     return savedThread;
@@ -500,6 +514,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       docDirty: false,
       pendingExternalThread: null,
       syncMessage: null,
+      persistedDocMarkdown: saved.docMarkdown,
     }));
     await rememberThreadOpenState(saved.id);
     await get().checkExternalSync();
@@ -746,6 +761,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const current = get().currentThread;
     if (!current) return;
     try {
+      const previousMarkdown = get().persistedDocMarkdown;
       const nextResume =
         current.resumeCard.summary || current.resumeCard.nextStep ? current.resumeCard : autoResumeCard(current);
       const next = {
@@ -754,11 +770,20 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
         updatedAt: Date.now(),
       };
       const saved = await persistThread(next);
+      const rawCaptureEvents = buildRawCaptureEvents(
+        saved.id,
+        previousMarkdown,
+        saved.docMarkdown,
+      );
+      await Promise.all(rawCaptureEvents.map((event) => persistEvent(event)));
+      const newestEvents = [...rawCaptureEvents].sort((left, right) => right.createdAt - left.createdAt);
       set((state) => ({
         currentThread: saved,
         threads: updateThreadInList(state.threads, saved),
+        currentEvents: [...newestEvents, ...state.currentEvents],
         saveError: null,
         docDirty: false,
+        persistedDocMarkdown: saved.docMarkdown,
         syncStatus:
           state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
         syncMessage: null,
@@ -794,6 +819,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
       docDirty: false,
+      persistedDocMarkdown: saved.docMarkdown,
     }));
   },
 
@@ -924,6 +950,49 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     }));
   },
 
+  captureToCurrentThread: async (content, source = 'editor') => {
+    const current = get().currentThread;
+    const trimmed = content.replace(/\r\n/g, '\n').trim();
+    if (!current || !trimmed) return false;
+    const nextMarkdown = appendRawCaptureToMarkdown(current.docMarkdown, trimmed);
+    const draft = applyMarkdownPatchToThread(
+      {
+        ...current,
+        updatedAt: Date.now(),
+      },
+      nextMarkdown,
+      current.syncMeta?.lastExternalModifiedAt,
+    );
+    const next = {
+      ...draft,
+      resumeCard:
+        draft.resumeCard.summary || draft.resumeCard.nextStep ? draft.resumeCard : autoResumeCard(draft),
+      updatedAt: Date.now(),
+    };
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const saved = await persistThread(next);
+    const event = buildRawCaptureEvent(saved.id, trimmed, {
+      source,
+      now: Date.now(),
+    });
+    await persistEvent(event);
+    set((state) => ({
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
+      currentEvents: [event, ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id)],
+      saveError: null,
+      docDirty: false,
+      persistedDocMarkdown: saved.docMarkdown,
+      syncStatus:
+        state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
+      syncMessage: null,
+    }));
+    return true;
+  },
+
   addDecision: async (title, detailMarkdown) => {
     const current = get().currentThread;
     if (!current || !title.trim()) return;
@@ -1044,7 +1113,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     if (check.kind === 'external-change') {
       set({
         syncStatus: 'external-change',
-        syncMessage: 'Detected external markdown changes.',
+        syncMessage: null,
         pendingExternalThread: check.thread,
       });
       return;
@@ -1057,8 +1126,9 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       currentThread: imported,
       threads: updateThreadInList(state.threads, imported),
       docDirty: false,
+      persistedDocMarkdown: imported.docMarkdown,
       syncStatus: 'synced',
-      syncMessage: 'Imported latest markdown changes.',
+      syncMessage: null,
       pendingExternalThread: null,
     }));
   },
@@ -1071,8 +1141,9 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       currentThread: saved,
       threads: updateThreadInList(state.threads, saved),
       docDirty: false,
+      persistedDocMarkdown: saved.docMarkdown,
       syncStatus: 'synced',
-      syncMessage: 'Reloaded thread from markdown file.',
+      syncMessage: null,
       pendingExternalThread: null,
     }));
   },

@@ -20,9 +20,19 @@ export const ThinkSessionEditor = forwardRef<
     onMarkdownChange: (markdown: string) => void;
     slashCommands?: MarkdownSlashCommand[];
     onSlashCommand?: (payload: MarkdownSlashCommandSelection) => void;
+    nativeSlashUi?: 'auto' | 'off';
+    editorClassName?: string;
   }
 >(function ThinkSessionEditor(
-  { sessionId, initialMarkdown, onMarkdownChange, slashCommands, onSlashCommand },
+  {
+    sessionId,
+    initialMarkdown,
+    onMarkdownChange,
+    slashCommands,
+    onSlashCommand,
+    nativeSlashUi = 'auto',
+    editorClassName = '',
+  },
   ref,
 ) {
   const [taskRefMode, setTaskRefMode] = useState<TaskRefRenderMode>('inline-chip');
@@ -55,9 +65,10 @@ export const ThinkSessionEditor = forwardRef<
       taskRefMode={taskRefMode}
       slashCommands={slashCommands}
       onSlashCommand={onSlashCommand}
+      nativeSlashUi={nativeSlashUi}
       className={`min-h-0 flex-1 think-session-editor ${
         editorDensity === 'focused' ? 'think-session-editor--focused' : ''
-      }`}
+      } ${editorClassName}`.trim()}
     />
   );
 });

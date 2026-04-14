@@ -2,7 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Calendar, Hash, Send, Tag, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useRoleStore, useStreamStore } from '../stores';
+import { useRoleStore, useStreamStore, useTaskStore, useWorkThreadStore } from '../stores';
 
 interface QuickInputBarProps {
   open: boolean;
@@ -11,6 +11,7 @@ interface QuickInputBarProps {
 
 const DDL_TYPES = ['soft', 'commitment', 'hard'] as const;
 type DdlType = (typeof DDL_TYPES)[number];
+type QuickInputTarget = 'task' | 'thread';
 
 export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
   const { t } = useTranslation('stream');
@@ -20,12 +21,16 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
   const [ddlDate, setDdlDate] = useState('');
   const [ddlType, setDdlType] = useState<DdlType>('soft');
   const [tags, setTags] = useState('');
+  const [target, setTarget] = useState<QuickInputTarget>('task');
   const addEntry = useStreamStore((s) => s.addEntry);
   const roles = useRoleStore((s) => s.roles);
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
+  const currentThread = useWorkThreadStore((s) => s.currentThread);
+  const addTaskToThread = useWorkThreadStore((s) => s.addTaskToThread);
 
   useEffect(() => {
     if (open) {
+      setTarget(currentThread ? 'thread' : 'task');
       setTimeout(() => inputRef.current?.focus(), 100);
     } else {
       setTitle('');
@@ -33,10 +38,11 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
       setDdlDate('');
       setDdlType('soft');
       setTags('');
+      setTarget('task');
     }
-  }, [open]);
+  }, [open, currentThread]);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     const trimmed = title.trim();
     if (!trimmed) return;
     const parsedDdl = ddlDate ? new Date(ddlDate) : undefined;
@@ -45,11 +51,21 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
       .map((t) => t.trim())
       .filter(Boolean);
 
-    addEntry(trimmed, true, {
-      ddl: parsedDdl,
-      ddlType: ddlDate ? ddlType : undefined,
-      tags: parsedTags.length > 0 ? parsedTags : undefined,
-    }).catch(() => {});
+    try {
+      const entry = await addEntry(trimmed, true, {
+        ddl: parsedDdl,
+        ddlType: ddlDate ? ddlType : undefined,
+        tags: parsedTags.length > 0 ? parsedTags : undefined,
+      });
+      if (target === 'thread' && currentThread && entry.extractedTaskId) {
+        const task = useTaskStore.getState().tasks.find((item) => item.id === entry.extractedTaskId);
+        if (task) {
+          await addTaskToThread(task, 'current');
+        }
+      }
+    } catch {
+      return;
+    }
 
     setTitle('');
     setDdlDate('');
@@ -57,13 +73,13 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
     setTags('');
     setShowMeta(false);
     onClose();
-  }, [title, ddlDate, ddlType, tags, addEntry, onClose]);
+  }, [title, ddlDate, ddlType, tags, addEntry, addTaskToThread, currentThread, onClose, target]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        handleSubmit();
+        void handleSubmit();
       }
       if (e.key === 'Escape') {
         onClose();
@@ -94,12 +110,47 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
               </span>
             )}
 
+            {currentThread && (
+              <div
+                className="flex shrink-0 items-center rounded-full border p-0.5"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setTarget('thread')}
+                  className={`rounded-full px-2 py-1 text-[11px] font-medium transition-colors ${
+                    target === 'thread'
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
+                  }`}
+                  title={currentThread.title}
+                >
+                  {t('Thread')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTarget('task')}
+                  className={`rounded-full px-2 py-1 text-[11px] font-medium transition-colors ${
+                    target === 'task'
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
+                  }`}
+                >
+                  {t('Task')}
+                </button>
+              </div>
+            )}
+
             <input
               ref={inputRef}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={t('Quick create task...', { ns: 'stream' })}
+              placeholder={
+                currentThread && target === 'thread'
+                  ? t('Quick create task in current thread...', { ns: 'stream' })
+                  : t('Quick create task...', { ns: 'stream' })
+              }
               className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-tertiary)] outline-none"
             />
 
@@ -114,7 +165,7 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
 
             <button
               type="button"
-              onClick={handleSubmit}
+              onClick={() => void handleSubmit()}
               disabled={!title.trim()}
               className="rounded p-1.5 text-[var(--color-accent)] transition-opacity disabled:opacity-30"
             >

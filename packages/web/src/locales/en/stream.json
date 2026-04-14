@@ -47,6 +47,7 @@
   "Time capsule auto": "Time capsule (random old sparks)",
   "All": "All",
   "Inspiration": "Inspiration",
+  "Thread": "Thread",
   "Task": "Task",
   "Log": "Log",
   "No role": "No role",
@@ -76,5 +77,7 @@
   "Attach file": "Attach file",
   "Collapse composer": "Collapse composer",
   "Collapse": "Collapse",
-  "Expand composer": "Expand composer"
+  "Expand composer": "Expand composer",
+  "Quick create task...": "Quick create task...",
+  "Quick create task in current thread...": "Create task and link it to current thread..."
 }

@@ -9,7 +9,7 @@ describe('resolveWorkThreadUiPrefs', () => {
   it('falls back to editor-centered defaults when settings are missing', () => {
     const prefs = resolveWorkThreadUiPrefs({});
 
-    expect(prefs.nowDefaultView).toBe('task');
+    expect(prefs.nowDefaultView).toBe('auto');
     expect(prefs.nowShowAutoView).toBe(true);
     expect(prefs.threadOpenMode).toBe('resume-last');
     expect(prefs.materialSidebarDefaultOpen).toBe(true);
@@ -43,12 +43,12 @@ describe('getAvailableNowViews', () => {
       }),
     );
 
-    expect(views).toEqual(['task', 'thread']);
+    expect(views).toEqual(['thread', 'task']);
   });
 
-  it('keeps task, thread, and auto when auto view is enabled', () => {
+  it('keeps auto first so Meta / Now opens in resume-first order', () => {
     const views = getAvailableNowViews(resolveWorkThreadUiPrefs({}));
-    expect(views).toEqual(['task', 'thread', 'auto']);
+    expect(views).toEqual(['auto', 'thread', 'task']);
   });
 });
 

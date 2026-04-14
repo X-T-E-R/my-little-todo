@@ -3,9 +3,11 @@ import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
 import { editorViewCtx } from '@milkdown/core';
 import type { Ctx } from '@milkdown/ctx';
+import type { Node as ProseMirrorNode } from '@milkdown/prose/model';
 import { TextSelection } from '@milkdown/prose/state';
 import type { EditorView } from '@milkdown/prose/view';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
+import { markdownToSlice } from '@milkdown/utils';
 import { type Task, displayTaskTitle, taskRoleIds } from '@my-little-todo/core';
 import {
   forwardRef,
@@ -19,6 +21,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { useRoleStore, useStreamStore, useTaskStore } from '../stores';
 import { taskRefHighlightPlugin } from '../utils/taskRefPlugin';
+import { isMilkdownSlashMenuClassName } from '../utils/richMarkdownNativeSlash';
 import {
   findTaskRefDeleteRange,
   formatTaskRefMarkdown,
@@ -30,6 +33,24 @@ export type MarkdownTaskRefMode = 'inline-chip' | 'mini-card' | 'highlight-only'
 
 export type RichMarkdownEditorHandle = {
   insertText: (text: string) => void;
+  replaceTextRange: (
+    from: number,
+    to: number,
+    text: string,
+    selection?: {
+      start: number;
+      end?: number;
+    },
+  ) => void;
+  replaceMarkdownRange: (
+    from: number,
+    to: number,
+    markdown: string,
+    selection?: {
+      text?: string;
+      fallback?: 'start' | 'end';
+    },
+  ) => void;
   focus: () => void;
 };
 
@@ -68,6 +89,7 @@ type RichMarkdownEditorProps = {
   taskRefAutocomplete?: boolean;
   slashCommands?: MarkdownSlashCommand[];
   onSlashCommand?: (payload: MarkdownSlashCommandSelection) => void;
+  nativeSlashUi?: 'auto' | 'off';
 };
 
 type AutocompleteCandidate = {
@@ -123,8 +145,50 @@ const variantClassMap: Record<MarkdownEditorVariant, string> = {
   immersive: 'markdown-editor markdown-editor--immersive',
 };
 
+function clampOverlayPosition(
+  left: number,
+  top: number,
+  wrapperRect: DOMRect | undefined,
+  panelWidth: number,
+  panelHeight: number,
+): { left: number; top: number } {
+  if (!wrapperRect) {
+    return {
+      left: Math.max(12, left),
+      top: Math.max(24, top),
+    };
+  }
+
+  const maxLeft = Math.max(12, wrapperRect.width - panelWidth - 12);
+  const maxTop = Math.max(24, wrapperRect.height - panelHeight - 12);
+  return {
+    left: Math.max(12, Math.min(left, maxLeft)),
+    top: Math.max(24, Math.min(top, maxTop)),
+  };
+}
+
 function getEditorView(ctx: Ctx): EditorView {
   return ctx.get(editorViewCtx);
+}
+
+function findTextSelectionInRange(
+  doc: ProseMirrorNode,
+  from: number,
+  to: number,
+  text: string,
+): { start: number; end: number } | null {
+  if (!text) return null;
+  let match: { start: number; end: number } | null = null;
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (match || !node.isText || !node.text) return;
+    const index = node.text.indexOf(text);
+    if (index < 0) return;
+    match = {
+      start: pos + index,
+      end: pos + index + text.length,
+    };
+  });
+  return match;
 }
 
 function buildAutocompleteCandidates(
@@ -255,6 +319,7 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       taskRefAutocomplete = false,
       slashCommands = [],
       onSlashCommand,
+      nativeSlashUi = 'auto',
     },
     ref,
   ) {
@@ -303,6 +368,43 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
     }, [slashMenu]);
 
     useEffect(() => {
+      const wrapper = wrapperRef.current;
+      if (!wrapper || nativeSlashUi !== 'off' || typeof MutationObserver === 'undefined') return;
+
+      const hideSlashMenu = (element: HTMLElement) => {
+        element.style.display = 'none';
+        element.style.visibility = 'hidden';
+        element.style.pointerEvents = 'none';
+        element.setAttribute('data-native-slash-hidden', 'true');
+      };
+
+      const hideNativeSlashMenus = (root: ParentNode) => {
+        root.querySelectorAll<HTMLElement>('.milkdown-slash-menu').forEach(hideSlashMenu);
+      };
+
+      hideNativeSlashMenus(wrapper);
+
+      const observer = new MutationObserver((records) => {
+        for (const record of records) {
+          record.addedNodes.forEach((node) => {
+            if (!(node instanceof HTMLElement)) return;
+            if (isMilkdownSlashMenuClassName(node.className)) {
+              hideSlashMenu(node);
+            }
+            hideNativeSlashMenus(node);
+          });
+        }
+      });
+
+      observer.observe(wrapper, {
+        childList: true,
+        subtree: true,
+      });
+
+      return () => observer.disconnect();
+    }, [nativeSlashUi]);
+
+    useEffect(() => {
       if (!autocomplete.open) return;
       setAutocomplete((prev) => ({
         ...prev,
@@ -332,32 +434,79 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       [getEditor],
     );
 
-    const replaceAutocompleteRange = useCallback(
-      (replacement: string) => {
+    const replaceTextRange = useCallback(
+      (
+        from: number,
+        to: number,
+        text: string,
+        selection?: {
+          start: number;
+          end?: number;
+        },
+      ) => {
         withEditorView((view) => {
-          const { replaceFrom, replaceTo } = autocompleteRef.current;
-          const tr = view.state.tr.insertText(replacement, replaceFrom, replaceTo);
-          tr.setSelection(TextSelection.create(tr.doc, replaceFrom + replacement.length));
+          const tr = view.state.tr.insertText(text, from, to);
+          const selectionStartOffset = Math.max(
+            0,
+            Math.min(selection?.start ?? text.length, text.length),
+          );
+          const selectionEndOffset = Math.max(
+            selectionStartOffset,
+            Math.min(selection?.end ?? selectionStartOffset, text.length),
+          );
+          tr.setSelection(
+            TextSelection.create(tr.doc, from + selectionStartOffset, from + selectionEndOffset),
+          );
           view.dispatch(tr);
           view.focus();
         });
-        closeAutocomplete();
       },
-      [closeAutocomplete, withEditorView],
+      [withEditorView],
     );
 
-    const replaceSlashCommandRange = useCallback(
+    const replaceAutocompleteRange = useCallback(
       (replacement: string) => {
-        withEditorView((view) => {
-          const { replaceFrom, replaceTo } = slashMenuRef.current;
-          const tr = view.state.tr.insertText(replacement, replaceFrom, replaceTo);
-          tr.setSelection(TextSelection.create(tr.doc, replaceFrom + replacement.length));
+        const { replaceFrom, replaceTo } = autocompleteRef.current;
+        replaceTextRange(replaceFrom, replaceTo, replacement);
+        closeAutocomplete();
+      },
+      [closeAutocomplete, replaceTextRange],
+    );
+
+    const replaceMarkdownRange = useCallback(
+      (
+        from: number,
+        to: number,
+        markdown: string,
+        selection?: {
+          text?: string;
+          fallback?: 'start' | 'end';
+        },
+      ) => {
+        const editor = getEditor();
+        if (!editor) return;
+        editor.action((ctx) => {
+          const view = getEditorView(ctx);
+          const slice = markdownToSlice(markdown)(ctx);
+          const tr = view.state.tr.replace(from, to, slice);
+          const insertedTo = Math.min(tr.doc.content.size, from + slice.content.size);
+          const selectedRange =
+            selection?.text && insertedTo > from
+              ? findTextSelectionInRange(tr.doc, from, insertedTo, selection.text)
+              : null;
+
+          if (selectedRange) {
+            tr.setSelection(TextSelection.create(tr.doc, selectedRange.start, selectedRange.end));
+          } else {
+            const fallbackPos = selection?.fallback === 'start' ? from : insertedTo;
+            tr.setSelection(TextSelection.create(tr.doc, fallbackPos));
+          }
+
           view.dispatch(tr);
           view.focus();
         });
-        closeSlashMenu();
       },
-      [closeSlashMenu, withEditorView],
+      [getEditor],
     );
 
     const insertCandidateById = useCallback(
@@ -431,13 +580,20 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
             if (!next) {
               closeAutocomplete();
             } else {
+              const position = clampOverlayPosition(
+                next.left - (wrapperRect?.left ?? 0),
+                next.top - (wrapperRect?.top ?? 0),
+                wrapperRect,
+                540,
+                300,
+              );
               const nextState: TaskRefAutocompleteState = {
                 open: true,
                 query: next.query,
                 replaceFrom: next.replaceFrom,
                 replaceTo: next.replaceTo,
-                left: Math.max(12, next.left - (wrapperRect?.left ?? 0)),
-                top: Math.max(24, next.top - (wrapperRect?.top ?? 0)),
+                left: position.left,
+                top: position.top,
                 selectedIndex:
                   autocompleteRef.current.open && autocompleteRef.current.query === next.query
                     ? autocompleteRef.current.selectedIndex
@@ -452,13 +608,20 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
             if (!nextSlash) {
               closeSlashMenu();
             } else {
+              const position = clampOverlayPosition(
+                nextSlash.left - (wrapperRect?.left ?? 0),
+                nextSlash.top - (wrapperRect?.top ?? 0),
+                wrapperRect,
+                320,
+                240,
+              );
               const nextState: SlashCommandState = {
                 open: true,
                 query: nextSlash.query,
                 replaceFrom: nextSlash.replaceFrom,
                 replaceTo: nextSlash.replaceTo,
-                left: Math.max(12, nextSlash.left - (wrapperRect?.left ?? 0)),
-                top: Math.max(24, nextSlash.top - (wrapperRect?.top ?? 0)),
+                left: position.left,
+                top: position.top,
                 selectedIndex:
                   slashMenuRef.current.open && slashMenuRef.current.query === nextSlash.query
                     ? slashMenuRef.current.selectedIndex
@@ -566,7 +729,7 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
               const selected = activeSlashCommands[activeSlashMenu.selectedIndex];
               if (!selected) return;
               event.preventDefault();
-              replaceSlashCommandRange('');
+              closeSlashMenu();
               slashCommandRef.current?.({
                 command: selected,
                 query: activeSlashMenu.query,
@@ -681,7 +844,16 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       });
     }, [getEditor]);
 
-    useImperativeHandle(ref, () => ({ insertText, focus }), [insertText, focus]);
+    useImperativeHandle(
+      ref,
+      () => ({
+        insertText,
+        replaceTextRange,
+        replaceMarkdownRange,
+        focus,
+      }),
+      [focus, insertText, replaceMarkdownRange, replaceTextRange],
+    );
 
     const visibleCandidates = autocomplete.open
       ? buildAutocompleteCandidates(tasks, currentRoleId, autocomplete.query)
@@ -692,9 +864,21 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
         ref={wrapperRef}
         className={`${variantClassMap[variant]} ${
           taskRefs ? `task-ref-mode-${taskRefMode}` : ''
-        } ${taskRefAutocomplete ? 'task-ref-autocomplete-enabled' : ''} ${className}`.trim()}
+        } ${taskRefAutocomplete ? 'task-ref-autocomplete-enabled' : ''} ${
+          nativeSlashUi === 'off' ? 'native-slash-ui-off' : ''
+        } ${className}`.trim()}
+        data-native-slash-ui={nativeSlashUi}
         style={{ position: 'relative' }}
       >
+        {nativeSlashUi === 'off' ? (
+          <style>{`
+            .native-slash-ui-off .milkdown .milkdown-slash-menu {
+              display: none !important;
+              visibility: hidden !important;
+              pointer-events: none !important;
+            }
+          `}</style>
+        ) : null}
         <Milkdown />
         {taskRefAutocomplete && autocomplete.open && (
           <div
@@ -778,7 +962,7 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
                   }`}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
-                    replaceSlashCommandRange('');
+                    closeSlashMenu();
                     slashCommandRef.current?.({
                       command,
                       query: slashMenu.query,
