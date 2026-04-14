@@ -82,6 +82,16 @@ export interface WorkThreadSchedulerMeta {
   snoozedUntil?: number;
 }
 
+export type WorkThreadSyncMode = 'internal' | 'hybrid';
+
+export interface WorkThreadSyncMeta {
+  mode: WorkThreadSyncMode;
+  filePath?: string;
+  lastExportedHash?: string;
+  lastImportedAt?: number;
+  lastExternalModifiedAt?: number;
+}
+
 export type WorkThreadSuggestionKind =
   | 'organize_context'
   | 'summarize_conclusion'
@@ -141,6 +151,7 @@ export interface WorkThread {
   waitingFor: WorkThreadWaitingCondition[];
   interrupts: WorkThreadInterrupt[];
   schedulerMeta: WorkThreadSchedulerMeta;
+  syncMeta?: WorkThreadSyncMeta;
   suggestions?: WorkThreadSuggestion[];
   createdAt: number;
   updatedAt: number;

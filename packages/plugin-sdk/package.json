@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./i18n-test": {
+      "types": "./dist/i18n-test.d.ts",
+      "import": "./dist/i18n-test.js"
+    },
     "./vite-plugin": {
       "types": "./dist/vite-plugin-mltp.d.ts",
       "import": "./dist/vite-plugin-mltp.js"
@@ -18,7 +22,8 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "vitest run"
   },
   "peerDependencies": {
     "react": ">=18",
@@ -30,12 +35,13 @@
     }
   },
   "dependencies": {
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "typescript": "~5.9.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/react": "^19.2.14",
-    "typescript": "~5.9.3",
-    "vite": "^8.0.1"
+    "vite": "^8.0.1",
+    "vitest": "^3.2.4"
   }
 }

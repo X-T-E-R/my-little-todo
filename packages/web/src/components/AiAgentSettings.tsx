@@ -72,7 +72,8 @@ function ChoiceRow<T extends string>({
 }
 
 export function AiAgentSettings() {
-  const { t } = useTranslation('ai');
+  const { t } = useTranslation(['ai', 'settings']);
+  const { t: ts } = useTranslation('settings');
   const [confirmWrites, setConfirmWrites] = useState(true);
   const [persona, setPersona] = useState<AiPersona>('coach');
   const [entryPreset, setEntryPreset] = useState<AiEntryPreset>('stream');
@@ -131,7 +132,11 @@ export function AiAgentSettings() {
   };
 
   if (!loaded) {
-    return <p className="text-xs text-[var(--color-text-tertiary)]">Loading...</p>;
+    return (
+      <p className="text-xs text-[var(--color-text-tertiary)]">
+        {t('Loading...', { ns: 'settings' })}
+      </p>
+    );
   }
 
   return (
@@ -142,8 +147,9 @@ export function AiAgentSettings() {
       >
         <h3 className="text-sm font-semibold text-[var(--color-text)]">{t('AI role')}</h3>
         <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-          Tune how the assistant sounds, where it shows up first, and how much guidance it gives by
-          default.
+          {ts(
+            'Tune how the assistant sounds, where it shows up first, and how much guidance it gives by default.',
+          )}
         </p>
       </section>
 
@@ -176,24 +182,24 @@ export function AiAgentSettings() {
         </div>
 
         <ChoiceRow
-          label="Default entry"
+          label={ts('Default entry')}
           value={entryPreset}
           onChange={(next) => void saveEntryPreset(next)}
           options={[
-            { id: 'stream', label: 'Stream' },
-            { id: 'now', label: 'Now' },
-            { id: 'thread', label: 'Work thread' },
+            { id: 'stream', label: ts('Stream') },
+            { id: 'now', label: ts('Now') },
+            { id: 'thread', label: ts('Work thread') },
           ]}
         />
 
         <ChoiceRow
-          label="Suggestion density"
+          label={ts('Suggestion density')}
           value={suggestionDensity}
           onChange={(next) => void saveSuggestionDensity(next)}
           options={[
-            { id: 'focused', label: 'Focused' },
-            { id: 'balanced', label: 'Balanced' },
-            { id: 'proactive', label: 'Proactive' },
+            { id: 'focused', label: ts('Focused') },
+            { id: 'balanced', label: ts('Balanced') },
+            { id: 'proactive', label: ts('Proactive') },
           ]}
         />
 
@@ -215,9 +221,13 @@ export function AiAgentSettings() {
           style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
         >
           <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Show context hints</p>
+            <p className="text-sm font-medium text-[var(--color-text)]">
+              {ts('Show context hints')}
+            </p>
             <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-              Surface recent role, task, and stream context before the assistant suggests actions.
+              {ts(
+                'Surface recent role, task, and stream context before the assistant suggests actions.',
+              )}
             </p>
           </div>
           <Toggle

@@ -6,30 +6,27 @@ import {
   runPluginActivate,
   runPluginDeactivate,
 } from './pluginApi';
+import { discoverPluginLocales } from './pluginLocales';
 import { readPluginFile } from './pluginFs';
 import { clearPluginUi } from './pluginUiRegistry';
 import type { PluginModuleExports } from './types';
 
 const active = new Map<
   string,
-  { definition: PluginDefinition; disposers: (() => void)[]; styleEl?: HTMLStyleElement }
+  {
+    definition: PluginDefinition;
+    disposers: (() => void)[];
+    styleEl?: HTMLStyleElement;
+    loadedLanguages: string[];
+  }
 >();
 
-async function tryLoadLocales(pluginId: string): Promise<void> {
-  const bundles: Record<string, Record<string, string>> = {};
-  for (const lng of ['en', 'zh-CN']) {
-    const raw = await readPluginFile(pluginId, `locales/${lng}.json`);
-    if (!raw) continue;
-    try {
-      const text = new TextDecoder().decode(raw);
-      bundles[lng] = JSON.parse(text) as Record<string, string>;
-    } catch {
-      /* skip */
-    }
+async function tryLoadLocales(pluginId: string): Promise<string[]> {
+  const discovered = await discoverPluginLocales(pluginId);
+  if (discovered.loadedLanguages.length > 0) {
+    await loadLocalesForPlugin(pluginId, discovered.bundles);
   }
-  if (Object.keys(bundles).length > 0) {
-    await loadLocalesForPlugin(pluginId, bundles);
-  }
+  return discovered.loadedLanguages;
 }
 
 function injectStylesheet(
@@ -76,14 +73,23 @@ export async function activatePlugin(pluginId: string, manifest: PluginManifest)
     throw new Error('Plugin must export default definePlugin({ activate })');
   }
 
-  await tryLoadLocales(pluginId);
+  const loadedLanguages = await tryLoadLocales(pluginId);
 
   const styleEl = injectStylesheet(pluginId, manifest);
 
   const ctx = createPluginContext(pluginId, manifest, onDispose);
-  await runPluginActivate(definition, ctx);
+  try {
+    await runPluginActivate(definition, ctx);
+  } catch (error) {
+    if (styleEl?.parentNode) {
+      styleEl.parentNode.removeChild(styleEl);
+    }
+    clearPluginUi(pluginId);
+    await removeLocalesForPlugin(pluginId, loadedLanguages);
+    throw error;
+  }
 
-  active.set(pluginId, { definition, disposers, styleEl });
+  active.set(pluginId, { definition, disposers, styleEl, loadedLanguages });
 }
 
 export async function deactivatePlugin(pluginId: string): Promise<void> {
@@ -105,7 +111,7 @@ export async function deactivatePlugin(pluginId: string): Promise<void> {
   }
 
   clearPluginUi(pluginId);
-  await removeLocalesForPlugin(pluginId, ['en', 'zh-CN']);
+  await removeLocalesForPlugin(pluginId, entry.loadedLanguages);
   active.delete(pluginId);
 }
 

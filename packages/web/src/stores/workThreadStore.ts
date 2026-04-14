@@ -25,11 +25,37 @@ import {
 import { create } from 'zustand';
 import { getDataStore } from '../storage/dataStore';
 import { formatTaskRefMarkdown } from '../utils/taskRefs';
+import {
+  LEGACY_LAST_OPENED_THREAD_ID_KEY,
+  LEGACY_MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY,
+  LEGACY_THREAD_OPEN_MODE_KEY,
+  LEGACY_THREAD_RUNTIME_SIDEBAR_DEFAULT_KEY,
+  LAST_OPENED_THREAD_ID_KEY,
+  MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY,
+  THREAD_OPEN_MODE_KEY,
+  THREAD_RUNTIME_SIDEBAR_DEFAULT_KEY,
+  type RuntimeSidebarDefault,
+  type ThreadOpenMode,
+} from '../utils/workThreadUiPrefs';
 import { generateWorkThreadSuggestion, parseSuggestedNextSteps } from '../utils/workThreadAi';
+import {
+  applyMarkdownPatchToThread,
+  checkWorkThreadExternalChanges,
+  exportWorkThreadToMarkdownFile,
+  type WorkThreadSyncPrefs,
+  WORK_THREAD_MARKDOWN_AUTO_IMPORT_KEY,
+  WORK_THREAD_MARKDOWN_SYNC_ENABLED_KEY,
+  WORK_THREAD_MARKDOWN_SYNC_ROOT_KEY,
+} from '../utils/workThreadSync';
 import { useStreamStore } from './streamStore';
 import { useTaskStore } from './taskStore';
 
-export const WORK_THREAD_SCHEDULER_POLICY_KEY = 'think-session:thread-scheduler-policy';
+export const WORK_THREAD_SCHEDULER_POLICY_KEY = 'work-thread:thread-scheduler-policy';
+export const LEGACY_WORK_THREAD_SCHEDULER_POLICY_KEY = 'think-session:thread-scheduler-policy';
+export const WORK_THREAD_RUNTIME_SIDEBAR_REMEMBERED_KEY =
+  'work-thread:thread-runtime-sidebar-remembered-open';
+export const LEGACY_WORK_THREAD_RUNTIME_SIDEBAR_REMEMBERED_KEY =
+  'think-session:thread-runtime-sidebar-remembered-open';
 
 function summarizeText(text: string, maxLength: number): string {
   const compact = text.replace(/\s+/g, ' ').trim();
@@ -80,8 +106,23 @@ interface WorkThreadState {
   aiBusy: boolean;
   saveError: string | null;
   schedulerPolicy: WorkThreadSchedulerPolicy;
+  lastOpenedThreadId: string | null;
+  threadListOpen: boolean;
+  materialSidebarOpen: boolean;
+  runtimeSidebarOpen: boolean;
+  runtimeSidebarRemembered: boolean;
+  threadOpenMode: ThreadOpenMode;
+  runtimeSidebarDefault: RuntimeSidebarDefault;
+  markdownSyncEnabled: boolean;
+  markdownSyncRoot: string;
+  markdownAutoImport: boolean;
+  docDirty: boolean;
+  syncStatus: 'idle' | 'syncing' | 'synced' | 'external-change' | 'disabled' | 'error';
+  syncMessage: string | null;
+  pendingExternalThread: WorkThread | null;
 
   loadThreads: () => Promise<void>;
+  loadUiPrefs: () => Promise<void>;
   loadSchedulerPolicy: () => Promise<WorkThreadSchedulerPolicy>;
   setSchedulerPolicy: (policy: WorkThreadSchedulerPolicy) => Promise<void>;
   showThreadList: () => Promise<void>;
@@ -119,6 +160,12 @@ interface WorkThreadState {
   addNextAction: (text: string, source?: 'user' | 'ai') => Promise<void>;
   toggleNextActionDone: (id: string) => Promise<void>;
   createTaskFromNextAction: (id: string) => Promise<void>;
+  setMaterialSidebarOpen: (open: boolean) => Promise<void>;
+  setRuntimeSidebarOpen: (open: boolean) => Promise<void>;
+  setThreadListOpen: (open: boolean) => void;
+  checkExternalSync: () => Promise<void>;
+  reloadFromPendingExternal: () => Promise<void>;
+  dismissPendingExternal: () => void;
 
   runAiSuggestion: (kind: WorkThreadSuggestionKind) => Promise<void>;
   applySuggestionToDoc: (id: string) => Promise<void>;
@@ -128,18 +175,77 @@ interface WorkThreadState {
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let loadPromise: Promise<void> | null = null;
 
-async function persistThread(thread: WorkThread): Promise<void> {
-  await getDataStore().saveWorkThread(ensureWorkThreadRuntime(thread));
+function getCurrentSyncPrefs(): WorkThreadSyncPrefs {
+  try {
+    const state = useWorkThreadStore.getState();
+    return {
+      enabled: state.markdownSyncEnabled,
+      root: state.markdownSyncRoot,
+      autoImport: state.markdownAutoImport,
+    };
+  } catch {
+    return {
+      enabled: false,
+      root: '',
+      autoImport: false,
+    };
+  }
+}
+
+async function persistThread(thread: WorkThread): Promise<WorkThread> {
+  const normalized = ensureWorkThreadRuntime(thread);
+  const synced = await exportWorkThreadToMarkdownFile(normalized, getCurrentSyncPrefs());
+  await getDataStore().saveWorkThread(synced);
+  return synced;
 }
 
 async function persistEvent(event: WorkThreadEvent): Promise<void> {
   await getDataStore().appendWorkThreadEvent(event);
 }
 
+async function readSettingCompat(primary: string, legacy?: string): Promise<string | null> {
+  const current = await getDataStore().getSetting(primary);
+  if (current != null && current !== '') return current;
+  if (!legacy) return current;
+  return getDataStore().getSetting(legacy);
+}
+
 async function readSchedulerPolicy(): Promise<WorkThreadSchedulerPolicy> {
-  const raw = await getDataStore().getSetting(WORK_THREAD_SCHEDULER_POLICY_KEY);
+  const raw = await readSettingCompat(
+    WORK_THREAD_SCHEDULER_POLICY_KEY,
+    LEGACY_WORK_THREAD_SCHEDULER_POLICY_KEY,
+  );
   if (raw === 'manual' || raw === 'coach' || raw === 'semi_auto') return raw;
   return DEFAULT_WORK_THREAD_SCHEDULER_POLICY;
+}
+
+async function readBooleanSetting(
+  key: string,
+  fallback: boolean,
+  legacyKey?: string,
+): Promise<boolean> {
+  const raw = await readSettingCompat(key, legacyKey);
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return fallback;
+}
+
+async function readThreadOpenMode(): Promise<ThreadOpenMode> {
+  const raw = await readSettingCompat(THREAD_OPEN_MODE_KEY, LEGACY_THREAD_OPEN_MODE_KEY);
+  return raw === 'board-first' ? 'board-first' : 'resume-last';
+}
+
+async function readRuntimeSidebarDefault(): Promise<RuntimeSidebarDefault> {
+  const raw = await readSettingCompat(
+    THREAD_RUNTIME_SIDEBAR_DEFAULT_KEY,
+    LEGACY_THREAD_RUNTIME_SIDEBAR_DEFAULT_KEY,
+  );
+  if (raw === 'open' || raw === 'closed') return raw;
+  return 'remember';
+}
+
+async function rememberThreadOpenState(threadId: string | null): Promise<void> {
+  await getDataStore().putSetting(LAST_OPENED_THREAD_ID_KEY, threadId ?? '');
 }
 
 function updateThreadInList(threads: WorkThread[], next: WorkThread): WorkThread[] {
@@ -183,6 +289,20 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
   aiBusy: false,
   saveError: null,
   schedulerPolicy: DEFAULT_WORK_THREAD_SCHEDULER_POLICY,
+  lastOpenedThreadId: null,
+  threadListOpen: false,
+  materialSidebarOpen: true,
+  runtimeSidebarOpen: true,
+  runtimeSidebarRemembered: true,
+  threadOpenMode: 'resume-last',
+  runtimeSidebarDefault: 'remember',
+  markdownSyncEnabled: false,
+  markdownSyncRoot: '',
+  markdownAutoImport: true,
+  docDirty: false,
+  syncStatus: 'idle',
+  syncMessage: null,
+  pendingExternalThread: null,
 
   loadThreads: async () => {
     if (loadPromise) return loadPromise;
@@ -208,6 +328,54 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     return loadPromise;
   },
 
+  loadUiPrefs: async () => {
+    const [
+      materialSidebarOpen,
+      runtimeSidebarRemembered,
+      threadOpenMode,
+      runtimeSidebarDefault,
+      lastOpenedThreadId,
+      markdownSyncEnabled,
+      markdownSyncRoot,
+      markdownAutoImport,
+    ] = await Promise.all([
+      readBooleanSetting(
+        MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY,
+        true,
+        LEGACY_MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY,
+      ),
+      readBooleanSetting(
+        WORK_THREAD_RUNTIME_SIDEBAR_REMEMBERED_KEY,
+        true,
+        LEGACY_WORK_THREAD_RUNTIME_SIDEBAR_REMEMBERED_KEY,
+      ),
+      readThreadOpenMode(),
+      readRuntimeSidebarDefault(),
+      readSettingCompat(LAST_OPENED_THREAD_ID_KEY, LEGACY_LAST_OPENED_THREAD_ID_KEY),
+      readBooleanSetting(WORK_THREAD_MARKDOWN_SYNC_ENABLED_KEY, false),
+      readSettingCompat(WORK_THREAD_MARKDOWN_SYNC_ROOT_KEY),
+      readBooleanSetting(WORK_THREAD_MARKDOWN_AUTO_IMPORT_KEY, true),
+    ]);
+    set({
+      materialSidebarOpen,
+      runtimeSidebarRemembered,
+      runtimeSidebarOpen:
+        runtimeSidebarDefault === 'open'
+          ? true
+          : runtimeSidebarDefault === 'closed'
+            ? false
+            : runtimeSidebarRemembered,
+      threadOpenMode,
+      runtimeSidebarDefault,
+      lastOpenedThreadId: lastOpenedThreadId?.trim() || null,
+      markdownSyncEnabled,
+      markdownSyncRoot: markdownSyncRoot?.trim() || '',
+      markdownAutoImport,
+      syncStatus:
+        markdownSyncEnabled && markdownSyncRoot?.trim() ? 'idle' : 'disabled',
+    });
+  },
+
   loadSchedulerPolicy: async () => {
     const policy = await readSchedulerPolicy();
     set({ schedulerPolicy: policy });
@@ -222,7 +390,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
   showThreadList: async () => {
     await get().saveCheckpoint('Saved checkpoint');
     await get().loadThreads();
-    set({ currentThread: null, currentEvents: [] });
+    set({ threadListOpen: true });
   },
 
   openThread: async (id) => {
@@ -234,8 +402,14 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     set({
       currentThread: ensureWorkThreadRuntime(thread),
       currentEvents: events,
+      lastOpenedThreadId: id,
+      threadListOpen: false,
+      pendingExternalThread: null,
+      syncMessage: null,
     });
+    await rememberThreadOpenState(id);
     await get().loadThreads();
+    await get().checkExternalSync();
   },
 
   createThread: async (opts) => {
@@ -249,16 +423,23 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
         status: opts?.status,
       }),
     );
-    await persistThread(thread);
+    const savedThread = await persistThread(thread);
     const event = createEvent(thread.id, 'created', 'user', 'Created thread');
     await persistEvent(event);
     set((state) => ({
-      threads: updateThreadInList(state.threads, thread),
-      currentThread: thread,
+      threads: updateThreadInList(state.threads, savedThread),
+      currentThread: savedThread,
       currentEvents: [event],
       saveError: null,
+      lastOpenedThreadId: savedThread.id,
+      threadListOpen: false,
+      docDirty: false,
+      syncStatus: 'synced',
+      syncMessage: null,
+      pendingExternalThread: null,
     }));
-    return thread;
+    await rememberThreadOpenState(savedThread.id);
+    return savedThread;
   },
 
   dispatchThread: async (id, source = 'manual') => {
@@ -279,9 +460,9 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       },
       updatedAt: Date.now(),
     };
-    await persistThread(next);
+    const saved = await persistThread(next);
     const resumeEvent = createEvent(
-      next.id,
+      saved.id,
       'thread_resumed',
       'system',
       source === 'now' ? 'Resumed from Now recommendation' : 'Resumed thread',
@@ -292,7 +473,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const dispatchEvent =
       source === 'now'
         ? createEvent(
-            next.id,
+            saved.id,
             'thread_dispatched',
             'system',
             'Dispatched from Now',
@@ -303,9 +484,9 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     if (dispatchEvent) {
       await persistEvent(dispatchEvent);
     }
-    const events = await getDataStore().listWorkThreadEvents(next.id, 300);
+    const events = await getDataStore().listWorkThreadEvents(saved.id, 300);
     set((store) => ({
-      currentThread: next,
+      currentThread: saved,
       currentEvents: [
         ...(dispatchEvent ? [dispatchEvent] : []),
         resumeEvent,
@@ -313,8 +494,15 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
           (item) => item.id !== resumeEvent.id && item.id !== dispatchEvent?.id,
         ),
       ],
-      threads: updateThreadInList(store.threads, next),
+      threads: updateThreadInList(store.threads, saved),
+      lastOpenedThreadId: saved.id,
+      threadListOpen: false,
+      docDirty: false,
+      pendingExternalThread: null,
+      syncMessage: null,
     }));
+    await rememberThreadOpenState(saved.id);
+    await get().checkExternalSync();
   },
 
   deleteThread: async (id) => {
@@ -323,7 +511,11 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       threads: state.threads.filter((thread) => thread.id !== id),
       currentThread: state.currentThread?.id === id ? null : state.currentThread,
       currentEvents: state.currentThread?.id === id ? [] : state.currentEvents,
+      lastOpenedThreadId: state.lastOpenedThreadId === id ? null : state.lastOpenedThreadId,
     }));
+    if (get().lastOpenedThreadId === null) {
+      await rememberThreadOpenState(null);
+    }
   },
 
   renameThread: async (title) => {
@@ -331,12 +523,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const nextTitle = title.trim();
     if (!current || !nextTitle || nextTitle === current.title) return;
     const next = { ...current, title: nextTitle, updatedAt: Date.now() };
-    await persistThread(next);
-    const event = createEvent(next.id, 'renamed', 'user', `Renamed thread to ${nextTitle}`);
+    const saved = await persistThread(next);
+    const event = createEvent(saved.id, 'renamed', 'user', `Renamed thread to ${nextTitle}`);
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -347,10 +539,10 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const nextMission = mission.trim() || current.title;
     if (nextMission === current.mission) return;
     const next = { ...current, mission: nextMission, updatedAt: Date.now() };
-    await persistThread(next);
+    const saved = await persistThread(next);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
     }));
   },
 
@@ -358,12 +550,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const current = get().currentThread;
     if (!current || current.status === status) return;
     const next = { ...current, status, updatedAt: Date.now() };
-    await persistThread(next);
-    const event = createEvent(next.id, 'status_changed', 'user', `Status changed to ${status}`);
+    const saved = await persistThread(next);
+    const event = createEvent(saved.id, 'status_changed', 'user', `Status changed to ${status}`);
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -382,12 +574,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       },
       updatedAt: Date.now(),
     };
-    await persistThread(next);
-    const event = createEvent(next.id, 'resume_card_updated', 'user', 'Updated resume card');
+    const saved = await persistThread(next);
+    const event = createEvent(saved.id, 'resume_card_updated', 'user', 'Updated resume card');
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -414,12 +606,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
           ].slice(0, 7);
         })();
     const next = { ...current, workingSet, updatedAt: Date.now() };
-    await persistThread(next);
-    const event = createEvent(next.id, 'working_set_updated', 'user', 'Updated working set');
+    const saved = await persistThread(next);
+    const event = createEvent(saved.id, 'working_set_updated', 'user', 'Updated working set');
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -442,12 +634,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       status: current.status === 'running' ? 'waiting' : current.status,
       updatedAt: Date.now(),
     };
-    await persistThread(next);
-    const event = createEvent(next.id, 'waiting_updated', 'user', `Added waiting condition: ${condition.title}`);
+    const saved = await persistThread(next);
+    const event = createEvent(saved.id, 'waiting_updated', 'user', `Added waiting condition: ${condition.title}`);
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -465,12 +657,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       status: current.status === 'waiting' && !hasOpenWaiting ? 'ready' : current.status,
       updatedAt: Date.now(),
     };
-    await persistThread(next);
-    const event = createEvent(next.id, 'waiting_updated', 'user', 'Updated waiting condition');
+    const saved = await persistThread(next);
+    const event = createEvent(saved.id, 'waiting_updated', 'user', 'Updated waiting condition');
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -491,9 +683,9 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       interrupts: [interrupt, ...current.interrupts],
       updatedAt: Date.now(),
     };
-    await persistThread(next);
+    const saved = await persistThread(next);
     const event = createEvent(
-      next.id,
+      saved.id,
       'interrupt_captured',
       source === 'system' ? 'system' : 'user',
       `Captured interrupt: ${interrupt.title}`,
@@ -502,8 +694,8 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     );
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -519,20 +711,30 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       interrupts,
       updatedAt: Date.now(),
     };
-    await persistThread(next);
+    const saved = await persistThread(next);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
     }));
   },
 
   updateDoc: (markdown) => {
     const current = get().currentThread;
     if (!current) return;
-    const next = { ...current, docMarkdown: markdown, updatedAt: Date.now() };
+    const next = applyMarkdownPatchToThread(
+      {
+        ...current,
+        updatedAt: Date.now(),
+      },
+      markdown,
+      current.syncMeta?.lastExternalModifiedAt,
+    );
     set((state) => ({
       currentThread: next,
       threads: updateThreadInList(state.threads, next),
+      docDirty: true,
+      syncStatus: state.markdownSyncEnabled && state.markdownSyncRoot ? 'syncing' : 'disabled',
+      syncMessage: null,
     }));
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
@@ -551,14 +753,18 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
         resumeCard: nextResume,
         updatedAt: Date.now(),
       };
-      await persistThread(next);
+      const saved = await persistThread(next);
       set((state) => ({
-        currentThread: next,
-        threads: updateThreadInList(state.threads, next),
+        currentThread: saved,
+        threads: updateThreadInList(state.threads, saved),
         saveError: null,
+        docDirty: false,
+        syncStatus:
+          state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
+        syncMessage: null,
       }));
     } catch (error) {
-      set({ saveError: String(error) });
+      set({ saveError: String(error), syncStatus: 'error', syncMessage: String(error) });
     }
   },
 
@@ -574,7 +780,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       },
       updatedAt: Date.now(),
     };
-    await persistThread(next);
+    const saved = await persistThread(next);
     const event = createEvent(
       current.id,
       'checkpoint_saved',
@@ -584,9 +790,10 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     );
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
+      docDirty: false,
     }));
   },
 
@@ -601,12 +808,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       addedAt: Date.now(),
     };
     const next = withContextItem(current, item);
-    await persistThread(next);
+    const saved = await persistThread(next);
     const event = createEvent(current.id, 'context_added', 'user', `Added note context: ${item.title}`, item.content);
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -622,12 +829,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       addedAt: Date.now(),
     };
     const next = withContextItem(current, item);
-    await persistThread(next);
+    const saved = await persistThread(next);
     const event = createEvent(current.id, 'context_added', 'user', `Added link context: ${item.title}`, item.content);
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -670,13 +877,13 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       },
       item,
     );
-    await persistThread(next);
+    const saved = await persistThread(next);
     const event = createEvent(thread.id, 'task_linked', 'user', `Linked task: ${item.title}`);
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
-      currentEvents: [event, ...state.currentEvents.filter((entry) => entry.threadId === next.id)],
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
+      currentEvents: [event, ...state.currentEvents.filter((entry) => entry.threadId === saved.id)],
     }));
   },
 
@@ -707,13 +914,13 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       addedAt: Date.now(),
     };
     const next = withContextItem(thread, item);
-    await persistThread(next);
+    const saved = await persistThread(next);
     const event = createEvent(thread.id, 'context_added', 'user', `Added stream context: ${item.title}`);
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
-      currentEvents: [event, ...state.currentEvents.filter((timeline) => timeline.threadId === next.id)],
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
+      currentEvents: [event, ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id)],
     }));
   },
 
@@ -748,12 +955,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
             },
       updatedAt: Date.now(),
     });
-    await persistThread(next);
+    const saved = await persistThread(next);
     const event = createEvent(current.id, 'next_action_added', source, `Added next action: ${action.text}`);
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -768,10 +975,10 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       ),
       updatedAt: Date.now(),
     });
-    await persistThread(next);
+    const saved = await persistThread(next);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
     }));
   },
 
@@ -787,7 +994,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       item.id === id ? { ...item, linkedTaskId: createdTask.id, done: true } : item,
     );
     const next = { ...current, nextActions, updatedAt: Date.now() };
-    await persistThread(next);
+    const saved = await persistThread(next);
     const event = createEvent(
       current.id,
       'task_created',
@@ -796,10 +1003,79 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     );
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
+  },
+
+  setMaterialSidebarOpen: async (open) => {
+    set({ materialSidebarOpen: open });
+  },
+
+  setRuntimeSidebarOpen: async (open) => {
+    set({ runtimeSidebarOpen: open, runtimeSidebarRemembered: open });
+    await getDataStore().putSetting(
+      WORK_THREAD_RUNTIME_SIDEBAR_REMEMBERED_KEY,
+      open ? 'true' : 'false',
+    );
+  },
+
+  setThreadListOpen: (open) => {
+    set({ threadListOpen: open });
+  },
+
+  checkExternalSync: async () => {
+    const current = get().currentThread;
+    if (!current) return;
+    const check = await checkWorkThreadExternalChanges(current, getCurrentSyncPrefs(), get().docDirty);
+    if (check.kind === 'disabled' || check.kind === 'missing' || check.kind === 'unsupported') {
+      set({
+        syncStatus: check.kind === 'disabled' ? 'disabled' : 'idle',
+        syncMessage: null,
+        pendingExternalThread: null,
+      });
+      return;
+    }
+    if (check.kind === 'unchanged') {
+      set({ syncStatus: 'synced', syncMessage: null, pendingExternalThread: null });
+      return;
+    }
+    if (check.kind === 'external-change') {
+      set({
+        syncStatus: 'external-change',
+        syncMessage: 'Detected external markdown changes.',
+        pendingExternalThread: check.thread,
+      });
+      return;
+    }
+    const imported = await persistThread(check.thread);
+    set((state) => ({
+      currentThread: imported,
+      threads: updateThreadInList(state.threads, imported),
+      docDirty: false,
+      syncStatus: 'synced',
+      syncMessage: 'Imported latest markdown changes.',
+      pendingExternalThread: null,
+    }));
+  },
+
+  reloadFromPendingExternal: async () => {
+    const pending = get().pendingExternalThread;
+    if (!pending) return;
+    const saved = await persistThread(pending);
+    set((state) => ({
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
+      docDirty: false,
+      syncStatus: 'synced',
+      syncMessage: 'Reloaded thread from markdown file.',
+      pendingExternalThread: null,
+    }));
+  },
+
+  dismissPendingExternal: () => {
+    set({ pendingExternalThread: null, syncStatus: 'idle', syncMessage: null });
   },
 
   runAiSuggestion: async (kind) => {
@@ -813,12 +1089,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
         suggestions: [suggestion, ...(current.suggestions ?? [])],
         updatedAt: Date.now(),
       };
-      await persistThread(next);
+      const saved = await persistThread(next);
       const event = createEvent(current.id, 'ai_suggested', 'ai', suggestion.title, suggestion.content, { kind });
       await persistEvent(event);
       set((state) => ({
-        currentThread: next,
-        threads: updateThreadInList(state.threads, next),
+        currentThread: saved,
+        threads: updateThreadInList(state.threads, saved),
         currentEvents: [event, ...state.currentEvents],
         aiBusy: false,
       }));
@@ -838,12 +1114,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       suggestions: (current.suggestions ?? []).map((item) => (item.id === id ? { ...item, applied: true } : item)),
       updatedAt: Date.now(),
     };
-    await persistThread(next);
+    const saved = await persistThread(next);
     const event = createEvent(current.id, 'ai_applied', 'user', `Inserted AI suggestion: ${suggestion.title}`);
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },
@@ -868,12 +1144,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       suggestions: (current.suggestions ?? []).map((item) => (item.id === id ? { ...item, applied: true } : item)),
       updatedAt: Date.now(),
     };
-    await persistThread(next);
+    const saved = await persistThread(next);
     const event = createEvent(current.id, 'ai_applied', 'user', `Applied AI next steps: ${suggestion.title}`);
     await persistEvent(event);
     set((state) => ({
-      currentThread: next,
-      threads: updateThreadInList(state.threads, next),
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
       currentEvents: [event, ...state.currentEvents],
     }));
   },

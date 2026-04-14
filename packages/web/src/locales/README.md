@@ -134,6 +134,14 @@ The admin panel has a single namespace `admin.json`.
 ## Testing
 
 ```bash
+pnpm --filter @my-little-todo/web test
+```
+
+This runs the regular web Vitest suite, including the i18n integrity check that scans `t(...)`, `i18n.t(...)`, and `<Trans ...>` usage against `zh-CN` resources.
+
+For manual UI verification, you can still run:
+
+```bash
 pnpm dev
 ```
 

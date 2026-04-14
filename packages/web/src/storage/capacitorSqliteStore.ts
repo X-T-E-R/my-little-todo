@@ -204,6 +204,7 @@ async function ensureSchema(db: CapDB): Promise<void> {
         waiting_for TEXT NOT NULL DEFAULT '[]',
         interrupts TEXT NOT NULL DEFAULT '[]',
         scheduler_meta TEXT NOT NULL DEFAULT '{}',
+        sync_meta TEXT NOT NULL DEFAULT '{"mode":"internal"}',
         suggestions TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
@@ -262,6 +263,26 @@ async function ensureSchema(db: CapDB): Promise<void> {
       );
       await db.execute(
         `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (12, ${Date.now()})`,
+      );
+    }
+    const rowsV12 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
+    const verBefore13 =
+      rowsV12.values?.[0]?.version != null ? Number(rowsV12.values[0].version) : 0;
+    if (verBefore13 < 13) {
+      try {
+        await db.execute(
+          `ALTER TABLE work_threads ADD COLUMN sync_meta TEXT NOT NULL DEFAULT '{"mode":"internal"}'`,
+        );
+      } catch {
+        /* column may already exist */
+      }
+      await db.execute(
+        `UPDATE work_threads SET sync_meta = '{"mode":"internal"}' WHERE trim(COALESCE(sync_meta, '')) = ''`,
+      );
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (13, ${Date.now()})`,
       );
     }
   }
@@ -828,8 +849,8 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       await db.execute(
         `INSERT INTO work_threads (
           id, title, mission, status, lane, role_id, doc_markdown, context_items, next_actions,
-          resume_card, working_set, waiting_for, interrupts, scheduler_meta, suggestions, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          resume_card, working_set, waiting_for, interrupts, scheduler_meta, sync_meta, suggestions, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title=excluded.title,
           mission=excluded.mission,
@@ -844,6 +865,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           waiting_for=excluded.waiting_for,
           interrupts=excluded.interrupts,
           scheduler_meta=excluded.scheduler_meta,
+          sync_meta=excluded.sync_meta,
           suggestions=excluded.suggestions,
           updated_at=excluded.updated_at`,
         [
@@ -861,6 +883,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           row.waiting_for,
           row.interrupts,
           row.scheduler_meta,
+          row.sync_meta,
           row.suggestions,
           row.created_at,
           row.updated_at,

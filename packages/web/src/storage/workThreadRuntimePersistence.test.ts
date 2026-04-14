@@ -35,6 +35,11 @@ describe('workThreadStorage', () => {
           resolved: false,
         },
       ],
+      syncMeta: {
+        mode: 'hybrid',
+        filePath: 'C:/threads/comsol.md',
+        lastExportedHash: 'abc',
+      },
     };
 
     const raw = serializeWorkThread(thread);
@@ -44,6 +49,8 @@ describe('workThreadStorage', () => {
     expect(roundTrip.lane).toBe('execution');
     expect(roundTrip.waitingFor[0]?.title).toBe('Sample output');
     expect(roundTrip.interrupts[0]?.title).toBe('Phone call');
+    expect(roundTrip.syncMeta?.mode).toBe('hybrid');
+    expect(roundTrip.syncMeta?.filePath).toBe('C:/threads/comsol.md');
     expect(roundTrip.resumeCard.updatedAt).toBeTypeOf('number');
   });
 

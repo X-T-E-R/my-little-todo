@@ -23,7 +23,8 @@
     "Heading 3": "标题 3",
     "Heading 4": "标题 4",
     "Brain Dump": "脑暴速记",
-    "Think Session": "理一理"
+    "Think Session": "理一理",
+    "Work Thread": "Work Thread"
   },
   "notifications": {
     "Reminder: {{title}}": "提醒: {{title}}",

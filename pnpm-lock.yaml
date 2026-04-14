@@ -53,6 +53,9 @@ importers:
       vite:
         specifier: ^8.0.1
         version: 8.0.1(@types/node@22.19.15)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.46.1)(tsx@4.21.0)
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.21.0)
 
   packages/admin:
     dependencies:
@@ -169,6 +172,9 @@ importers:
       react:
         specifier: '>=18'
         version: 19.2.4
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
@@ -176,12 +182,12 @@ importers:
       '@types/react':
         specifier: ^19.2.14
         version: 19.2.14
-      typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
       vite:
         specifier: ^8.0.1
         version: 8.0.1(@types/node@22.19.15)(esbuild@0.27.4)(jiti@2.6.1)(terser@5.46.1)(tsx@4.21.0)
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.13)(@types/node@22.19.15)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.21.0)
 
   packages/web:
     dependencies:

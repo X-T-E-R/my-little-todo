@@ -1,3 +1,6 @@
 {
-  "title": "来自 Hello World 插件的问候！"
+  "title": "来自 Hello World 插件的问候！",
+  "loading": "加载中…",
+  "counter_label": "计数：",
+  "increment": "+1"
 }

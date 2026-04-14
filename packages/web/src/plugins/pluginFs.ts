@@ -85,6 +85,10 @@ function makeKey(pluginId: string, relativePath: string): string {
   return `${pluginId}/${norm}`;
 }
 
+function normalizeRelativePath(relativePath = ''): string {
+  return relativePath.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
+}
+
 /** Write a file under the plugin sandbox (Tauri AppData or IndexedDB). */
 export async function writePluginFile(
   pluginId: string,
@@ -138,6 +142,53 @@ export async function removePluginDirectory(pluginId: string): Promise<void> {
       await idbDelete(k);
     }
   }
+}
+
+export async function listPluginFiles(pluginId: string, relativeDir = ''): Promise<string[]> {
+  const normalizedDir = normalizeRelativePath(relativeDir);
+
+  if (isTauriEnv()) {
+    const rootPath = normalizedDir
+      ? `${TAURI_REL}/${pluginId}/${normalizedDir}`
+      : `${TAURI_REL}/${pluginId}`;
+
+    async function walk(dirPath: string, prefix: string): Promise<string[]> {
+      let entries:
+        | Awaited<ReturnType<typeof readDir>>
+        | undefined;
+      try {
+        entries = await readDir(dirPath, { baseDir: BaseDirectory.AppData });
+      } catch {
+        return [];
+      }
+
+      const files: string[] = [];
+      for (const entry of entries) {
+        const name = entry.name;
+        if (!name) continue;
+        const nextPrefix = prefix ? `${prefix}/${name}` : name;
+        if (entry.isDirectory) {
+          files.push(...(await walk(`${dirPath}/${name}`, nextPrefix)));
+          continue;
+        }
+        files.push(nextPrefix);
+      }
+      return files;
+    }
+
+    return walk(rootPath, normalizedDir);
+  }
+
+  const keys = await idbGetAllKeys();
+  const basePrefix = normalizedDir ? `${pluginId}/${normalizedDir}/` : `${pluginId}/`;
+  const files: string[] = [];
+
+  for (const key of keys) {
+    if (typeof key !== 'string' || !key.startsWith(basePrefix)) continue;
+    files.push(key.slice(pluginId.length + 1));
+  }
+
+  return files.sort((left, right) => left.localeCompare(right));
 }
 
 export async function listInstalledPluginIds(): Promise<string[]> {

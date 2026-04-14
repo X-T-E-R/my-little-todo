@@ -99,12 +99,14 @@ export function TimeCapsuleSettings() {
 
       <section className="space-y-4">
         <div>
-          <p className="text-xs font-medium text-[var(--color-text-secondary)]">Lookback window</p>
+          <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+            {t('Lookback window')}
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {([
-              ['14', '2 weeks'],
-              ['30', '30 days'],
-              ['90', '90 days'],
+              ['14', t('2 weeks')],
+              ['30', t('30 days')],
+              ['90', t('90 days')],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -129,12 +131,14 @@ export function TimeCapsuleSettings() {
         </div>
 
         <div>
-          <p className="text-xs font-medium text-[var(--color-text-secondary)]">Surfacing rhythm</p>
+          <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+            {t('Surfacing rhythm')}
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {([
-              ['gentle', 'Gentle'],
-              ['regular', 'Regular'],
-              ['frequent', 'Frequent'],
+              ['gentle', t('Gentle')],
+              ['regular', t('Regular')],
+              ['frequent', t('Frequent')],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -163,10 +167,13 @@ export function TimeCapsuleSettings() {
           style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
         >
           <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Inline hint in Stream</p>
+            <p className="text-sm font-medium text-[var(--color-text)]">
+              {t('Inline hint in Stream')}
+            </p>
             <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-              Show a lighter reminder banner in Stream instead of only surfacing the capsule through
-              separate prompts.
+              {t(
+                'Show a lighter reminder banner in Stream instead of only surfacing the capsule through separate prompts.',
+              )}
             </p>
           </div>
           <Toggle

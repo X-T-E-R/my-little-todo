@@ -83,6 +83,16 @@ export const BUILT_IN_MODULES: AppModule[] = [
     categoryOrder: 0,
   },
   {
+    id: 'work-thread',
+    nameKey: 'module_work_thread_name',
+    descriptionKey: 'module_work_thread_desc',
+    defaultEnabled: true,
+    stability: 'beta',
+    hasSettingsPage: true,
+    category: 'thinking-and-ai',
+    categoryOrder: 1,
+  },
+  {
     id: 'ai-agent',
     nameKey: 'module_ai_agent_name',
     descriptionKey: 'module_ai_agent_desc',
@@ -90,7 +100,7 @@ export const BUILT_IN_MODULES: AppModule[] = [
     stability: 'beta',
     hasSettingsPage: true,
     category: 'thinking-and-ai',
-    categoryOrder: 1,
+    categoryOrder: 2,
   },
   {
     id: 'advanced-filter',

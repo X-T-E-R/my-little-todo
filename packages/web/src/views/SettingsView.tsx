@@ -26,6 +26,7 @@ import {
   Monitor,
   Moon,
   PanelLeft,
+  Rows3,
   RefreshCw,
   RotateCcw,
   Search,
@@ -81,6 +82,7 @@ import { getAuthToken, useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
 import { getSyncEngine } from '../sync';
 import type { ConflictStrategy } from '../sync';
+import { probeMltServer } from '../sync/serverProbe';
 import { initSyncFromConfig } from '../sync/syncManager';
 import {
   type BackupPayload,
@@ -91,6 +93,7 @@ import {
 } from '../utils/backupPayload';
 import { checkGitHubUpdate } from '../utils/githubUpdater';
 import { mapApiError } from '../utils/i18nErrorMap';
+import { createHttpClient } from '../utils/httpClient';
 import {
   canEditBackendUrl,
   canExportToFolder,
@@ -185,6 +188,7 @@ const PLUGIN_ICONS: Record<string, LucideIcon> = {
   'time-awareness': CalendarClock,
   'stream-context-panel': PanelLeft,
   'think-session': Coffee,
+  'work-thread': Rows3,
 };
 
 const MODULE_CATEGORY_ORDER: BuiltinModuleCategory[] = [
@@ -2020,10 +2024,8 @@ function SyncTab() {
     if (isTauriEnv()) return;
     (async () => {
       try {
-        const res = await fetch(`${getSettingsApiBase()}/health`, {
-          signal: AbortSignal.timeout(3000),
-        });
-        if (res.ok) setServerRunning(true);
+        await probeMltServer(getSettingsApiBase(), createHttpClient());
+        setServerRunning(true);
       } catch {
         /* server not reachable */
       }
@@ -2034,21 +2036,13 @@ function SyncTab() {
     setTestStatus('testing');
     setTestMsg('');
     try {
-      const res = await fetch(`${getSettingsApiBase()}/health`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTestStatus('success');
-        setTestMsg(
-          t('Connection successful — {{details}}', {
-            details: `${data.db ?? ''} ${data.auth ?? ''}`,
-          }),
-        );
-      } else {
-        setTestStatus('error');
-        setTestMsg(`HTTP ${res.status}`);
-      }
+      const data = await probeMltServer(getSettingsApiBase(), createHttpClient());
+      setTestStatus('success');
+      setTestMsg(
+        t('Connection successful — {{details}}', {
+          details: [data.db, data.auth].filter(Boolean).join(' ').trim() || 'ok',
+        }),
+      );
     } catch (err) {
       setTestStatus('error');
       const message = err instanceof Error ? err.message : String(err);

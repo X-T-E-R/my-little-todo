@@ -16,9 +16,10 @@ import {
   UserCircle,
   Zap,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRoleStore } from '../stores';
+import { getViewport, positionCascadeMenu, positionContextMenu } from '../utils/menuPosition';
 import { ConfirmableDeleteItem } from './ContextMenu';
 
 interface TaskContextMenuProps {
@@ -42,29 +43,38 @@ interface TaskContextMenuProps {
 }
 
 function CascadeSubmenu({
+  submenuRef,
   parentRef,
   children,
 }: {
+  submenuRef: React.RefObject<HTMLDivElement | null>;
   parentRef: React.RefObject<HTMLDivElement | null>;
   children: React.ReactNode;
 }) {
-  const [pos, setPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number }>({
+    left: 0,
+    top: 0,
+    maxHeight: Math.max(160, window.innerHeight - 16),
+  });
 
-  useEffect(() => {
-    if (!parentRef.current) return;
+  useLayoutEffect(() => {
+    if (!parentRef.current || !submenuRef.current) return;
     const rect = parentRef.current.getBoundingClientRect();
-    let left = rect.right + 4;
-    if (left + 180 > window.innerWidth) {
-      left = rect.left - 184;
-    }
-    setPos({
-      left: Math.max(4, left),
-      top: Math.min(rect.top, window.innerHeight - 250),
-    });
+    setPos(
+      positionCascadeMenu(
+        rect,
+        {
+          width: submenuRef.current.offsetWidth,
+          height: submenuRef.current.offsetHeight,
+        },
+        getViewport(),
+      ),
+    );
   }, [parentRef]);
 
   return (
     <motion.div
+      ref={submenuRef}
       initial={{ opacity: 0, x: -8 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -8 }}
@@ -76,6 +86,8 @@ function CascadeSubmenu({
         background: 'var(--color-surface)',
         border: '1px solid var(--color-border)',
         minWidth: '160px',
+        maxHeight: `${pos.maxHeight}px`,
+        overflowY: 'auto',
       }}
     >
       {children}
@@ -104,11 +116,26 @@ export function TaskContextMenu({
   const [openSub, setOpenSub] = useState<'role' | null>(null);
   const roles = useRoleStore((s) => s.roles);
   const menuRef = useRef<HTMLDivElement>(null);
+  const submenuRef = useRef<HTMLDivElement>(null);
   const roleRowRef = useRef<HTMLDivElement>(null);
+  const [menuStyle, setMenuStyle] = useState<{
+    left: number;
+    top: number;
+    maxHeight: number;
+  }>({
+    left: x,
+    top: y,
+    maxHeight: Math.max(160, window.innerHeight - 16),
+  });
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(target) &&
+        !submenuRef.current?.contains(target)
+      ) {
         onClose();
       }
     };
@@ -123,8 +150,19 @@ export function TaskContextMenu({
     };
   }, [onClose]);
 
-  const adjustedX = Math.min(x, window.innerWidth - 200);
-  const adjustedY = Math.min(y, window.innerHeight - 350);
+  useLayoutEffect(() => {
+    if (!menuRef.current) return;
+    setMenuStyle(
+      positionContextMenu(
+        { x, y },
+        {
+          width: menuRef.current.offsetWidth,
+          height: menuRef.current.offsetHeight,
+        },
+        getViewport(),
+      ),
+    );
+  }, [x, y, openSub, task.id]);
 
   const MenuItem = ({
     icon: Icon,
@@ -163,11 +201,13 @@ export function TaskContextMenu({
         transition={{ duration: 0.1 }}
         className="fixed z-[100] rounded-xl p-1 shadow-xl"
         style={{
-          left: adjustedX,
-          top: adjustedY,
+          left: menuStyle.left,
+          top: menuStyle.top,
           background: 'var(--color-surface)',
           border: '1px solid var(--color-border)',
           minWidth: '180px',
+          maxHeight: `${menuStyle.maxHeight}px`,
+          overflowY: 'auto',
         }}
         onMouseLeave={() => setOpenSub(null)}
       >
@@ -242,7 +282,7 @@ export function TaskContextMenu({
 
         <AnimatePresence>
           {openSub === 'role' && (
-            <CascadeSubmenu parentRef={roleRowRef}>
+            <CascadeSubmenu submenuRef={submenuRef} parentRef={roleRowRef}>
               <button
                 type="button"
                 onClick={() => {

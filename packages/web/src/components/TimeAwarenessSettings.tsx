@@ -123,37 +123,38 @@ export function TimeAwarenessSettings() {
       >
         <p className="text-sm font-semibold text-[var(--color-text)]">{t('time_pattern_title')}</p>
         <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-          Blend learned work rhythms with your preferred intervention strength so reminders feel
-          timely without becoming noisy.
+          {t(
+            'Blend learned work rhythms with your preferred intervention strength so reminders feel timely without becoming noisy.',
+          )}
         </p>
       </section>
 
       <section className="space-y-4">
         <ChoiceRow
-          label="Recommendation sensitivity"
+          label={t('Recommendation sensitivity')}
           value={sensitivity}
           onChange={(next) => {
             setSensitivity(next);
             void putSetting('time-awareness-sensitivity', next);
           }}
           options={[
-            { id: 'gentle', label: 'Gentle' },
-            { id: 'balanced', label: 'Balanced' },
-            { id: 'high', label: 'High' },
+            { id: 'gentle', label: t('Gentle') },
+            { id: 'balanced', label: t('Balanced') },
+            { id: 'high', label: t('High') },
           ]}
         />
 
         <ChoiceRow
-          label="Reminder intensity"
+          label={t('Reminder intensity')}
           value={reminderIntensity}
           onChange={(next) => {
             setReminderIntensity(next);
             void putSetting('time-awareness-reminder-intensity', next);
           }}
           options={[
-            { id: 'subtle', label: 'Subtle' },
-            { id: 'standard', label: 'Standard' },
-            { id: 'strong', label: 'Strong' },
+            { id: 'subtle', label: t('Subtle') },
+            { id: 'standard', label: t('Standard') },
+            { id: 'strong', label: t('Strong') },
           ]}
         />
 
@@ -162,9 +163,11 @@ export function TimeAwarenessSettings() {
           style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
         >
           <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Learn from behavior</p>
+            <p className="text-sm font-medium text-[var(--color-text)]">
+              {t('Learn from behavior')}
+            </p>
             <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-              Keep refining time suggestions based on accepted and postponed tasks.
+              {t('Keep refining time suggestions based on accepted and postponed tasks.')}
             </p>
           </div>
           <Toggle

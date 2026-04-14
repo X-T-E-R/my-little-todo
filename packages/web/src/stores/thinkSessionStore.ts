@@ -26,12 +26,10 @@ function seedI18n() {
   };
 }
 
-export type StreamPanelMode = 'stream' | 'think';
-export type ThinkWorkspaceMode = 'session' | 'thread';
+export type StreamPanelMode = 'stream' | 'think-session' | 'work-thread';
 
 interface ThinkSessionState {
   streamMode: StreamPanelMode;
-  workspaceMode: ThinkWorkspaceMode;
   currentSession: ThinkSession | null;
   /** Bumps when markdown should remount (seed / open history). */
   editorKey: number;
@@ -41,7 +39,6 @@ interface ThinkSessionState {
   saveError: string | null;
 
   setStreamMode: (mode: StreamPanelMode) => void;
-  setWorkspaceMode: (mode: ThinkWorkspaceMode) => void;
   /** Start or resume editing */
   ensureSession: () => Promise<void>;
   setStartModeAndSeed: (mode: ThinkSessionStartMode) => Promise<void>;
@@ -62,7 +59,6 @@ let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useThinkSessionStore = create<ThinkSessionState>((set, get) => ({
   streamMode: 'stream',
-  workspaceMode: 'session',
   currentSession: null,
   editorKey: 0,
   sessions: [],
@@ -71,7 +67,6 @@ export const useThinkSessionStore = create<ThinkSessionState>((set, get) => ({
   saveError: null,
 
   setStreamMode: (mode) => set({ streamMode: mode }),
-  setWorkspaceMode: (mode) => set({ workspaceMode: mode }),
 
   ensureSession: async () => {
     const cur = get().currentSession;
@@ -272,6 +267,6 @@ export const useThinkSessionStore = create<ThinkSessionState>((set, get) => ({
   },
 
   clearCurrentSession: () => {
-    set({ currentSession: null, streamMode: 'stream', workspaceMode: 'session' });
+    set({ currentSession: null, streamMode: 'stream' });
   },
 }));

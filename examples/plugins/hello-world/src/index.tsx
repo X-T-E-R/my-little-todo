@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 function SettingsBody({ ctx }: { ctx: PluginContext }) {
   const [n, setN] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [, setLanguageTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,16 +21,23 @@ function SettingsBody({ ctx }: { ctx: PluginContext }) {
     };
   }, [ctx]);
 
+  useEffect(() => {
+    const subscription = ctx.i18n.onLanguageChanged(() => {
+      setLanguageTick((value) => value + 1);
+    });
+    return () => subscription.dispose();
+  }, [ctx]);
+
   return (
     <div data-plugin-id={ctx.pluginId} className="space-y-3">
       <p className="mltp-hello-title text-sm" style={{ color: 'var(--color-text)' }}>
         {ctx.i18n.t('title')}
       </p>
       {loading ? (
-        <p className="text-xs text-[var(--color-text-tertiary)]">…</p>
+        <p className="text-xs text-[var(--color-text-tertiary)]">{ctx.i18n.t('loading')}</p>
       ) : (
         <p className="text-xs text-[var(--color-text-secondary)]">
-          Counter: <strong>{n}</strong>
+          {ctx.i18n.t('counter_label', { count: n })} <strong>{n}</strong>
         </p>
       )}
       <button
@@ -44,7 +52,7 @@ function SettingsBody({ ctx }: { ctx: PluginContext }) {
           })()
         }
       >
-        +1
+        {ctx.i18n.t('increment')}
       </button>
     </div>
   );

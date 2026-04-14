@@ -8,6 +8,7 @@ export type {
   PluginEventsAPI,
   PluginI18nAPI,
   PluginLogger,
+  PluginLocaleTree,
   PluginManifest,
   PluginManifestAuthor,
   PluginPermission,

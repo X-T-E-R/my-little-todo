@@ -5,6 +5,7 @@ import type {
   WorkThreadLane,
   WorkThreadResumeCard,
   WorkThreadSchedulerPolicy,
+  WorkThreadSyncMeta,
   WorkThreadStatus,
   WorkThreadWorkingSetItem,
 } from '../models/work-thread.js';
@@ -94,6 +95,7 @@ export function createWorkThread(opts: CreateWorkThreadOptions = {}): WorkThread
     waitingFor: [],
     interrupts: [],
     schedulerMeta: {},
+    syncMeta: { mode: 'internal' },
     suggestions: [],
     createdAt: now,
     updatedAt: now,
@@ -101,6 +103,13 @@ export function createWorkThread(opts: CreateWorkThreadOptions = {}): WorkThread
 }
 
 export function ensureWorkThreadRuntime(thread: WorkThread): WorkThread {
+  const syncMeta: WorkThreadSyncMeta = {
+    mode: thread.syncMeta?.mode === 'hybrid' ? 'hybrid' : 'internal',
+    filePath: thread.syncMeta?.filePath,
+    lastExportedHash: thread.syncMeta?.lastExportedHash,
+    lastImportedAt: thread.syncMeta?.lastImportedAt,
+    lastExternalModifiedAt: thread.syncMeta?.lastExternalModifiedAt,
+  };
   return {
     ...thread,
     mission: normalizeString(thread.mission) || normalizeString(thread.title),
@@ -119,6 +128,7 @@ export function ensureWorkThreadRuntime(thread: WorkThread): WorkThread {
     waitingFor: thread.waitingFor ?? [],
     interrupts: thread.interrupts ?? [],
     schedulerMeta: thread.schedulerMeta ?? {},
+    syncMeta,
     suggestions: thread.suggestions ?? [],
   };
 }

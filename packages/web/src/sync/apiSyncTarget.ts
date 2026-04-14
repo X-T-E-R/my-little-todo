@@ -1,6 +1,6 @@
 import { getAuthToken } from '../stores/authStore';
 import { createHttpClient, type HttpClient, type HttpRequest } from '../utils/httpClient';
-import { isTauriEnv } from '../utils/platform';
+import { formatSyncRequestError, probeMltServer } from './serverProbe';
 import type { ChangeRecord, PushResult, SyncTarget } from './types';
 
 export type ApiAuthMode = 'token' | 'credentials';
@@ -14,39 +14,6 @@ interface ApiSyncTargetOpts {
   username?: string;
   password?: string;
   httpClient?: HttpClient;
-}
-
-function isCrossOriginTarget(baseUrl: string): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return new URL(baseUrl).origin !== window.location.origin;
-  } catch {
-    return false;
-  }
-}
-
-function formatFetchError(baseUrl: string, err: unknown): Error {
-  if (
-    err instanceof Error &&
-    (err.name === 'TimeoutError' || /timeout|timed out/i.test(err.message))
-  ) {
-    return new Error(`Connection timed out while contacting ${baseUrl}`);
-  }
-
-  if (
-    !isTauriEnv() &&
-    err instanceof TypeError &&
-    err.message === 'Failed to fetch' &&
-    isCrossOriginTarget(baseUrl)
-  ) {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'this app';
-    return new Error(
-      `Cross-origin request blocked. Add ${origin} to CORS_ALLOWED_ORIGINS on ${baseUrl}.`,
-    );
-  }
-
-  if (err instanceof Error) return err;
-  return new Error(String(err));
 }
 
 export class ApiServerSyncTarget implements SyncTarget {
@@ -63,6 +30,7 @@ export class ApiServerSyncTarget implements SyncTarget {
 
   private cachedJwt: string | null = null;
   private jwtExpiresAt = 0;
+  private compatibilityCheckedAt = 0;
 
   constructor(opts: ApiSyncTargetOpts) {
     this.id = opts.id;
@@ -73,6 +41,14 @@ export class ApiServerSyncTarget implements SyncTarget {
     this.username = opts.username;
     this.password = opts.password;
     this.httpClient = opts.httpClient ?? createHttpClient();
+  }
+
+  private async ensureCompatible(force = false): Promise<void> {
+    const checkedRecently = Date.now() - this.compatibilityCheckedAt < 5 * 60 * 1000;
+    if (!force && checkedRecently) return;
+
+    await probeMltServer(this.baseUrl, this.httpClient);
+    this.compatibilityCheckedAt = Date.now();
   }
 
   private async ensureToken(): Promise<string | null> {
@@ -93,6 +69,7 @@ export class ApiServerSyncTarget implements SyncTarget {
   private async login(): Promise<string | null> {
     const url = `${this.baseUrl}/api/auth/login`;
     try {
+      await this.ensureCompatible();
       console.info(`[Sync] Logging in to ${this.baseUrl} as "${this.username}"...`);
       const res = await this.httpClient.request({
         url,
@@ -115,7 +92,7 @@ export class ApiServerSyncTarget implements SyncTarget {
     } catch (err) {
       this.cachedJwt = null;
       this.jwtExpiresAt = 0;
-      const formatted = formatFetchError(this.baseUrl, err);
+      const formatted = formatSyncRequestError(this.baseUrl, err);
       console.error(`[Sync] Login failed for ${url}:`, formatted);
       throw formatted;
     }
@@ -129,13 +106,14 @@ export class ApiServerSyncTarget implements SyncTarget {
   }
 
   private async authedRequest(url: string, init: Omit<HttpRequest, 'url'> = {}) {
+    await this.ensureCompatible();
     const h = await this.headers();
     const merged: HttpRequest = { ...init, url, headers: { ...h, ...(init.headers || {}) } };
     let res;
     try {
       res = await this.httpClient.request(merged);
     } catch (err) {
-      throw formatFetchError(this.baseUrl, err);
+      throw formatSyncRequestError(this.baseUrl, err);
     }
 
     if (res.status === 401 && this.authMode === 'credentials' && this.username) {
@@ -149,7 +127,7 @@ export class ApiServerSyncTarget implements SyncTarget {
           headers: { ...newH, ...(init.headers || {}) },
         });
       } catch (err) {
-        throw formatFetchError(this.baseUrl, err);
+        throw formatSyncRequestError(this.baseUrl, err);
       }
     }
 
@@ -158,11 +136,8 @@ export class ApiServerSyncTarget implements SyncTarget {
 
   async testConnection(): Promise<boolean> {
     try {
-      const res = await this.httpClient.request({
-        url: `${this.baseUrl}/health`,
-        timeoutMs: 5000,
-      });
-      return res.ok;
+      await this.ensureCompatible(true);
+      return true;
     } catch {
       return false;
     }

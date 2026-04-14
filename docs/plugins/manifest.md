@@ -7,7 +7,7 @@
 | `manifest.json` | 是 | 元数据与权限 |
 | `index.js`（或 `entryPoint` 指定名） | 是 | ESM 入口，需 `export default definePlugin(...)` |
 | `styles.css` 等 | 否 | 若声明 `styleSheet`，宿主会注入为带 `data-plugin-id` 的 `<style>` |
-| `locales/en.json`、`locales/zh-CN.json` | 否 | 会合并进 i18n 命名空间 `plugin:<id>` |
+| `locales/<locale>.json` | 否 | 会合并进 i18n 命名空间 `plugin:<id>`；`<locale>` 需为合法 BCP47 tag，如 `en`、`zh-CN`、`ja` |
 | `README.md` / `icon.png` | 否 | 构建时可一并打入包内 |
 
 ## manifest 字段

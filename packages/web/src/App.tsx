@@ -321,20 +321,34 @@ function useThinkSessionHotkey(
   }, [enabled, shortcut, handleViewChange]);
 }
 
+function useWorkThreadHotkey(
+  enabled: boolean,
+  shortcut: string | null | undefined,
+  handleViewChange: (view: View) => void,
+) {
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (shortcut && matchesShortcut(event, shortcut)) {
+        event.preventDefault();
+        openWorkThread(handleViewChange);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [enabled, shortcut, handleViewChange]);
+}
+
 function openThinkSession(handleViewChange: (view: View) => void) {
-  useThinkSessionStore.getState().setWorkspaceMode('session');
-  useThinkSessionStore.getState().setStreamMode('think');
+  useThinkSessionStore.getState().setStreamMode('think-session');
   handleViewChange('stream');
 }
 
 function openWorkThread(handleViewChange: (view: View) => void, threadId?: string) {
   if (threadId) {
     void useWorkThreadStore.getState().dispatchThread(threadId, 'now');
-  } else {
-    void useWorkThreadStore.getState().showThreadList();
   }
-  useThinkSessionStore.getState().setWorkspaceMode('thread');
-  useThinkSessionStore.getState().setStreamMode('think');
+  useThinkSessionStore.getState().setStreamMode('work-thread');
   handleViewChange('stream');
 }
 
@@ -344,6 +358,7 @@ function AppViewContent({
   handleViewChange,
   brainDumpEnabled,
   thinkSessionEnabled,
+  workThreadEnabled,
   onOpenBrainDump,
   t,
 }: {
@@ -352,6 +367,7 @@ function AppViewContent({
   handleViewChange: (view: View) => void;
   brainDumpEnabled: boolean;
   thinkSessionEnabled: boolean;
+  workThreadEnabled: boolean;
   onOpenBrainDump: () => void;
   t: (key: string) => string;
 }) {
@@ -381,7 +397,7 @@ function AppViewContent({
               thinkSessionEnabled ? () => openThinkSession(handleViewChange) : undefined
             }
             onOpenWorkThread={
-              thinkSessionEnabled ? (threadId?: string) => openWorkThread(handleViewChange, threadId) : undefined
+              workThreadEnabled ? (threadId?: string) => openWorkThread(handleViewChange, threadId) : undefined
             }
           />
         )}
@@ -488,6 +504,7 @@ export function App() {
   const energyEnabled = useModuleStore((s) => s.isEnabled('energy-indicator'));
   const brainDumpEnabled = useModuleStore((s) => s.isEnabled('brain-dump'));
   const thinkSessionEnabled = useModuleStore((s) => s.isEnabled('think-session'));
+  const workThreadEnabled = useModuleStore((s) => s.isEnabled('work-thread'));
   const visibleTabs = useMemo(
     () => TAB_CONFIG.filter((tab) => tab.key !== 'board' || kanbanEnabled),
     [kanbanEnabled],
@@ -554,8 +571,10 @@ export function App() {
 
   const brainDumpKeys = useShortcutStore((s) => s.getKeys('plugin.brainDump'));
   const thinkSessionKeys = useShortcutStore((s) => s.getKeys('plugin.thinkSession'));
+  const workThreadKeys = useShortcutStore((s) => s.getKeys('plugin.workThread'));
   useBrainDumpHotkey(brainDumpEnabled, brainDumpKeys, () => setShowBrainDump(true));
   useThinkSessionHotkey(thinkSessionEnabled, thinkSessionKeys, handleViewChange);
+  useWorkThreadHotkey(workThreadEnabled, workThreadKeys, handleViewChange);
 
   const handleNewTask = useCallback(() => setShowQuickInput((value) => !value), []);
   const globalHandlers = useMemo(
@@ -612,6 +631,7 @@ export function App() {
             handleViewChange={handleViewChange}
             brainDumpEnabled={brainDumpEnabled}
             thinkSessionEnabled={thinkSessionEnabled}
+            workThreadEnabled={workThreadEnabled}
             onOpenBrainDump={() => setShowBrainDump(true)}
             t={t}
           />

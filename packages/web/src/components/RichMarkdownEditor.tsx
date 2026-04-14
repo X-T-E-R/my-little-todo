@@ -33,6 +33,24 @@ export type RichMarkdownEditorHandle = {
   focus: () => void;
 };
 
+export type MarkdownSlashCommand = {
+  id: string;
+  title: string;
+  description?: string;
+  keywords?: string[];
+};
+
+export type MarkdownSlashCommandSelection = {
+  command: MarkdownSlashCommand;
+  query: string;
+  replaceFrom: number;
+  replaceTo: number;
+  anchor: {
+    left: number;
+    top: number;
+  };
+};
+
 type RichMarkdownEditorProps = {
   editorId: string;
   initialMarkdown: string;
@@ -48,6 +66,8 @@ type RichMarkdownEditorProps = {
   onSubmitShortcut?: () => void;
   onPasteCapture?: (event: ClipboardEvent) => void;
   taskRefAutocomplete?: boolean;
+  slashCommands?: MarkdownSlashCommand[];
+  onSlashCommand?: (payload: MarkdownSlashCommandSelection) => void;
 };
 
 type AutocompleteCandidate = {
@@ -67,7 +87,27 @@ type TaskRefAutocompleteState = {
   selectedIndex: number;
 };
 
+type SlashCommandState = {
+  open: boolean;
+  query: string;
+  replaceFrom: number;
+  replaceTo: number;
+  left: number;
+  top: number;
+  selectedIndex: number;
+};
+
 const EMPTY_AUTOCOMPLETE: TaskRefAutocompleteState = {
+  open: false,
+  query: '',
+  replaceFrom: 0,
+  replaceTo: 0,
+  left: 0,
+  top: 0,
+  selectedIndex: 0,
+};
+
+const EMPTY_SLASH_MENU: SlashCommandState = {
   open: false,
   query: '',
   replaceFrom: 0,
@@ -153,6 +193,49 @@ function deleteTaskRefAtCursor(view: EditorView, direction: 'backward' | 'forwar
   return true;
 }
 
+function getSlashCommandContext(view: EditorView): {
+  query: string;
+  replaceFrom: number;
+  replaceTo: number;
+  left: number;
+  top: number;
+} | null {
+  const { state } = view;
+  const { from, to } = state.selection;
+  if (from !== to) return null;
+  const windowStart = Math.max(1, from - 120);
+  const textBefore = state.doc.textBetween(windowStart, from, '\n', '\0');
+  const markerIndex = textBefore.lastIndexOf('/');
+  if (markerIndex < 0) return null;
+  const previousChar = textBefore[markerIndex - 1];
+  if (previousChar && !/\s|\0/.test(previousChar)) return null;
+  const trailing = textBefore.slice(markerIndex + 1);
+  if (trailing.includes('\n') || trailing.includes('\0') || /\s/.test(trailing)) return null;
+  const replaceFrom = from - (textBefore.length - markerIndex);
+  const coords = view.coordsAtPos(from);
+  return {
+    query: trailing.trim().toLowerCase(),
+    replaceFrom,
+    replaceTo: to,
+    left: coords.left,
+    top: coords.bottom + 8,
+  };
+}
+
+function filterSlashCommands(
+  commands: MarkdownSlashCommand[],
+  query: string,
+): MarkdownSlashCommand[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return commands;
+  return commands.filter((command) =>
+    [command.title, command.description ?? '', ...(command.keywords ?? [])]
+      .join(' ')
+      .toLowerCase()
+      .includes(normalized),
+  );
+}
+
 const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdownEditorProps>(
   function RichMarkdownEditorInner(
     {
@@ -170,6 +253,8 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       onSubmitShortcut,
       onPasteCapture,
       taskRefAutocomplete = false,
+      slashCommands = [],
+      onSlashCommand,
     },
     ref,
   ) {
@@ -180,12 +265,16 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
     submitShortcutRef.current = onSubmitShortcut;
     const pasteCaptureRef = useRef(onPasteCapture);
     pasteCaptureRef.current = onPasteCapture;
+    const slashCommandRef = useRef(onSlashCommand);
+    slashCommandRef.current = onSlashCommand;
 
     const [, getEditor] = useInstance();
     const wrapperRef = useRef<HTMLDivElement>(null);
     const syncAutocompleteRef = useRef<(() => void) | null>(null);
     const autocompleteRef = useRef<TaskRefAutocompleteState>(EMPTY_AUTOCOMPLETE);
     const [autocomplete, setAutocomplete] = useState<TaskRefAutocompleteState>(EMPTY_AUTOCOMPLETE);
+    const slashMenuRef = useRef<SlashCommandState>(EMPTY_SLASH_MENU);
+    const [slashMenu, setSlashMenu] = useState<SlashCommandState>(EMPTY_SLASH_MENU);
     const [isCreatingTask, setIsCreatingTask] = useState(false);
 
     const tasks = useTaskStore((s) => s.tasks);
@@ -200,10 +289,18 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       () => buildAutocompleteCandidates(tasks, currentRoleId, autocomplete.query),
       [autocomplete.query, currentRoleId, tasks],
     );
+    const visibleSlashCommands = useMemo(
+      () => filterSlashCommands(slashCommands, slashMenu.query),
+      [slashCommands, slashMenu.query],
+    );
 
     useEffect(() => {
       autocompleteRef.current = autocomplete;
     }, [autocomplete]);
+
+    useEffect(() => {
+      slashMenuRef.current = slashMenu;
+    }, [slashMenu]);
 
     useEffect(() => {
       if (!autocomplete.open) return;
@@ -219,6 +316,11 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
     const closeAutocomplete = useCallback(() => {
       autocompleteRef.current = EMPTY_AUTOCOMPLETE;
       setAutocomplete(EMPTY_AUTOCOMPLETE);
+    }, []);
+
+    const closeSlashMenu = useCallback(() => {
+      slashMenuRef.current = EMPTY_SLASH_MENU;
+      setSlashMenu(EMPTY_SLASH_MENU);
     }, []);
 
     const withEditorView = useCallback(
@@ -242,6 +344,20 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
         closeAutocomplete();
       },
       [closeAutocomplete, withEditorView],
+    );
+
+    const replaceSlashCommandRange = useCallback(
+      (replacement: string) => {
+        withEditorView((view) => {
+          const { replaceFrom, replaceTo } = slashMenuRef.current;
+          const tr = view.state.tr.insertText(replacement, replaceFrom, replaceTo);
+          tr.setSelection(TextSelection.create(tr.doc, replaceFrom + replacement.length));
+          view.dispatch(tr);
+          view.focus();
+        });
+        closeSlashMenu();
+      },
+      [closeSlashMenu, withEditorView],
     );
 
     const insertCandidateById = useCallback(
@@ -301,34 +417,57 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
         }
 
         const syncAutocomplete = () => {
-          if (!taskRefAutocomplete) return;
           const editorElement = root.querySelector<HTMLElement>('.ProseMirror');
           if (!editorElement || document.activeElement !== editorElement) {
             closeAutocomplete();
+            closeSlashMenu();
             return;
           }
           const editor = getEditor();
           if (!editor) return;
-          const next = editor.action((ctx) => getAutocompleteContext(getEditorView(ctx)));
-          if (!next) {
-            closeAutocomplete();
-            return;
-          }
           const wrapperRect = wrapperRef.current?.getBoundingClientRect();
-          const nextState: TaskRefAutocompleteState = {
-            open: true,
-            query: next.query,
-            replaceFrom: next.replaceFrom,
-            replaceTo: next.replaceTo,
-            left: Math.max(12, next.left - (wrapperRect?.left ?? 0)),
-            top: Math.max(24, next.top - (wrapperRect?.top ?? 0)),
-            selectedIndex:
-              autocompleteRef.current.open && autocompleteRef.current.query === next.query
-                ? autocompleteRef.current.selectedIndex
-                : 0,
-          };
-          autocompleteRef.current = nextState;
-          setAutocomplete(nextState);
+          if (taskRefAutocomplete) {
+            const next = editor.action((ctx) => getAutocompleteContext(getEditorView(ctx)));
+            if (!next) {
+              closeAutocomplete();
+            } else {
+              const nextState: TaskRefAutocompleteState = {
+                open: true,
+                query: next.query,
+                replaceFrom: next.replaceFrom,
+                replaceTo: next.replaceTo,
+                left: Math.max(12, next.left - (wrapperRect?.left ?? 0)),
+                top: Math.max(24, next.top - (wrapperRect?.top ?? 0)),
+                selectedIndex:
+                  autocompleteRef.current.open && autocompleteRef.current.query === next.query
+                    ? autocompleteRef.current.selectedIndex
+                    : 0,
+              };
+              autocompleteRef.current = nextState;
+              setAutocomplete(nextState);
+            }
+          }
+          if (slashCommands.length > 0 && slashCommandRef.current) {
+            const nextSlash = editor.action((ctx) => getSlashCommandContext(getEditorView(ctx)));
+            if (!nextSlash) {
+              closeSlashMenu();
+            } else {
+              const nextState: SlashCommandState = {
+                open: true,
+                query: nextSlash.query,
+                replaceFrom: nextSlash.replaceFrom,
+                replaceTo: nextSlash.replaceTo,
+                left: Math.max(12, nextSlash.left - (wrapperRect?.left ?? 0)),
+                top: Math.max(24, nextSlash.top - (wrapperRect?.top ?? 0)),
+                selectedIndex:
+                  slashMenuRef.current.open && slashMenuRef.current.query === nextSlash.query
+                    ? slashMenuRef.current.selectedIndex
+                    : 0,
+              };
+              slashMenuRef.current = nextState;
+              setSlashMenu(nextState);
+            }
+          }
         };
 
         syncAutocompleteRef.current = syncAutocomplete;
@@ -394,6 +533,53 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
               return;
             }
           }
+          const activeSlashMenu = slashMenuRef.current;
+          const activeSlashCommands = filterSlashCommands(slashCommands, activeSlashMenu.query);
+          if (activeSlashMenu.open) {
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              const nextIndex =
+                activeSlashCommands.length === 0
+                  ? 0
+                  : (activeSlashMenu.selectedIndex + 1) % activeSlashCommands.length;
+              slashMenuRef.current = { ...activeSlashMenu, selectedIndex: nextIndex };
+              setSlashMenu(slashMenuRef.current);
+              return;
+            }
+            if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              const nextIndex =
+                activeSlashCommands.length === 0
+                  ? 0
+                  : (activeSlashMenu.selectedIndex - 1 + activeSlashCommands.length) %
+                    activeSlashCommands.length;
+              slashMenuRef.current = { ...activeSlashMenu, selectedIndex: nextIndex };
+              setSlashMenu(slashMenuRef.current);
+              return;
+            }
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              closeSlashMenu();
+              return;
+            }
+            if (event.key === 'Enter') {
+              const selected = activeSlashCommands[activeSlashMenu.selectedIndex];
+              if (!selected) return;
+              event.preventDefault();
+              replaceSlashCommandRange('');
+              slashCommandRef.current?.({
+                command: selected,
+                query: activeSlashMenu.query,
+                replaceFrom: activeSlashMenu.replaceFrom,
+                replaceTo: activeSlashMenu.replaceTo,
+                anchor: {
+                  left: activeSlashMenu.left,
+                  top: activeSlashMenu.top,
+                },
+              });
+              return;
+            }
+          }
 
           if (event.key === 'Backspace' || event.key === 'Delete') {
             const deleted = withEditorView((view) =>
@@ -402,6 +588,7 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
             if (deleted) {
               event.preventDefault();
               closeAutocomplete();
+              closeSlashMenu();
               return;
             }
           }
@@ -435,6 +622,7 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
             const activeElement = document.activeElement;
             if (activeElement && wrapperRef.current?.contains(activeElement)) return;
             closeAutocomplete();
+            closeSlashMenu();
           }, 0);
         };
 
@@ -464,6 +652,8 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
         taskRefs,
         toolbar,
         topBar,
+        closeSlashMenu,
+        slashCommands,
       ],
     );
 
@@ -565,6 +755,53 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
                 </button>
                 <p className="task-ref-autocomplete-panel__hint">{t('autocomplete_hint')}</p>
               </div>
+            </div>
+          </div>
+        )}
+        {slashMenu.open && visibleSlashCommands.length > 0 && (
+          <div
+            className="task-ref-autocomplete-panel"
+            style={{
+              position: 'absolute',
+              left: `${slashMenu.left}px`,
+              top: `${slashMenu.top}px`,
+              zIndex: 41,
+            }}
+          >
+            <div className="flex min-w-[260px] flex-col gap-1 p-1">
+              {visibleSlashCommands.map((command, index) => (
+                <button
+                  key={command.id}
+                  type="button"
+                  className={`task-ref-autocomplete-panel__item ${
+                    index === slashMenu.selectedIndex ? 'is-active' : ''
+                  }`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    replaceSlashCommandRange('');
+                    slashCommandRef.current?.({
+                      command,
+                      query: slashMenu.query,
+                      replaceFrom: slashMenu.replaceFrom,
+                      replaceTo: slashMenu.replaceTo,
+                      anchor: {
+                        left: slashMenu.left,
+                        top: slashMenu.top,
+                      },
+                    });
+                  }}
+                >
+                  <span className="task-ref-autocomplete-panel__title">{command.title}</span>
+                  {command.description ? (
+                    <span
+                      className="block text-[10px]"
+                      style={{ color: 'var(--color-text-tertiary)' }}
+                    >
+                      {command.description}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
             </div>
           </div>
         )}

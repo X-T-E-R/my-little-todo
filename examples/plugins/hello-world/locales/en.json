@@ -1,3 +1,6 @@
 {
-  "title": "Hello from the Hello World plugin!"
+  "title": "Hello from the Hello World plugin!",
+  "loading": "Loading…",
+  "counter_label": "Counter:",
+  "increment": "+1"
 }

@@ -1,15 +1,15 @@
 import type { ThinkSessionStartMode } from '@my-little-todo/core';
 import { NotebookPen } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getSetting, putSetting } from '../storage/settingsApi';
-import { WorkThreadSettingsSection } from './WorkThreadSettingsSection';
+import { MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY } from '../utils/workThreadUiPrefs';
 
 export type TaskRefRenderMode = 'inline-chip' | 'mini-card' | 'highlight-only';
 export type ThinkSessionEditorDensity = 'balanced' | 'focused';
 
 const KEY_TASK_REF_RENDER_MODE = 'think-session:task-ref-render-mode';
 const KEY_DEFAULT_MODE = 'think-session:default-start-mode';
-const KEY_SIDEBAR_OPEN = 'think-session:sidebar-default-open';
 const KEY_EDITOR_DENSITY = 'think-session:editor-density';
 
 export async function loadThinkSessionSettings(): Promise<{
@@ -21,7 +21,7 @@ export async function loadThinkSessionSettings(): Promise<{
   const [taskRefRenderMode, defaultMode, sidebarDefaultOpen, editorDensity] = await Promise.all([
     getSetting(KEY_TASK_REF_RENDER_MODE),
     getSetting(KEY_DEFAULT_MODE),
-    getSetting(KEY_SIDEBAR_OPEN),
+    getSetting(MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY),
     getSetting(KEY_EDITOR_DENSITY),
   ]);
 
@@ -66,6 +66,7 @@ function Toggle({
 }
 
 export function ThinkSessionSettings() {
+  const { t } = useTranslation('settings');
   const [taskRefRenderMode, setTaskRefRenderMode] = useState<TaskRefRenderMode>('inline-chip');
   const [defaultMode, setDefaultMode] = useState<ThinkSessionStartMode>('blank');
   const [sidebarDefaultOpen, setSidebarDefaultOpen] = useState(true);
@@ -83,7 +84,7 @@ export function ThinkSessionSettings() {
   }, []);
 
   if (!ready) {
-    return <p className="text-xs text-[var(--color-text-tertiary)]">Loading...</p>;
+    return <p className="text-xs text-[var(--color-text-tertiary)]">{t('Loading...')}</p>;
   }
 
   return (
@@ -100,10 +101,11 @@ export function ThinkSessionSettings() {
             <NotebookPen size={16} />
           </span>
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold text-[var(--color-text)]">Think Session</h3>
+            <h3 className="text-sm font-semibold text-[var(--color-text)]">
+              {t('think_session_settings_title')}
+            </h3>
             <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-              Control how light arrange and thread writing feel without splitting them into a different
-              visual language.
+              {t('think_session_settings_intro')}
             </p>
           </div>
         </div>
@@ -111,12 +113,14 @@ export function ThinkSessionSettings() {
 
       <section className="space-y-3">
         <div>
-          <p className="text-xs font-medium text-[var(--color-text-secondary)]">Task reference style</p>
+          <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+            {t('think_session_task_reference_label')}
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {([
-              ['inline-chip', 'Inline chip'],
-              ['mini-card', 'Mini card'],
-              ['highlight-only', 'Highlight only'],
+              ['inline-chip', t('think_session_task_reference_inline_chip')],
+              ['mini-card', t('think_session_task_reference_mini_card')],
+              ['highlight-only', t('think_session_task_reference_highlight_only')],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -141,12 +145,14 @@ export function ThinkSessionSettings() {
         </div>
 
         <div>
-          <p className="text-xs font-medium text-[var(--color-text-secondary)]">Default writing mode</p>
+          <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+            {t('think_session_default_mode_label')}
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {([
-              ['blank', 'Free write'],
-              ['discovery', 'Discovery'],
-              ['arrange', 'Arrange'],
+              ['blank', t('think_session_default_mode_free_write')],
+              ['discovery', t('think_session_default_mode_discovery')],
+              ['arrange', t('think_session_default_mode_arrange')],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -168,11 +174,16 @@ export function ThinkSessionSettings() {
           </div>
         </div>
 
-        <div className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+        <div
+          className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+        >
           <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Sidebar default open</p>
+            <p className="text-sm font-medium text-[var(--color-text)]">
+              {t('think_session_sidebar_default_open_title')}
+            </p>
             <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-              Keep the task/context sidebar visible when entering the session workspace.
+              {t('think_session_sidebar_default_open_hint')}
             </p>
           </div>
           <Toggle
@@ -180,17 +191,19 @@ export function ThinkSessionSettings() {
             onToggle={() => {
               const next = !sidebarDefaultOpen;
               setSidebarDefaultOpen(next);
-              void putSetting(KEY_SIDEBAR_OPEN, next ? 'true' : 'false');
+              void putSetting(MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY, next ? 'true' : 'false');
             }}
           />
         </div>
 
         <div>
-          <p className="text-xs font-medium text-[var(--color-text-secondary)]">Editor density</p>
+          <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+            {t('think_session_editor_density_label')}
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {([
-              ['balanced', 'Balanced'],
-              ['focused', 'Focused'],
+              ['balanced', t('think_session_editor_density_balanced')],
+              ['focused', t('think_session_editor_density_focused')],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -212,8 +225,6 @@ export function ThinkSessionSettings() {
           </div>
         </div>
       </section>
-
-      <WorkThreadSettingsSection />
     </div>
   );
 }

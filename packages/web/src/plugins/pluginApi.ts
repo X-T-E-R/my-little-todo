@@ -4,6 +4,7 @@ import type {
   PluginContext,
   PluginDefinition,
   PluginEventsAPI,
+  PluginLocaleTree,
   PluginI18nAPI,
   PluginLogger,
   PluginManifest,
@@ -82,6 +83,18 @@ export function createPluginContext(
     t(key, options) {
       return i18n.t(key, { ns, ...options });
     },
+    getLanguage() {
+      return i18n.resolvedLanguage ?? i18n.language;
+    },
+    onLanguageChanged(handler) {
+      const wrapped = (language: string) => handler(language);
+      i18n.on('languageChanged', wrapped);
+      const dispose = () => {
+        i18n.off('languageChanged', wrapped);
+      };
+      onDispose(dispose);
+      return { dispose };
+    },
   };
 
   const ui: PluginUIAPI = {
@@ -116,7 +129,7 @@ export function createPluginContext(
 
 export async function loadLocalesForPlugin(
   pluginId: string,
-  locales: Record<string, Record<string, string>>,
+  locales: Record<string, PluginLocaleTree>,
 ) {
   const ns = `plugin:${pluginId}`;
   for (const [lng, bundle] of Object.entries(locales)) {

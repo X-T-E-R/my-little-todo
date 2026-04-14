@@ -77,7 +77,6 @@ function Toggle({
 }
 
 export function DesktopWidgetSettings() {
-  const { t } = useTranslation('widget');
   const { t: ts } = useTranslation('settings');
   const [mode, setMode] = useState<WidgetDisplayMode>('overlay');
   const [density, setDensity] = useState<WidgetDensity>('balanced');
@@ -146,10 +145,11 @@ export function DesktopWidgetSettings() {
         className="rounded-[var(--radius-panel)] border p-4"
         style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
       >
-        <p className="text-sm font-semibold text-[var(--color-text)]">Desktop surfaces</p>
+        <p className="text-sm font-semibold text-[var(--color-text)]">{ts('Desktop surfaces')}</p>
         <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-          Decide how the widget and context bar appear on desktop, how dense they are, and what they
-          do when clicked.
+          {ts(
+            'Decide how the widget and context bar appear on desktop, how dense they are, and what they do when clicked.',
+          )}
         </p>
       </section>
 
@@ -161,28 +161,28 @@ export function DesktopWidgetSettings() {
             className="inline-flex items-center gap-2 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-medium hover:bg-[var(--color-bg)]"
           >
             <Monitor size={16} />
-            {t('open_widget')}
+            {ts('Open widget window')}
           </button>
           <button
             type="button"
             onClick={() => void closeWidget()}
             className="rounded-[var(--radius-card)] border border-[var(--color-border)] px-3 py-2 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)]"
           >
-            {t('close_widget')}
+            {ts('Close widget')}
           </button>
           <button
             type="button"
             onClick={() => void openContextBar()}
             className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-xs font-medium hover:bg-[var(--color-bg)]"
           >
-            {t('open_context_bar')}
+            {ts('Open context bar')}
           </button>
           <button
             type="button"
             onClick={() => void closeContextBar()}
             className="rounded-[var(--radius-card)] border border-[var(--color-border)] px-3 py-2 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg)]"
           >
-            {t('close_context_bar')}
+            {ts('Close context bar')}
           </button>
         </div>
 
@@ -191,36 +191,36 @@ export function DesktopWidgetSettings() {
           value={mode}
           onChange={(next) => void persistMode(next)}
           options={[
-            { id: 'overlay', label: t('mode_overlay') },
-            { id: 'pin', label: t('mode_pin') },
+            { id: 'overlay', label: ts('Overlay') },
+            { id: 'pin', label: ts('Pin beneath other windows') },
           ]}
         />
 
         <ChoiceRow
-          label="Information density"
+          label={ts('Information density')}
           value={density}
           onChange={(next) => {
             setDensity(next);
             void putSetting(DENSITY_KEY, next);
           }}
           options={[
-            { id: 'airy', label: 'Airy' },
-            { id: 'balanced', label: 'Balanced' },
-            { id: 'dense', label: 'Dense' },
+            { id: 'airy', label: ts('Airy') },
+            { id: 'balanced', label: ts('Balanced') },
+            { id: 'dense', label: ts('Dense') },
           ]}
         />
 
         <ChoiceRow
-          label="Primary click behavior"
+          label={ts('Primary click behavior')}
           value={clickBehavior}
           onChange={(next) => {
             setClickBehavior(next);
             void putSetting(CLICK_BEHAVIOR_KEY, next);
           }}
           options={[
-            { id: 'open-stream', label: 'Open Stream' },
-            { id: 'open-now', label: 'Open Now' },
-            { id: 'toggle-context', label: 'Toggle Context Bar' },
+            { id: 'open-stream', label: ts('Open Stream') },
+            { id: 'open-now', label: ts('Open Now') },
+            { id: 'toggle-context', label: ts('Toggle Context Bar') },
           ]}
         />
 
@@ -229,10 +229,13 @@ export function DesktopWidgetSettings() {
           style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
         >
           <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Follow current role</p>
+            <p className="text-sm font-medium text-[var(--color-text)]">
+              {ts('Follow current role')}
+            </p>
             <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-              Keep the widget content aligned with the currently active role instead of pinning a
-              fixed role snapshot.
+              {ts(
+                'Keep the widget content aligned with the currently active role instead of pinning a fixed role snapshot.',
+              )}
             </p>
           </div>
           <Toggle

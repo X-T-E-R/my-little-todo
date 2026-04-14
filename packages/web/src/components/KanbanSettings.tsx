@@ -1,5 +1,6 @@
 import { LayoutGrid } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getSetting, putSetting } from '../storage/settingsApi';
 
 export type KanbanSummaryDensity = 'compact' | 'rich';
@@ -59,6 +60,7 @@ function Toggle({
 }
 
 export function KanbanSettings() {
+  const { t } = useTranslation('settings');
   const [summaryDensity, setSummaryDensity] = useState<KanbanSummaryDensity>('rich');
   const [emptyLaneMode, setEmptyLaneMode] = useState<KanbanEmptyLaneMode>('compressed');
   const [doneRailMode, setDoneRailMode] = useState<KanbanDoneRailMode>('rail');
@@ -76,7 +78,7 @@ export function KanbanSettings() {
   }, []);
 
   if (!ready) {
-    return <p className="text-xs text-[var(--color-text-tertiary)]">Loading...</p>;
+    return <p className="text-xs text-[var(--color-text-tertiary)]">{t('Loading...')}</p>;
   }
 
   return (
@@ -93,9 +95,11 @@ export function KanbanSettings() {
             <LayoutGrid size={16} />
           </span>
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold text-[var(--color-text)]">Kanban board</h3>
+            <h3 className="text-sm font-semibold text-[var(--color-text)]">
+              {t('kanban_settings_title')}
+            </h3>
             <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-              Tune how the embedded board and fullscreen overview balance execution and summary.
+              {t('kanban_settings_intro')}
             </p>
           </div>
         </div>
@@ -103,11 +107,13 @@ export function KanbanSettings() {
 
       <section className="space-y-3">
         <div>
-          <p className="text-xs font-medium text-[var(--color-text-secondary)]">Fullscreen summary density</p>
+          <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+            {t('kanban_summary_density_label')}
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {([
-              ['compact', 'Compact'],
-              ['rich', 'Rich'],
+              ['compact', t('kanban_summary_density_compact')],
+              ['rich', t('kanban_summary_density_rich')],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -130,11 +136,13 @@ export function KanbanSettings() {
         </div>
 
         <div>
-          <p className="text-xs font-medium text-[var(--color-text-secondary)]">Empty lane behavior</p>
+          <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+            {t('kanban_empty_lane_label')}
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {([
-              ['compressed', 'Compress empty lanes'],
-              ['full', 'Keep full-width lanes'],
+              ['compressed', t('kanban_empty_lane_compressed')],
+              ['full', t('kanban_empty_lane_full')],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -157,11 +165,13 @@ export function KanbanSettings() {
         </div>
 
         <div>
-          <p className="text-xs font-medium text-[var(--color-text-secondary)]">Done rail in fullscreen</p>
+          <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+            {t('kanban_done_rail_label')}
+          </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {([
-              ['rail', 'Compact rail'],
-              ['expanded', 'Expanded review'],
+              ['rail', t('kanban_done_rail_compact')],
+              ['expanded', t('kanban_done_rail_expanded')],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -188,9 +198,11 @@ export function KanbanSettings() {
           style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
         >
           <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Show WIP pressure warning</p>
+            <p className="text-sm font-medium text-[var(--color-text)]">
+              {t('kanban_wip_warning_title')}
+            </p>
             <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-              Highlight the doing lane when it moves beyond the configured WIP limit.
+              {t('kanban_wip_warning_hint')}
             </p>
           </div>
           <Toggle

@@ -145,10 +145,13 @@ export function StreamContextPanelSettings() {
         className="rounded-[var(--radius-panel)] border p-4"
         style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
       >
-        <p className="text-sm font-semibold text-[var(--color-text)]">Stream context panel</p>
+        <p className="text-sm font-semibold text-[var(--color-text)]">
+          {t('Stream context panel')}
+        </p>
         <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-          Choose what shows up in the side panel, how tightly it packs information, and what it
-          prioritizes first.
+          {t(
+            'Choose what shows up in the side panel, how tightly it packs information, and what it prioritizes first.',
+          )}
         </p>
       </section>
 
@@ -172,7 +175,7 @@ export function StreamContextPanelSettings() {
           onChange={(value) => void persistBool(setShowTags, KEY_SHOW_TAGS, value)}
         />
         <ToggleRow
-          label="Show completed tasks"
+          label={t('Show completed tasks')}
           checked={showCompleted}
           onChange={(value) => void persistBool(setShowCompleted, KEY_SHOW_COMPLETED, value)}
         />
@@ -194,30 +197,30 @@ export function StreamContextPanelSettings() {
         />
 
         <ChoiceRow
-          label="Default sort"
+          label={t('Default sort')}
           value={sortMode}
           onChange={(next) => {
             setSortMode(next);
             void putSetting(KEY_SORT_MODE, next);
           }}
           options={[
-            { id: 'smart', label: 'Smart' },
-            { id: 'recent', label: 'Recent' },
-            { id: 'due', label: 'Due first' },
+            { id: 'smart', label: t('Smart') },
+            { id: 'recent', label: t('Recent') },
+            { id: 'due', label: t('Due first') },
           ]}
         />
 
         <ChoiceRow
-          label="Panel density"
+          label={t('Panel density')}
           value={density}
           onChange={(next) => {
             setDensity(next);
             void putSetting(KEY_PANEL_DENSITY, next);
           }}
           options={[
-            { id: 'airy', label: 'Airy' },
-            { id: 'balanced', label: 'Balanced' },
-            { id: 'dense', label: 'Dense' },
+            { id: 'airy', label: t('Airy') },
+            { id: 'balanced', label: t('Balanced') },
+            { id: 'dense', label: t('Dense') },
           ]}
         />
       </section>

@@ -1,5 +1,10 @@
 import { forwardRef, useEffect, useState } from 'react';
-import { RichMarkdownEditor, type RichMarkdownEditorHandle } from './RichMarkdownEditor';
+import {
+  RichMarkdownEditor,
+  type MarkdownSlashCommand,
+  type MarkdownSlashCommandSelection,
+  type RichMarkdownEditorHandle,
+} from './RichMarkdownEditor';
 import { type TaskRefRenderMode, loadThinkSessionSettings } from './ThinkSessionSettings';
 
 export type ThinkSessionEditorHandle = RichMarkdownEditorHandle;
@@ -10,8 +15,13 @@ export const ThinkSessionEditor = forwardRef<
     sessionId: string;
     initialMarkdown: string;
     onMarkdownChange: (markdown: string) => void;
+    slashCommands?: MarkdownSlashCommand[];
+    onSlashCommand?: (payload: MarkdownSlashCommandSelection) => void;
   }
->(function ThinkSessionEditor({ sessionId, initialMarkdown, onMarkdownChange }, ref) {
+>(function ThinkSessionEditor(
+  { sessionId, initialMarkdown, onMarkdownChange, slashCommands, onSlashCommand },
+  ref,
+) {
   const [taskRefMode, setTaskRefMode] = useState<TaskRefRenderMode>('inline-chip');
   const [editorDensity, setEditorDensity] = useState<'balanced' | 'focused'>('balanced');
 
@@ -40,6 +50,8 @@ export const ThinkSessionEditor = forwardRef<
       taskRefs
       taskRefAutocomplete
       taskRefMode={taskRefMode}
+      slashCommands={slashCommands}
+      onSlashCommand={onSlashCommand}
       className={`min-h-0 flex-1 think-session-editor ${
         editorDensity === 'focused' ? 'think-session-editor--focused' : ''
       }`}

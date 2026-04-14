@@ -22,6 +22,12 @@
 - [manifest 规范](./manifest.md)
 - [Plugin API 参考](./api.md)
 
+## i18n 约定
+
+- 第三方插件应把翻译随包放在 `locales/<locale>.json`，例如 `locales/en.json`、`locales/zh-CN.json`、`locales/ja.json`。
+- 插件内可见文案应通过 `ctx.i18n.t(...)` 获取；不要直接复用宿主的 `settings` / `common` 等命名空间。
+- 推荐在插件仓库本地测试中接入 `@my-little-todo/plugin-sdk/i18n-test` 校验工具。
+
 ## 插件市场 / 注册表
 
 - 默认注册表 URL 见 `packages/web/src/plugins/types.ts` 中的 `DEFAULT_REGISTRY_URL`（可被用户自定义源覆盖，键名 `plugin:_registry:sources`）。

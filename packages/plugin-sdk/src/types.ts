@@ -59,8 +59,14 @@ export interface PluginEventsAPI {
   off(event: string, handler: (...args: unknown[]) => void): void;
 }
 
+export type PluginLocaleTree = {
+  [key: string]: string | PluginLocaleTree;
+};
+
 export interface PluginI18nAPI {
   t(key: string, options?: Record<string, string | number>): string;
+  getLanguage(): string;
+  onLanguageChanged(handler: (language: string) => void): Disposable;
 }
 
 export interface PluginLogger {

@@ -123,5 +123,6 @@
   "Add to thread": "加入线程",
   "New thread from task": "从任务新建线程",
   "Accepted {{accepted}} / Rejected {{rejected}} / Swapped {{swapped}}": "?? {{accepted}} / ?? {{rejected}} / ?? {{swapped}}",
-  "Attach file": "\u6dfb\u52a0\u6587\u4ef6"
+  "Attach file": "\u6dfb\u52a0\u6587\u4ef6",
+  "Uploading...": "上传中..."
 }

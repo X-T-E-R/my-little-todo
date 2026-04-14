@@ -184,6 +184,13 @@ export const DEFAULT_SHORTCUTS: ShortcutBinding[] = [
     keys: 'Ctrl+Shift+T',
     scope: 'plugin',
   },
+  {
+    id: 'plugin.workThread',
+    action: 'plugin.workThread',
+    label: i18n.t('shortcuts.Work Thread', { ns: 'common' }),
+    keys: 'Ctrl+Shift+Y',
+    scope: 'plugin',
+  },
 ];
 
 /**

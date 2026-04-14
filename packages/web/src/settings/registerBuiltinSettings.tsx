@@ -8,6 +8,7 @@ import { ThinkSessionSettings } from '../components/ThinkSessionSettings';
 import { TimeAwarenessSettings } from '../components/TimeAwarenessSettings';
 import { TimeCapsuleSettings } from '../components/TimeCapsuleSettings';
 import { WindowContextSettings } from '../components/WindowContextSettings';
+import { WorkThreadSettingsSection } from '../components/WorkThreadSettingsSection';
 import { registerSettingsEntry } from './registry';
 
 const BUILTIN_SETTINGS = [
@@ -17,6 +18,7 @@ const BUILTIN_SETTINGS = [
   { id: 'file-host', component: FileHostSettings },
   { id: 'desktop-widget', component: DesktopWidgetSettings },
   { id: 'think-session', component: ThinkSessionSettings },
+  { id: 'work-thread', component: WorkThreadSettingsSection },
   { id: 'window-context', component: WindowContextSettings },
   { id: 'time-awareness', component: TimeAwarenessSettings },
   { id: 'stream-context-panel', component: StreamContextPanelSettings },

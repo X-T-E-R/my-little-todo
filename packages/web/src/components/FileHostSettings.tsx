@@ -7,21 +7,6 @@ import { useAuthStore } from '../stores/authStore';
 import { getSetting, putSetting } from '../storage/settingsApi';
 import { isNativeClient } from '../utils/platform';
 
-const CATEGORIES: Array<{ id: FileCategory; label: string }> = [
-  { id: 'image', label: 'Images' },
-  { id: 'document', label: 'Documents' },
-  { id: 'video', label: 'Videos' },
-  { id: 'audio', label: 'Audio' },
-  { id: 'archive', label: 'Archives' },
-  { id: 'other', label: 'Other files' },
-];
-
-const PROVIDERS: Array<{ id: FileHostProviderId; label: string }> = [
-  { id: 'local-files', label: 'Local files' },
-  { id: 'mlt-server', label: 'MLT Server' },
-  { id: 'webdav', label: 'WebDAV' },
-];
-
 function Toggle({
   checked,
   onChange,
@@ -102,6 +87,21 @@ export function FileHostSettings() {
   const [serverMaxSizeMb, setServerMaxSizeMb] = useState('10');
   const [serverPublicBaseUrl, setServerPublicBaseUrl] = useState('');
 
+  const categories: Array<{ id: FileCategory; label: string }> = [
+    { id: 'image', label: t('Images') },
+    { id: 'document', label: t('Documents') },
+    { id: 'video', label: t('Videos') },
+    { id: 'audio', label: t('Audio') },
+    { id: 'archive', label: t('Archives') },
+    { id: 'other', label: t('Other files') },
+  ];
+
+  const providers: Array<{ id: FileHostProviderId; label: string }> = [
+    { id: 'local-files', label: t('Local files') },
+    { id: 'mlt-server', label: t('MLT Server') },
+    { id: 'webdav', label: t('WebDAV') },
+  ];
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -151,7 +151,7 @@ export function FileHostSettings() {
       enabled,
       allowClipboardImages,
       maxSize: Math.max(1, Number(maxSizeMb || '10')) * 1024 * 1024,
-      routing: CATEGORIES.map((category) => ({
+      routing: categories.map((category) => ({
         category: category.id,
         provider: routingByCategory[category.id] ?? 'local-files',
       })),
@@ -207,9 +207,13 @@ export function FileHostSettings() {
             <CloudUpload size={16} />
           </span>
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold text-[var(--color-text)]">File host core</h3>
+            <h3 className="text-sm font-semibold text-[var(--color-text)]">
+              {t('File host core')}
+            </h3>
             <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-              Route images, documents, and other files through local storage, MLT Server, or WebDAV.
+              {t(
+                'Route images, documents, and other files through local storage, MLT Server, or WebDAV.',
+              )}
             </p>
           </div>
         </div>
@@ -218,9 +222,9 @@ export function FileHostSettings() {
       <section className="space-y-3">
         <div className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
           <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Enable file host</p>
+            <p className="text-sm font-medium text-[var(--color-text)]">{t('Enable file host')}</p>
             <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-              Turn clipboard, drag-and-drop, and file routing on or off.
+              {t('Turn clipboard, drag-and-drop, and file routing on or off.')}
             </p>
           </div>
           <Toggle checked={enabled} onChange={setEnabled} />
@@ -228,9 +232,11 @@ export function FileHostSettings() {
 
         <div className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
           <div>
-            <p className="text-sm font-medium text-[var(--color-text)]">Allow clipboard images</p>
+            <p className="text-sm font-medium text-[var(--color-text)]">
+              {t('Allow clipboard images')}
+            </p>
             <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-              When disabled, paste falls back to plain text only.
+              {t('When disabled, paste falls back to plain text only.')}
             </p>
           </div>
           <Toggle checked={allowClipboardImages} onChange={setAllowClipboardImages} />
@@ -238,7 +244,7 @@ export function FileHostSettings() {
 
         <div>
           <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
-            Max upload size (MB)
+            {t('Max upload size (MB)')}
           </label>
           <input
             type="number"
@@ -253,9 +259,9 @@ export function FileHostSettings() {
       <section className="space-y-3">
         <div className="flex items-center gap-2">
           <ImageIcon size={15} className="text-[var(--color-accent)]" />
-          <p className="text-sm font-semibold text-[var(--color-text)]">Category routing</p>
+          <p className="text-sm font-semibold text-[var(--color-text)]">{t('Category routing')}</p>
         </div>
-        {CATEGORIES.map((category) => (
+        {categories.map((category) => (
           <div key={category.id} className="grid gap-2 sm:grid-cols-[10rem_minmax(0,1fr)] sm:items-center">
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
               {category.label}
@@ -270,7 +276,7 @@ export function FileHostSettings() {
               }
               className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
             >
-              {PROVIDERS.map((provider) => (
+              {providers.map((provider) => (
                 <option key={provider.id} value={provider.id}>
                   {provider.label}
                 </option>
@@ -283,10 +289,13 @@ export function FileHostSettings() {
       <section className="space-y-3">
         <div className="flex items-center gap-2">
           <FolderArchive size={15} className="text-[var(--color-accent)]" />
-          <p className="text-sm font-semibold text-[var(--color-text)]">Extension overrides</p>
+          <p className="text-sm font-semibold text-[var(--color-text)]">
+            {t('Extension overrides')}
+          </p>
         </div>
         <p className="text-[11px] text-[var(--color-text-tertiary)]">
-          One rule per line, for example: <code>heic=image</code> or <code>md=document</code>
+          {t('One rule per line, for example:')} <code>heic=image</code> {t('or')}{' '}
+          <code>md=document</code>
         </p>
         <textarea
           value={overridesText}
@@ -299,7 +308,9 @@ export function FileHostSettings() {
       <section className="space-y-3 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
         <div className="flex items-center gap-2">
           <Server size={15} className="text-[var(--color-accent)]" />
-          <p className="text-sm font-semibold text-[var(--color-text)]">MLT Server provider</p>
+          <p className="text-sm font-semibold text-[var(--color-text)]">
+            {t('MLT Server provider')}
+          </p>
         </div>
         <input
           type="url"
@@ -313,16 +324,16 @@ export function FileHostSettings() {
           onChange={(event) => setMltAuthMode(event.target.value as 'session' | 'token' | 'credentials')}
           className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
         >
-          <option value="session">Reuse current session</option>
-          <option value="token">Bearer token</option>
-          <option value="credentials">Username and password</option>
+          <option value="session">{t('Reuse current session')}</option>
+          <option value="token">{t('Bearer token')}</option>
+          <option value="credentials">{t('Username and password')}</option>
         </select>
         {mltAuthMode === 'token' ? (
           <input
             type="password"
             value={mltToken}
             onChange={(event) => setMltToken(event.target.value)}
-            placeholder="Bearer token"
+            placeholder={t('Bearer token')}
             className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
           />
         ) : null}
@@ -332,14 +343,14 @@ export function FileHostSettings() {
               type="text"
               value={mltUsername}
               onChange={(event) => setMltUsername(event.target.value)}
-              placeholder="Username"
+              placeholder={t('Username')}
               className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
             />
             <input
               type="password"
               value={mltPassword}
               onChange={(event) => setMltPassword(event.target.value)}
-              placeholder="Password"
+              placeholder={t('Password')}
               className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
             />
           </div>
@@ -349,7 +360,7 @@ export function FileHostSettings() {
       <section className="space-y-3 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
         <div className="flex items-center gap-2">
           <Link2 size={15} className="text-[var(--color-accent)]" />
-          <p className="text-sm font-semibold text-[var(--color-text)]">WebDAV provider</p>
+          <p className="text-sm font-semibold text-[var(--color-text)]">{t('WebDAV provider')}</p>
         </div>
         <input
           type="url"
@@ -370,14 +381,14 @@ export function FileHostSettings() {
             type="text"
             value={webdavUsername}
             onChange={(event) => setWebdavUsername(event.target.value)}
-            placeholder="Username"
+            placeholder={t('Username')}
             className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
           />
           <input
             type="password"
             value={webdavPassword}
             onChange={(event) => setWebdavPassword(event.target.value)}
-            placeholder="Password"
+            placeholder={t('Password')}
             className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
           />
           <input
@@ -394,13 +405,15 @@ export function FileHostSettings() {
         <section className="space-y-3 rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
           <div className="flex items-center gap-2">
             <Settings2 size={15} className="text-[var(--color-accent)]" />
-            <p className="text-sm font-semibold text-[var(--color-text)]">Server file host</p>
+            <p className="text-sm font-semibold text-[var(--color-text)]">{t('Server file host')}</p>
           </div>
           <div className="flex items-start justify-between gap-4 rounded-2xl border px-4 py-3" style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}>
             <div>
-              <p className="text-sm font-medium text-[var(--color-text)]">Enable server uploads</p>
+              <p className="text-sm font-medium text-[var(--color-text)]">
+                {t('Enable server uploads')}
+              </p>
               <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-                Lets this hosted server act as a managed file host for signed-in users.
+                {t('Lets this hosted server act as a managed file host for signed-in users.')}
               </p>
             </div>
             <Toggle checked={serverEnabled} onChange={setServerEnabled} />
@@ -417,7 +430,7 @@ export function FileHostSettings() {
             type="url"
             value={serverPublicBaseUrl}
             onChange={(event) => setServerPublicBaseUrl(event.target.value)}
-            placeholder="Public base url for generated links (optional)"
+            placeholder={t('Public base url for generated links (optional)')}
             className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
           />
         </section>
@@ -432,7 +445,7 @@ export function FileHostSettings() {
           {saved ? t('Saved') : t('Save')}
         </button>
         <span className="text-[11px] text-[var(--color-text-tertiary)]">
-          {saved ? 'File host settings saved.' : 'Changes apply immediately for new uploads.'}
+          {saved ? t('File host settings saved.') : t('Changes apply immediately for new uploads.')}
         </span>
       </div>
     </div>

@@ -27,6 +27,9 @@ export function deserializeWorkThread(raw: unknown): WorkThread {
     waitingFor: parseValue<WorkThread['waitingFor']>(record.waiting_for ?? record.waitingFor, []),
     interrupts: parseValue<WorkThread['interrupts']>(record.interrupts, []),
     schedulerMeta: parseValue<WorkThread['schedulerMeta']>(record.scheduler_meta ?? record.schedulerMeta, {}),
+    syncMeta: parseValue<WorkThread['syncMeta']>(record.sync_meta ?? record.syncMeta, {
+      mode: 'internal',
+    }),
     suggestions: parseValue<WorkThread['suggestions']>(record.suggestions, []),
     createdAt: Number(record.created_at ?? record.createdAt ?? Date.now()),
     updatedAt: Number(record.updated_at ?? record.updatedAt ?? Date.now()),
@@ -50,6 +53,7 @@ export function serializeWorkThread(thread: WorkThread) {
     waiting_for: JSON.stringify(thread.waitingFor),
     interrupts: JSON.stringify(thread.interrupts),
     scheduler_meta: JSON.stringify(thread.schedulerMeta),
+    sync_meta: JSON.stringify(thread.syncMeta ?? { mode: 'internal' }),
     suggestions: thread.suggestions != null ? JSON.stringify(thread.suggestions) : null,
     created_at: thread.createdAt,
     updated_at: thread.updatedAt,

@@ -833,7 +833,6 @@ export function TaskDetailPanel() {
   const streamEntries = useStreamStore((s) => s.entries);
   const addTaskToThread = useWorkThreadStore((s) => s.addTaskToThread);
   const setThinkStreamMode = useThinkSessionStore((s) => s.setStreamMode);
-  const setThinkWorkspaceMode = useThinkSessionStore((s) => s.setWorkspaceMode);
 
   const projectRelatedStreamEntries = useMemo((): StreamEntry[] => {
     if (!task || task.taskType !== 'project') return [];
@@ -871,10 +870,9 @@ export function TaskDetailPanel() {
   }, [panelMode]);
 
   const openThreadWorkspace = useCallback(() => {
-    setThinkWorkspaceMode('thread');
-    setThinkStreamMode('think');
+    setThinkStreamMode('work-thread');
     window.dispatchEvent(new CustomEvent('mlt-navigate', { detail: { view: 'stream' } }));
-  }, [setThinkStreamMode, setThinkWorkspaceMode]);
+  }, [setThinkStreamMode]);
 
   if (!task) return null;
 

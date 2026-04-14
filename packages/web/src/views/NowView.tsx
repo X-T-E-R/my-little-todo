@@ -16,6 +16,7 @@ import { RecommendationHistory } from '../components/RecommendationHistory';
 import { RolePillMulti } from '../components/RolePickerPopover';
 import { TaskContextMenu } from '../components/TaskContextMenu';
 import { useModuleStore } from '../modules';
+import { getSetting } from '../storage/settingsApi';
 import {
   countTaskSwitchesInWindow,
   ensureFocusSessionHydrated,
@@ -38,6 +39,13 @@ import {
 } from '../stores';
 import type { EnergyLevel } from '../stores/execCoachStore';
 import { pickRecommendation } from '../stores/taskStore';
+import {
+  NOW_DEFAULT_VIEW_KEY,
+  NOW_SHOW_AUTO_VIEW_KEY,
+  getAvailableNowViews,
+  resolveWorkThreadUiPrefs,
+  type NowViewMode,
+} from '../utils/workThreadUiPrefs';
 
 const REJECTION_REASONS = [
   { id: 'no_conditions', label: 'No conditions to do this now' },
@@ -92,6 +100,8 @@ export function NowView({
   const [celebrateLine, setCelebrateLine] = useState<string | null>(null);
   const [focusStoreHydrated, setFocusStoreHydrated] = useState(false);
   const [chosenByUserTaskId, setChosenByUserTaskId] = useState<string | null>(null);
+  const [nowViewMode, setNowViewMode] = useState<NowViewMode>('task');
+  const [showAutoView, setShowAutoView] = useState(true);
   const session = useFocusSessionStore((s) => s.session);
   const setSession = useFocusSessionStore((s) => s.setSession);
   const overrideTaskId = useNowOverrideStore((s) => s.overrideTaskId);
@@ -142,6 +152,19 @@ export function NowView({
     void loadThreads();
   }, [load, loadBehavior, loadTimeAwareness, loadCoachActivity, loadThreads]);
 
+  useEffect(() => {
+    void Promise.all([getSetting(NOW_DEFAULT_VIEW_KEY), getSetting(NOW_SHOW_AUTO_VIEW_KEY)]).then(
+      ([defaultView, autoView]) => {
+        const prefs = resolveWorkThreadUiPrefs({
+          nowDefaultView: defaultView,
+          nowShowAutoView: autoView !== 'false',
+        });
+        setNowViewMode(prefs.nowDefaultView);
+        setShowAutoView(prefs.nowShowAutoView);
+      },
+    );
+  }, []);
+
   const threadRecommendation = useMemo(
     () => getRecommendedThread(tasks),
     [tasks, workThreads, threadSchedulerPolicy],
@@ -149,6 +172,44 @@ export function NowView({
 
   const primaryThreadRecommendation =
     threadSchedulerPolicy === 'manual' ? null : threadRecommendation;
+  const availableNowViews = getAvailableNowViews(
+    resolveWorkThreadUiPrefs({ nowShowAutoView: showAutoView }),
+  );
+  const displayedNowView = availableNowViews.includes(nowViewMode)
+    ? nowViewMode
+    : availableNowViews[0];
+  const threadItems = useMemo(
+    () =>
+      [...workThreads]
+        .filter((thread) => thread.status !== 'archived')
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 6),
+    [workThreads],
+  );
+  const nowViewTabs = (
+    <div
+      className="mb-4 inline-flex flex-wrap items-center gap-1 rounded-full border p-1"
+      style={{
+        borderColor: 'var(--color-border)',
+        background: 'color-mix(in srgb, var(--color-surface) 94%, var(--color-bg))',
+      }}
+    >
+      {availableNowViews.map((view) => (
+        <button
+          key={view}
+          type="button"
+          onClick={() => setNowViewMode(view)}
+          className="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
+          style={{
+            background: displayedNowView === view ? 'var(--color-accent-soft)' : 'transparent',
+            color: displayedNowView === view ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+          }}
+        >
+          {t(`now_view_${view}`)}
+        </button>
+      ))}
+    </div>
+  );
 
   useEffect(() => {
     if (!overrideTaskId || loading) return;
@@ -478,11 +539,111 @@ export function NowView({
     );
   }
 
-  if (primaryThreadRecommendation && onOpenWorkThread) {
+  if (displayedNowView === 'thread' && onOpenWorkThread) {
+    return (
+      <div className="relative h-full overflow-y-auto px-4 py-4 sm:px-6 lg:px-8">
+        {nowViewTabs}
+        <div className="mx-auto grid max-w-6xl gap-6 xl:grid-cols-[minmax(0,1.3fr)_320px]">
+          <section
+            className="overflow-hidden rounded-[var(--radius-panel)] border p-6"
+            style={{
+              background: 'color-mix(in srgb, var(--color-surface) 96%, var(--color-bg))',
+              borderColor: 'var(--color-border)',
+            }}
+          >
+            <div className="mb-4">
+              <h1 className="text-2xl font-black tracking-[-0.03em]" style={{ color: 'var(--color-text)' }}>
+                {t('now_thread_tab_title')}
+              </h1>
+              <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('now_thread_tab_hint')}
+              </p>
+            </div>
+            <div className="space-y-3">
+              {threadItems.length === 0 ? (
+                <div className="rounded-2xl border border-dashed px-4 py-6 text-sm" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-tertiary)' }}>
+                  {t('now_thread_tab_empty')}
+                </div>
+              ) : (
+                threadItems.map((thread) => (
+                  <article
+                    key={thread.id}
+                    className="rounded-2xl border p-4"
+                    style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                          {thread.title}
+                        </div>
+                        <div className="mt-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                          {t(`thread_status_${thread.status}`, { ns: 'think' })} · {thread.lane}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onOpenWorkThread(thread.id)}
+                        className="rounded-xl px-3 py-2 text-[11px] font-semibold text-white"
+                        style={{ background: 'var(--color-accent)' }}
+                      >
+                        {t('now_resume_thread')}
+                      </button>
+                    </div>
+                    <p className="mt-3 text-sm leading-7" style={{ color: 'var(--color-text-secondary)' }}>
+                      {thread.resumeCard.summary || thread.mission || t('thread_resume_summary_empty', { ns: 'think' })}
+                    </p>
+                    <div className="mt-3 rounded-xl bg-[var(--color-bg)] px-3 py-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      <span className="font-medium" style={{ color: 'var(--color-text)' }}>
+                        {t('thread_resume_next_step_label', { ns: 'think' })}
+                      </span>{' '}
+                      {thread.resumeCard.nextStep || t('thread_resume_next_step_empty', { ns: 'think' })}
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+
+          <aside
+            className="overflow-hidden rounded-[var(--radius-panel)] border"
+            style={{
+              background: 'color-mix(in srgb, var(--color-surface) 95%, var(--color-bg))',
+              borderColor: 'var(--color-border)',
+            }}
+          >
+            <section className="px-4 py-4 sm:px-5 sm:py-5">
+              <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                {t('now_thread_sidecar_title')}
+              </p>
+              <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
+                {t('now_thread_sidecar_hint')}
+              </p>
+            </section>
+            {currentTask ? (
+              <section
+                className="border-t px-4 py-4 sm:px-5 sm:py-5"
+                style={{ borderColor: 'color-mix(in srgb, var(--color-border) 85%, transparent)' }}
+              >
+                <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {t('now_task_fallback_title')}
+                </p>
+                <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
+                  {displayTaskTitle(currentTask)}
+                </p>
+              </section>
+            ) : null}
+          </aside>
+        </div>
+      </div>
+    );
+  }
+
+  if (displayedNowView === 'auto' && primaryThreadRecommendation && onOpenWorkThread) {
     const thread = primaryThreadRecommendation.thread;
     const fallbackTask = currentTask;
     return (
       <div className="relative h-full overflow-y-auto px-4 py-4 sm:px-6 lg:px-8">
+        {nowViewTabs}
         <div className="mx-auto grid max-w-6xl gap-6 xl:grid-cols-[minmax(0,1.3fr)_340px]">
           <section
             className="overflow-hidden rounded-[var(--radius-panel)] border p-6 sm:p-8"
@@ -710,6 +871,7 @@ export function NowView({
 
   return (
     <div className="relative h-full overflow-y-auto px-4 py-4 sm:px-6 lg:px-8">
+      {nowViewTabs}
       {lockTick !== null && lockTick > 0 && (
         <div
           className="fixed inset-0 z-[150] flex flex-col items-center justify-center gap-2"
