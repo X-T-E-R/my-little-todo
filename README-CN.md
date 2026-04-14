@@ -20,6 +20,15 @@
 
 ## 发布边界
 
+当前仓库仍处于“未发布阶段的扩展平台骨架重构”中，方向明确为：
+
+- 保留产品领域模块与 `TS + React` 插件主模型
+- 用共享 `plugin-runner` 重建 server 插件能力
+- 把 `/api/mcp` 与 `/api/plugins/:pluginId/*` 固定为宿主网关
+- 冻结 auth / sync / MCP 的平台化扩张范围
+
+详见 [docs/architecture/03-host-plugin-platform.md](docs/architecture/03-host-plugin-platform.md)。
+
 当前 Stable 能力：
 
 - 任务 CRUD

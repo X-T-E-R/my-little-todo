@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ChevronRight,
   Download,
   FolderInput,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import React, { useCallback, useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { inspectMltpPackage } from '../plugins/pluginLoader';
 import {
   getRegistrySources,
   mergeAllRegistryPlugins,
@@ -119,7 +121,6 @@ export function ThirdPartyPluginsPanel() {
   const plugins = usePluginStore((s) => s.plugins);
   const hydrated = usePluginStore((s) => s.hydrated);
   const installFromArrayBuffer = usePluginStore((s) => s.installFromArrayBuffer);
-  const installFromUrl = usePluginStore((s) => s.installFromUrl);
   const enable = usePluginStore((s) => s.enable);
   const disable = usePluginStore((s) => s.disable);
   const uninstall = usePluginStore((s) => s.uninstall);
@@ -132,6 +133,15 @@ export function ThirdPartyPluginsPanel() {
   const [marketQuery, setMarketQuery] = useState('');
   const [installingId, setInstallingId] = useState<string | null>(null);
   const [sourcesText, setSourcesText] = useState('');
+  const [serverRisk, setServerRisk] = useState<{
+    manifestName: string;
+    pluginId: string;
+    capabilities: string[];
+    source: 'file' | 'marketplace';
+    sourceUrl?: string;
+    buffer: ArrayBuffer;
+  } | null>(null);
+  const [approvalCountdown, setApprovalCountdown] = useState(0);
   const fileRef = React.useRef<HTMLInputElement>(null);
   const searchId = useId();
   const registryTextareaId = useId();
@@ -160,6 +170,12 @@ export function ThirdPartyPluginsPanel() {
     void loadMarket();
   }, [loadMarket]);
 
+  useEffect(() => {
+    if (!serverRisk || approvalCountdown <= 0) return;
+    const timer = window.setTimeout(() => setApprovalCountdown((value) => value - 1), 1000);
+    return () => window.clearTimeout(timer);
+  }, [serverRisk, approvalCountdown]);
+
   const filtered = market.filter((p) => {
     const q = marketQuery.trim().toLowerCase();
     if (!q) return true;
@@ -172,14 +188,45 @@ export function ThirdPartyPluginsPanel() {
 
   const installedCount = Object.keys(plugins).length;
 
+  const installBuffer = useCallback(
+    async (
+      buffer: ArrayBuffer,
+      meta: { source: 'file' | 'marketplace'; sourceUrl?: string },
+    ) => {
+      const { manifest } = await inspectMltpPackage(buffer);
+      const capabilities = manifest.server?.capabilities ?? [];
+      const needsApproval =
+        capabilities.length > 0 ||
+        manifest.permissions.includes('server:run') ||
+        manifest.permissions.includes('mcp:expose') ||
+        manifest.permissions.includes('http:expose');
+
+      if (needsApproval) {
+        setServerRisk({
+          manifestName: manifest.name,
+          pluginId: manifest.id,
+          capabilities: capabilities.length > 0 ? capabilities : ['server'],
+          source: meta.source,
+          sourceUrl: meta.sourceUrl,
+          buffer,
+        });
+        setApprovalCountdown(5);
+        return;
+      }
+
+      await installFromArrayBuffer(buffer, meta);
+      showToast({ type: 'success', message: t('Plugin installed'), duration: 3000 });
+    },
+    [installFromArrayBuffer, showToast, t],
+  );
+
   const onPickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
     try {
       const buf = await f.arrayBuffer();
-      await installFromArrayBuffer(buf, { source: 'file' });
-      showToast({ type: 'success', message: t('Plugin installed'), duration: 3000 });
+      await installBuffer(buf, { source: 'file' });
     } catch (err) {
       showToast({
         type: 'error',
@@ -273,6 +320,18 @@ export function ThirdPartyPluginsPanel() {
                     <span className="mx-1.5 opacity-50">·</span>
                     <span>v{p.manifest.version}</span>
                   </p>
+                  {p.manifest.server ? (
+                    <>
+                      <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
+                        Server: {p.serverApproved ? p.serverStatus ?? 'unavailable' : 'awaiting approval'}
+                        <span className="mx-1.5 opacity-50">·</span>
+                        {p.manifest.server.capabilities.join(', ')}
+                      </p>
+                      {p.serverLastError ? (
+                        <p className="mt-1 text-[11px] text-[#c2410c]">{p.serverLastError}</p>
+                      ) : null}
+                    </>
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-2 ml-auto">
                   <button
@@ -374,8 +433,10 @@ export function ThirdPartyPluginsPanel() {
                 onInstall={async () => {
                   setInstallingId(p.id);
                   try {
-                    await installFromUrl(p.downloadUrl);
-                    showToast({ type: 'success', message: t('Plugin installed'), duration: 3000 });
+                    const res = await fetch(p.downloadUrl);
+                    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+                    const buf = await res.arrayBuffer();
+                    await installBuffer(buf, { source: 'marketplace', sourceUrl: p.downloadUrl });
                   } catch (err) {
                     showToast({
                       type: 'error',
@@ -523,6 +584,98 @@ export function ThirdPartyPluginsPanel() {
           )}
         </div>
       </details>
+
+      {serverRisk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+          <div
+            className="w-full max-w-lg rounded-2xl border border-[var(--color-border)] p-5 shadow-2xl"
+            style={{ background: 'var(--color-surface)' }}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+                style={{ background: 'color-mix(in srgb, #f97316 16%, transparent)', color: '#c2410c' }}
+              >
+                <AlertTriangle size={18} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-[var(--color-text)]">
+                  High-risk plugin capabilities
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                  <span className="font-medium">{serverRisk.manifestName}</span> declares server-side
+                  extension capabilities. If you approve it, the plugin may expose MCP tools or
+                  plugin HTTP endpoints through the host.
+                </p>
+                <div
+                  className="mt-3 rounded-xl border border-[var(--color-border)] px-3 py-2.5 text-[11px]"
+                  style={{ background: 'var(--color-bg)' }}
+                >
+                  <div className="font-mono text-[var(--color-text-secondary)]">{serverRisk.pluginId}</div>
+                  <div className="mt-1 text-[var(--color-text-tertiary)]">
+                    Capabilities: {serverRisk.capabilities.join(', ')}
+                  </div>
+                  {serverRisk.sourceUrl ? (
+                    <div className="mt-1 break-all text-[var(--color-text-tertiary)]">
+                      Source: {serverRisk.sourceUrl}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 rounded-xl border border-dashed border-[var(--color-border)] px-3 py-2.5 text-[11px] leading-relaxed text-[var(--color-text-tertiary)]">
+              Server capabilities stay inactive until you approve them. After approval, the host
+              will try to start the desktop server runner and expose the declared MCP or HTTP
+              capabilities through the unified gateway.
+            </div>
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setServerRisk(null);
+                  setApprovalCountdown(0);
+                }}
+                className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-xs font-medium text-[var(--color-text-secondary)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={approvalCountdown > 0}
+                onClick={() =>
+                  void (async () => {
+                    const pending = serverRisk;
+                    if (!pending) return;
+                    try {
+                      await installFromArrayBuffer(pending.buffer, {
+                        source: pending.source,
+                        sourceUrl: pending.sourceUrl,
+                        serverApproved: true,
+                      });
+                      showToast({ type: 'success', message: t('Plugin installed'), duration: 3000 });
+                    } catch (err) {
+                      showToast({
+                        type: 'error',
+                        message: err instanceof Error ? err.message : String(err),
+                        duration: 5000,
+                      });
+                    } finally {
+                      setServerRisk(null);
+                      setApprovalCountdown(0);
+                    }
+                  })()
+                }
+                className="rounded-xl px-4 py-2 text-xs font-medium text-white disabled:opacity-50"
+                style={{ background: 'var(--color-accent)' }}
+              >
+                {approvalCountdown > 0 ? `Approve in ${approvalCountdown}s` : 'Approve server capabilities'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

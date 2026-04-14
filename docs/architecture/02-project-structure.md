@@ -15,6 +15,8 @@ my-little-todo/
 │
 ├── packages/                        # 前端代码 (pnpm workspace)
 │   ├── core/                        #   纯 TS 核心逻辑
+│   ├── plugin-sdk/                  #   插件 SDK (UI + server plugin contract)
+│   ├── plugin-runner/               #   共享 server plugin runner 骨架
 │   ├── web/                         #   React 桌面/Web 应用
 │   ├── admin/                       #   管理员面板 SPA
 │   └── mobile/                      #   Android 移动端 (Capacitor)
@@ -68,7 +70,7 @@ crates/server/
         ├── blobs.rs                 #   /api/blobs (附件上传/下载)
         ├── backup.rs               #   /api/backup (云备份配置)
         ├── sync.rs                  #   /api/sync (push/pull/status 同步端点)
-        └── mcp.rs                   #   /api/mcp (MCP 协议端点)
+        └── mcp.rs                   #   /api/mcp (宿主 MCP 网关)
 ```
 
 ### 关键类型
@@ -198,6 +200,29 @@ packages/web/
 ├── vite.config.ts
 └── package.json
 ```
+
+---
+
+## packages/plugin-sdk — 插件 SDK
+
+用于定义第三方插件 contract。
+
+- `definePlugin()`：UI 插件入口
+- `defineServerPlugin()`：server 插件入口
+- 类型定义同时覆盖：
+  - TS + React UI 插件
+  - TS server 插件
+
+---
+
+## packages/plugin-runner — 共享 server plugin runner
+
+共享 runner 骨架目录。
+
+- 目标实现语言：TypeScript
+- 目标 MCP 层：官方 MCP TypeScript SDK
+- 目标产物：通过 `deno compile` 打包的单文件可执行程序
+- 供桌面宿主和服务器宿主共用
 
 ---
 

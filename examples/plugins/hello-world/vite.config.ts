@@ -6,10 +6,12 @@ export default defineConfig({
   plugins: [react(), mltpPlugin()],
   build: {
     lib: {
-      entry: 'src/index.tsx',
-      name: 'HelloWorld',
-      fileName: 'index',
+      entry: {
+        index: 'src/index.tsx',
+        server: 'src/server.ts',
+      },
       formats: ['es'],
+      fileName: (_format, entryName) => `${entryName}.js`,
     },
     rollupOptions: {
       external: ['react', 'react-dom', 'react/jsx-runtime'],

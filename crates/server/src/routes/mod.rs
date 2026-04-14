@@ -5,6 +5,7 @@ pub mod backup;
 pub mod blobs;
 pub mod data;
 pub mod mcp;
+pub mod plugins;
 pub mod stream;
 pub mod sync;
 pub mod tasks;

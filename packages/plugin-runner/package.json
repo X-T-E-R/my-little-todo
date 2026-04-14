@@ -1,0 +1,20 @@
+{
+  "name": "@my-little-todo/plugin-runner",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Shared TS runner skeleton for My Little Todo server plugins",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "pnpm run build && node --test test/*.mjs",
+    "check": "pnpm run typecheck && pnpm run test"
+  },
+  "dependencies": {
+    "@my-little-todo/plugin-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.9.3"
+  }
+}

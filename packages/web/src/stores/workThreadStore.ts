@@ -1049,6 +1049,9 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       });
       return;
     }
+    if (check.kind !== 'imported') {
+      return;
+    }
     const imported = await persistThread(check.thread);
     set((state) => ({
       currentThread: imported,

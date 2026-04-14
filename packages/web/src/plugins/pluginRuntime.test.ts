@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PluginManifest } from '@my-little-todo/plugin-sdk';
 
 const pluginApi = vi.hoisted(() => ({
   createPluginContext: vi.fn(() => ({ logger: { warn: vi.fn() } })),
@@ -36,12 +37,12 @@ vi.mock('./pluginUiRegistry', () => pluginUiRegistry);
 import { activatePlugin, deactivatePlugin } from './pluginRuntime';
 
 describe('pluginRuntime', () => {
-  const manifest = {
+  const manifest: PluginManifest = {
     id: 'demo',
     name: 'Demo',
     version: '0.1.0',
     minAppVersion: '0.5.0',
-    permissions: ['ui:settings'] as const,
+    permissions: ['ui:settings'],
     entryPoint: 'index.js',
   };
 

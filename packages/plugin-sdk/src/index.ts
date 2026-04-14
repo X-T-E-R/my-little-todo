@@ -1,4 +1,5 @@
 export { definePlugin } from './definePlugin.js';
+export { defineServerPlugin } from './defineServerPlugin.js';
 export type {
   Disposable,
   PluginCommand,
@@ -12,6 +13,22 @@ export type {
   PluginManifest,
   PluginManifestAuthor,
   PluginPermission,
+  PluginServerCapability,
+  PluginServerContentType,
+  PluginServerContext,
+  PluginServerHostAPI,
+  PluginServerHttpMethod,
+  PluginServerHttpRoute,
+  PluginServerLogger,
+  PluginServerManifest,
+  PluginServerMcpTool,
+  PluginServerRouteHandler,
+  PluginServerRouteRequest,
+  PluginServerRouteResponse,
+  PluginServerToolHandler,
+  PluginServerToolResult,
+  PluginServerToolPermission,
   PluginUIAPI,
   PluginWidget,
+  ServerPluginDefinition,
 } from './types.js';

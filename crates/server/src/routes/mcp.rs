@@ -4,14 +4,18 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 
 use chrono::{NaiveDate, TimeZone, Utc};
+use reqwest::Client;
 use uuid::Uuid;
 
 use crate::config::AuthMode;
+use crate::extension_registry::{ExtensionStatus, RegisteredExtension, RegisteredMcpTool};
 use crate::task_stream_facade;
+use crate::work_thread_facade;
 use crate::AppState;
 
 const NONE_ROLE_MARKER: &str = "__none__";
 const MCP_MODULE_KEY: &str = "module:mcp-integration:enabled";
+const INSTALLED_REGISTRY_KEY: &str = "plugin:_system:installed_registry";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PermissionLevel {
@@ -53,9 +57,21 @@ fn tool_min_rank(name: &str) -> u8 {
         | "search"
         | "get_roles"
         | "list_projects"
-        | "get_project_progress" => 0,
-        "create_task" | "add_stream" => 1,
-        "update_task" | "delete_task" | "update_stream_entry" | "manage_role" => 2,
+        | "get_project_progress"
+        | "work_thread.list"
+        | "work_thread.get" => 0,
+        "create_task"
+        | "add_stream"
+        | "work_thread.create"
+        | "work_thread.checkpoint"
+        | "work_thread.append_event" => 1,
+        "update_task"
+        | "delete_task"
+        | "update_stream_entry"
+        | "manage_role"
+        | "work_thread.update"
+        | "work_thread.set_status"
+        | "work_thread.delete" => 2,
         _ => 0,
     }
 }
@@ -629,16 +645,131 @@ fn all_tool_definitions() -> Vec<Value> {
     ]
 }
 
+fn work_thread_tool_definitions() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "work_thread.list",
+            "description": "列出工作线程，按 updatedAt 倒序返回。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "description": "最大返回数量，默认 50，上限 200" }
+                }
+            }
+        }),
+        json!({
+            "name": "work_thread.get",
+            "description": "读取单个工作线程，并可附带最近事件。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "线程 ID" },
+                    "include_events": { "type": "boolean", "description": "是否附带最近事件，默认 true" },
+                    "event_limit": { "type": "integer", "description": "事件数量上限，默认 30，上限 300" }
+                },
+                "required": ["id"]
+            }
+        }),
+        json!({
+            "name": "work_thread.create",
+            "description": "创建工作线程。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "mission": { "type": "string" },
+                    "lane": { "type": "string", "enum": ["general", "execution", "research", "infrastructure", "meta"] },
+                    "status": { "type": "string", "enum": ["running", "ready", "waiting", "blocked", "sleeping", "done", "archived"] },
+                    "roleId": { "type": "string" },
+                    "docMarkdown": { "type": "string" }
+                }
+            }
+        }),
+        json!({
+            "name": "work_thread.update",
+            "description": "更新工作线程顶层字段与 resumeCard/schedulerMeta/syncMeta。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "patch": { "type": "object", "description": "需要合并进线程对象的 patch" }
+                },
+                "required": ["id", "patch"]
+            }
+        }),
+        json!({
+            "name": "work_thread.set_status",
+            "description": "设置工作线程状态。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "status": { "type": "string", "enum": ["running", "ready", "waiting", "blocked", "sleeping", "done", "archived"] }
+                },
+                "required": ["id", "status"]
+            }
+        }),
+        json!({
+            "name": "work_thread.checkpoint",
+            "description": "保存线程 checkpoint，并更新最近 checkpoint 时间。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "title": { "type": "string" }
+                },
+                "required": ["id"]
+            }
+        }),
+        json!({
+            "name": "work_thread.append_event",
+            "description": "向工作线程追加时间线事件。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" },
+                    "type": { "type": "string" },
+                    "actor": { "type": "string", "enum": ["user", "ai", "system"] },
+                    "title": { "type": "string" },
+                    "detailMarkdown": { "type": "string" },
+                    "payload": { "type": "object" }
+                },
+                "required": ["id", "title"]
+            }
+        }),
+        json!({
+            "name": "work_thread.delete",
+            "description": "删除工作线程及其事件。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string" }
+                },
+                "required": ["id"]
+            }
+        }),
+    ]
+}
+
 async fn handle_tools_list(state: &AppState, user_id: &str, id: Option<Value>) -> JsonRpcResponse {
     let disabled = get_disabled_tools(state, user_id).await;
     let level = get_permission_level(state, user_id).await;
-    let tools: Vec<Value> = all_tool_definitions()
+    let mut all_tools = all_tool_definitions();
+    if work_thread_facade::work_thread_enabled(state.db.as_ref(), user_id).await {
+        all_tools.extend(work_thread_tool_definitions());
+    }
+    let mut tools: Vec<Value> = all_tools
         .into_iter()
         .filter(|t| {
             let name = t.get("name").and_then(|n| n.as_str()).unwrap_or("");
             !disabled.contains(name) && level.rank() >= tool_min_rank(name)
         })
         .collect();
+    tools.extend(
+        plugin_tool_definitions(state, user_id, &disabled, level.rank())
+            .await
+            .into_iter(),
+    );
     ok_response(id, json!({ "tools": tools }))
 }
 
@@ -651,8 +782,28 @@ async fn handle_tools_call(
     let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
+    if let Some(provider_error) = plugin_provider_error(state, user_id, tool_name).await {
+        return err_response(id, -32601, &provider_error);
+    }
+
+    if tool_name.starts_with("work_thread.")
+        && !work_thread_facade::work_thread_enabled(state.db.as_ref(), user_id).await
+    {
+        return err_response(id, -32601, "Tool provider 'work-thread' is disabled");
+    }
+
+    let plugin_tool = if tool_name.starts_with("plugin.") {
+        state.extension_registry.find_tool(tool_name).await
+    } else {
+        None
+    };
+
     let level = get_permission_level(state, user_id).await;
-    if level.rank() < tool_min_rank(tool_name) {
+    let min_rank = plugin_tool
+        .as_ref()
+        .map(|(_, tool)| tool.permission.rank())
+        .unwrap_or_else(|| tool_min_rank(tool_name));
+    if level.rank() < min_rank {
         return err_response(
             id,
             -32601,
@@ -672,6 +823,16 @@ async fn handle_tools_call(
         );
     }
 
+    if tool_name.starts_with("plugin.") {
+        let Some((extension, tool)) = plugin_tool else {
+            return err_response(id, -32601, &format!("Unknown tool: {}", tool_name));
+        };
+        return match proxy_plugin_tool_call(&extension, tool_name, &tool, &args).await {
+            Ok(result) => ok_response(id, result),
+            Err(error) => err_response(id, -32000, &error),
+        };
+    }
+
     let result = match tool_name {
         "get_overview" => tool_overview(state, user_id).await,
         "list_tasks" => tool_list_tasks(state, user_id, &args).await,
@@ -687,6 +848,14 @@ async fn handle_tools_call(
         "update_stream_entry" => tool_update_stream_entry(state, user_id, &args).await,
         "manage_role" => tool_manage_role(state, user_id, &args).await,
         "search" => tool_search(state, user_id, &args).await,
+        "work_thread.list" => tool_list_work_threads(state, user_id, &args).await,
+        "work_thread.get" => tool_get_work_thread(state, user_id, &args).await,
+        "work_thread.create" => tool_create_work_thread(state, user_id, &args).await,
+        "work_thread.update" => tool_update_work_thread(state, user_id, &args).await,
+        "work_thread.set_status" => tool_set_work_thread_status(state, user_id, &args).await,
+        "work_thread.checkpoint" => tool_checkpoint_work_thread(state, user_id, &args).await,
+        "work_thread.append_event" => tool_append_work_thread_event(state, user_id, &args).await,
+        "work_thread.delete" => tool_delete_work_thread(state, user_id, &args).await,
         _ => Err(format!("Unknown tool: {}", tool_name)),
     };
 
@@ -707,6 +876,196 @@ async fn handle_tools_call(
                 "isError": true,
             }),
         ),
+    }
+}
+
+async fn plugin_tool_definitions(
+    state: &AppState,
+    user_id: &str,
+    disabled: &HashSet<String>,
+    current_rank: u8,
+) -> Vec<Value> {
+    let mut tools = Vec::new();
+    for extension in state.extension_registry.all().await {
+        if extension.status != ExtensionStatus::Running {
+            continue;
+        }
+        if plugin_installation_state(state, user_id, &extension.plugin_id).await
+            != PluginInstallState::Runnable
+        {
+            continue;
+        }
+        for tool in &extension.mcp_tools {
+            let full_name = prefixed_plugin_tool_name(&extension, tool);
+            if disabled.contains(&full_name) || current_rank < tool.permission.rank() {
+                continue;
+            }
+            tools.push(json!({
+                "name": full_name,
+                "description": tool.description,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }));
+        }
+    }
+    tools
+}
+
+async fn proxy_plugin_tool_call(
+    extension: &RegisteredExtension,
+    full_tool_name: &str,
+    tool: &RegisteredMcpTool,
+    args: &Value,
+) -> Result<Value, String> {
+    let client = Client::new();
+    let payload = json!({
+        "name": normalized_plugin_tool_name(full_tool_name, &extension.plugin_id, &tool.name),
+        "fullName": full_tool_name,
+        "arguments": args,
+    });
+    let mut request = client.post(format!(
+        "{}/mcp/tools/call",
+        extension.proxy_base_url.trim_end_matches('/')
+    ));
+    if let Some(token) = &extension.runner_token {
+        request = request.header("x-mlt-plugin-token", token);
+    }
+    let response = request
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| format!("Plugin MCP proxy failed: {}", e))?;
+    let status = response.status();
+    let body = response
+        .json::<Value>()
+        .await
+        .map_err(|e| format!("Plugin MCP proxy returned invalid JSON: {}", e))?;
+    if !status.is_success() {
+        return Err(body
+            .get("error")
+            .and_then(|value| value.as_str())
+            .map(String::from)
+            .unwrap_or_else(|| format!("Plugin MCP proxy returned {}", status)));
+    }
+    Ok(body)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PluginInstallState {
+    Unknown,
+    Disabled,
+    Unavailable,
+    Runnable,
+}
+
+async fn plugin_provider_error(state: &AppState, user_id: &str, tool_name: &str) -> Option<String> {
+    if !tool_name.starts_with("plugin.") {
+        return None;
+    }
+    let plugin_id = plugin_id_from_tool_name(tool_name)?;
+    match plugin_installation_state(state, user_id, &plugin_id).await {
+        PluginInstallState::Disabled => Some(format!("Tool provider '{}' is disabled", plugin_id)),
+        PluginInstallState::Unavailable => {
+            Some(format!("Tool provider '{}' is unavailable", plugin_id))
+        }
+        PluginInstallState::Unknown => {
+            Some(format!("Tool provider '{}' is not registered", plugin_id))
+        }
+        PluginInstallState::Runnable => {
+            if state
+                .extension_registry
+                .find_tool(tool_name)
+                .await
+                .is_none()
+            {
+                Some(format!(
+                    "Tool '{}' is not registered by provider '{}'",
+                    tool_name, plugin_id
+                ))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+async fn plugin_installation_state(
+    state: &AppState,
+    user_id: &str,
+    plugin_id: &str,
+) -> PluginInstallState {
+    let raw = match state.db.get_setting(user_id, INSTALLED_REGISTRY_KEY).await {
+        Ok(value) => value,
+        Err(_) => return PluginInstallState::Unknown,
+    };
+    let Some(raw) = raw else {
+        return PluginInstallState::Unknown;
+    };
+    let parsed = match serde_json::from_str::<Value>(&raw) {
+        Ok(value) => value,
+        Err(_) => return PluginInstallState::Unknown,
+    };
+    let Some(record) = parsed.get(plugin_id) else {
+        return PluginInstallState::Unknown;
+    };
+    if !record
+        .get("enabled")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true)
+    {
+        return PluginInstallState::Disabled;
+    }
+    if record
+        .get("manifest")
+        .and_then(|value| value.get("server"))
+        .is_none()
+    {
+        return PluginInstallState::Unknown;
+    }
+    if !record
+        .get("serverApproved")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return PluginInstallState::Disabled;
+    }
+    match record
+        .get("serverStatus")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unavailable")
+    {
+        "running" => PluginInstallState::Runnable,
+        _ => PluginInstallState::Unavailable,
+    }
+}
+
+fn plugin_id_from_tool_name(tool_name: &str) -> Option<String> {
+    let mut parts = tool_name.splitn(4, '.');
+    if parts.next()? != "plugin" {
+        return None;
+    }
+    Some(parts.next()?.to_string())
+}
+
+fn normalized_plugin_tool_name(full_name: &str, plugin_id: &str, declared_name: &str) -> String {
+    let prefix = format!("plugin.{}.", plugin_id);
+    if let Some(stripped) = full_name.strip_prefix(&prefix) {
+        return stripped.to_string();
+    }
+    if let Some(stripped) = declared_name.strip_prefix(&prefix) {
+        return stripped.to_string();
+    }
+    declared_name.to_string()
+}
+
+fn prefixed_plugin_tool_name(extension: &RegisteredExtension, tool: &RegisteredMcpTool) -> String {
+    let prefix = format!("plugin.{}.", extension.plugin_id);
+    if tool.name.starts_with(&prefix) {
+        tool.name.clone()
+    } else {
+        format!("{}{}", prefix, tool.name)
     }
 }
 
@@ -1419,8 +1778,13 @@ async fn tool_get_task(state: &AppState, user_id: &str, args: &Value) -> Result<
 
 async fn tool_create_task(state: &AppState, user_id: &str, args: &Value) -> Result<Value, String> {
     let acl = get_role_acl(state, user_id).await;
-    if args.get("role").is_some() || args.get("role_id").is_some() || args.get("source_stream_id").is_some() {
-        return Err("Legacy task fields `role`, `role_id`, and `source_stream_id` are not accepted".into());
+    if args.get("role").is_some()
+        || args.get("role_id").is_some()
+        || args.get("source_stream_id").is_some()
+    {
+        return Err(
+            "Legacy task fields `role`, `role_id`, and `source_stream_id` are not accepted".into(),
+        );
     }
     let title = args
         .get("title")
@@ -1514,8 +1878,13 @@ async fn tool_create_task(state: &AppState, user_id: &str, args: &Value) -> Resu
 
 async fn tool_update_task(state: &AppState, user_id: &str, args: &Value) -> Result<Value, String> {
     let acl = get_role_acl(state, user_id).await;
-    if args.get("role").is_some() || args.get("role_id").is_some() || args.get("source_stream_id").is_some() {
-        return Err("Legacy task fields `role`, `role_id`, and `source_stream_id` are not accepted".into());
+    if args.get("role").is_some()
+        || args.get("role_id").is_some()
+        || args.get("source_stream_id").is_some()
+    {
+        return Err(
+            "Legacy task fields `role`, `role_id`, and `source_stream_id` are not accepted".into(),
+        );
     }
     let task_id = args
         .get("id")
@@ -1778,7 +2147,8 @@ async fn tool_list_stream(state: &AppState, user_id: &str, args: &Value) -> Resu
         .await
         .map_err(|e| e.to_string())?;
 
-    let mut filtered = task_stream_facade::list_stream_from_rows(state.db.as_ref(), &p, rows).await?;
+    let mut filtered =
+        task_stream_facade::list_stream_from_rows(state.db.as_ref(), &p, rows).await?;
     filtered.retain(|entry| stream_matches_acl(&acl, entry));
     let role_f = args.get("role_id").and_then(|v| v.as_str());
     let type_f = args
@@ -1878,7 +2248,8 @@ async fn tool_search(state: &AppState, user_id: &str, args: &Value) -> Result<Va
             .search_stream_json(&p, query, remaining as i64)
             .await
             .unwrap_or_default();
-        let entries = task_stream_facade::list_stream_from_rows(state.db.as_ref(), &p, stream_rows).await?;
+        let entries =
+            task_stream_facade::list_stream_from_rows(state.db.as_ref(), &p, stream_rows).await?;
         for v in entries {
             if results.len() >= max_n {
                 break;
@@ -2086,6 +2457,133 @@ async fn tool_manage_role(state: &AppState, user_id: &str, args: &Value) -> Resu
         }
         _ => Err(format!("Unknown action: {}", action)),
     }
+}
+
+async fn tool_list_work_threads(
+    state: &AppState,
+    user_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let limit = args
+        .get("limit")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(50)
+        .clamp(1, 200) as usize;
+    let threads = work_thread_facade::list_threads(state.db.as_ref(), user_id, limit).await?;
+    Ok(json!({ "threads": threads, "count": threads.len() }))
+}
+
+async fn tool_get_work_thread(
+    state: &AppState,
+    user_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let id = args
+        .get("id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Missing required parameter: id".to_string())?;
+    let Some(thread) = work_thread_facade::get_thread(state.db.as_ref(), user_id, id).await? else {
+        return Err(format!("Thread not found: {}", id));
+    };
+    let include_events = args
+        .get("include_events")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+    if !include_events {
+        return Ok(thread);
+    }
+    let event_limit = args
+        .get("event_limit")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(30)
+        .clamp(1, 300) as usize;
+    let events =
+        work_thread_facade::list_events(state.db.as_ref(), user_id, id, event_limit).await?;
+    let mut enriched = thread;
+    if let Some(obj) = enriched.as_object_mut() {
+        obj.insert("events".into(), Value::Array(events));
+    }
+    Ok(enriched)
+}
+
+async fn tool_create_work_thread(
+    state: &AppState,
+    user_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    work_thread_facade::create_thread(state.db.as_ref(), user_id, args).await
+}
+
+async fn tool_update_work_thread(
+    state: &AppState,
+    user_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let id = args
+        .get("id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Missing required parameter: id".to_string())?;
+    let patch = args
+        .get("patch")
+        .ok_or_else(|| "Missing required parameter: patch".to_string())?;
+    work_thread_facade::update_thread(state.db.as_ref(), user_id, id, patch).await
+}
+
+async fn tool_set_work_thread_status(
+    state: &AppState,
+    user_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let id = args
+        .get("id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Missing required parameter: id".to_string())?;
+    let status = args
+        .get("status")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Missing required parameter: status".to_string())?;
+    work_thread_facade::set_thread_status(state.db.as_ref(), user_id, id, status).await
+}
+
+async fn tool_checkpoint_work_thread(
+    state: &AppState,
+    user_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let id = args
+        .get("id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Missing required parameter: id".to_string())?;
+    let title = args.get("title").and_then(|value| value.as_str());
+    work_thread_facade::checkpoint_thread(state.db.as_ref(), user_id, id, title).await
+}
+
+async fn tool_append_work_thread_event(
+    state: &AppState,
+    user_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let id = args
+        .get("id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Missing required parameter: id".to_string())?;
+    work_thread_facade::append_event(state.db.as_ref(), user_id, id, args).await
+}
+
+async fn tool_delete_work_thread(
+    state: &AppState,
+    user_id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let id = args
+        .get("id")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "Missing required parameter: id".to_string())?;
+    let deleted = work_thread_facade::delete_thread(state.db.as_ref(), user_id, id).await?;
+    if !deleted {
+        return Err(format!("Thread not found: {}", id));
+    }
+    Ok(json!({ "id": id, "deleted": true }))
 }
 
 // ── Resource Implementations ────────────────────────────────────

@@ -2,10 +2,12 @@ pub mod auth;
 pub mod backup;
 pub mod config;
 pub mod export;
+pub mod extension_registry;
 pub mod providers;
 pub mod routes;
 pub mod task_stream_facade;
 pub mod utils;
+pub mod work_thread_facade;
 
 use std::sync::Arc;
 
@@ -20,10 +22,13 @@ use providers::DatabaseProvider;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
+use extension_registry::ExtensionRegistry;
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<dyn DatabaseProvider>,
     pub config: Arc<ServerConfig>,
+    pub extension_registry: ExtensionRegistry,
     pub version: &'static str,
     pub git_hash: &'static str,
 }
@@ -35,9 +40,11 @@ pub fn create_app(
     git_hash: &'static str,
 ) -> Router {
     let config = Arc::new(config);
+    let extension_registry = ExtensionRegistry::new();
     let state = AppState {
         db,
         config: config.clone(),
+        extension_registry,
         version,
         git_hash,
     };
@@ -164,6 +171,58 @@ pub fn create_app(
         ))
         .with_state(state.clone());
 
+    let plugin_routes = Router::new()
+        .route(
+            "/plugins/extensions/register",
+            post(routes::plugins::register_plugin_extension),
+        )
+        .route(
+            "/plugins/extensions/{plugin_id}",
+            delete(routes::plugins::unregister_plugin_extension),
+        )
+        .route(
+            "/plugins/work-thread/threads",
+            get(routes::plugins::list_work_threads).post(routes::plugins::create_work_thread),
+        )
+        .route(
+            "/plugins/work-thread/threads/{id}",
+            get(routes::plugins::get_work_thread)
+                .put(routes::plugins::update_work_thread)
+                .delete(routes::plugins::delete_work_thread),
+        )
+        .route(
+            "/plugins/work-thread/threads/{id}/status",
+            post(routes::plugins::set_work_thread_status),
+        )
+        .route(
+            "/plugins/work-thread/threads/{id}/checkpoint",
+            post(routes::plugins::checkpoint_work_thread),
+        )
+        .route(
+            "/plugins/work-thread/threads/{id}/events",
+            get(routes::plugins::list_work_thread_events)
+                .post(routes::plugins::append_work_thread_event),
+        )
+        .route(
+            "/plugins/{plugin_id}",
+            get(routes::plugins::handle_plugin_gateway_root)
+                .post(routes::plugins::handle_plugin_gateway_root)
+                .put(routes::plugins::handle_plugin_gateway_root)
+                .delete(routes::plugins::handle_plugin_gateway_root),
+        )
+        .route(
+            "/plugins/{plugin_id}/{*rest}",
+            get(routes::plugins::handle_plugin_gateway_path)
+                .post(routes::plugins::handle_plugin_gateway_path)
+                .put(routes::plugins::handle_plugin_gateway_path)
+                .delete(routes::plugins::handle_plugin_gateway_path),
+        )
+        .layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ))
+        .with_state(state.clone());
+
     // Blob routes (protected)
     let blob_routes = Router::new()
         .route("/blobs/upload", post(routes::blobs::upload_blob))
@@ -174,7 +233,10 @@ pub fn create_app(
         )
         .route("/blobs/config", get(routes::blobs::get_attachment_config))
         .route("/file-host/upload", post(routes::blobs::upload_file_host))
-        .route("/file-host/config", get(routes::blobs::get_file_host_config))
+        .route(
+            "/file-host/config",
+            get(routes::blobs::get_file_host_config),
+        )
         .route(
             "/file-host/{id}",
             get(routes::blobs::get_file_host).delete(routes::blobs::delete_file_host),
@@ -225,6 +287,7 @@ pub fn create_app(
         .nest("/api", backup_routes)
         .nest("/api", ai_routes)
         .nest("/api", mcp_routes)
+        .nest("/api", plugin_routes)
         .nest("/api", blob_routes)
         .nest("/api", sync_routes)
         .route(

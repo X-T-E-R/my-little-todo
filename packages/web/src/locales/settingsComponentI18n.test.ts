@@ -74,7 +74,8 @@ function collectRawCopyIssues(filePath: string): string[] {
       }
     }
 
-    if (ts.isJsxAttribute(node) && TARGET_JSX_ATTRS.has(node.name.text)) {
+    const attrName = ts.isJsxAttribute(node) ? getJsxAttributeName(node.name) : undefined;
+    if (ts.isJsxAttribute(node) && attrName && TARGET_JSX_ATTRS.has(attrName)) {
       const text = getStringLiteralFromInitializer(node.initializer);
       if (text && isSuspiciousUiCopy(text) && !isTranslatedContext(node)) {
         issues.push(formatIssue(sourceFile, node, text));
@@ -104,6 +105,10 @@ function getStringLiteralFromInitializer(
     return getLiteralText(initializer.expression);
   }
   return undefined;
+}
+
+function getJsxAttributeName(name: ts.JsxAttributeName): string | undefined {
+  return ts.isIdentifier(name) ? name.text : undefined;
 }
 
 function getLiteralText(node: ts.Node): string | undefined {

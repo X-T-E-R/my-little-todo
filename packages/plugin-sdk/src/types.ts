@@ -6,14 +6,95 @@ export type PluginPermission =
   | 'data:write'
   | 'tasks:read'
   | 'stream:read'
+  | 'server:run'
+  | 'mcp:expose'
+  | 'http:expose'
   | 'ui:settings'
   | 'ui:command'
   | 'ui:widget'
   | 'ui:panel';
 
+export type PluginServerCapability = 'mcp' | 'http';
+export type PluginServerToolPermission = 'read' | 'create' | 'full';
+export type PluginServerHttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+export type PluginServerContentType =
+  | 'application/json'
+  | 'text/plain'
+  | 'application/octet-stream';
+
 export interface PluginManifestAuthor {
   name: string;
   url?: string;
+}
+
+export interface PluginServerMcpTool {
+  name: string;
+  description: string;
+  permission: PluginServerToolPermission;
+}
+
+export interface PluginServerHttpRoute {
+  path: string;
+  method: PluginServerHttpMethod;
+}
+
+export interface PluginServerRouteRequest {
+  method: PluginServerHttpMethod | string;
+  path: string;
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
+  bodyText?: string;
+  bodyBytes?: Uint8Array;
+}
+
+export interface PluginServerRouteResponse {
+  status: number;
+  headers?: Record<string, string>;
+  contentType?: PluginServerContentType;
+  json?: unknown;
+  bodyText?: string;
+  bodyBytes?: Uint8Array;
+}
+
+export interface PluginServerToolResult {
+  content: unknown;
+  structured?: boolean;
+}
+
+export interface PluginServerLogger {
+  debug(...args: unknown[]): void;
+  info(...args: unknown[]): void;
+  warn(...args: unknown[]): void;
+  error(...args: unknown[]): void;
+}
+
+export interface PluginServerHostAPI {
+  getSetting?(key: string): Promise<string | null>;
+  putSetting?(key: string, value: string): Promise<void>;
+  deleteSetting?(key: string): Promise<void>;
+}
+
+export interface PluginServerContext {
+  pluginId: string;
+  logger: PluginServerLogger;
+  host?: PluginServerHostAPI;
+}
+
+export type PluginServerToolHandler = (
+  args: Record<string, unknown>,
+  ctx: PluginServerContext,
+) => Promise<PluginServerToolResult | unknown> | PluginServerToolResult | unknown;
+
+export type PluginServerRouteHandler = (
+  request: PluginServerRouteRequest,
+  ctx: PluginServerContext,
+) => Promise<PluginServerRouteResponse> | PluginServerRouteResponse;
+
+export interface PluginServerManifest {
+  entryPoint: string;
+  capabilities: PluginServerCapability[];
+  mcpTools?: PluginServerMcpTool[];
+  httpRoutes?: PluginServerHttpRoute[];
 }
 
 /** Root manifest.json for a .mltp package. */
@@ -30,6 +111,7 @@ export interface PluginManifest {
   permissions: PluginPermission[];
   entryPoint: string;
   styleSheet?: string;
+  server?: PluginServerManifest;
 }
 
 export interface Disposable {
@@ -95,4 +177,11 @@ export interface PluginContext {
 export interface PluginDefinition {
   activate(ctx: PluginContext): void | Promise<void>;
   deactivate?(): void | Promise<void>;
+}
+
+export interface ServerPluginDefinition {
+  activate?(ctx: PluginServerContext): void | Promise<void>;
+  deactivate?(ctx: PluginServerContext): void | Promise<void>;
+  tools?: Record<string, PluginServerToolHandler>;
+  routes?: Record<string, PluginServerRouteHandler>;
 }

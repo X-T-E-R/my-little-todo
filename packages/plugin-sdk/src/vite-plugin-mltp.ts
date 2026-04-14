@@ -3,6 +3,14 @@ import path from 'node:path';
 import JSZip from 'jszip';
 import type { Plugin as VitePlugin } from 'vite';
 
+interface PackagedManifest {
+  entryPoint?: string;
+  server?: {
+    entryPoint?: string;
+  };
+  styleSheet?: string;
+}
+
 export interface MltpPluginOptions {
   /** Path to manifest.json (default: project root manifest.json) */
   manifestPath?: string;
@@ -31,9 +39,7 @@ async function collectOptionalFiles(
   const manifestDir = path.dirname(path.resolve(root, manifestPath));
   const manifestFull = path.resolve(root, manifestPath);
   const raw = await readFile(manifestFull, 'utf-8');
-  const manifest = JSON.parse(raw) as {
-    styleSheet?: string;
-  };
+  const manifest = JSON.parse(raw) as PackagedManifest;
   const out: Array<{ name: string; data: Buffer }> = [];
   if (manifest.styleSheet) {
     const p = path.join(manifestDir, manifest.styleSheet);
@@ -71,6 +77,44 @@ async function collectOptionalFiles(
   return out;
 }
 
+function resolveBundleEntryTargets(
+  manifestRaw: string,
+  bundle: Record<string, { type: 'chunk' | 'asset'; fileName: string; isEntry?: boolean }>,
+): Array<{ bundleFileName: string; packageFileName: string }> {
+  const manifest = JSON.parse(manifestRaw) as PackagedManifest;
+  const packageEntries = [manifest.entryPoint ?? 'index.js', manifest.server?.entryPoint]
+    .filter((value): value is string => !!value)
+    .map((value) => value.replace(/\\/g, '/'));
+  const entryChunks = Object.values(bundle).filter(
+    (item): item is { type: 'chunk'; fileName: string; isEntry: true } =>
+      item.type === 'chunk' && item.isEntry === true && item.fileName.endsWith('.js'),
+  );
+
+  return packageEntries.map((packageFileName, index) => {
+    const exactMatch = entryChunks.find((chunk) => chunk.fileName === packageFileName);
+    if (exactMatch) {
+      return {
+        bundleFileName: exactMatch.fileName,
+        packageFileName,
+      };
+    }
+    if (index === 0 && entryChunks.length === 1) {
+      const fallbackChunk = entryChunks[0];
+      if (!fallbackChunk) {
+        throw new Error('[vite-plugin-mltp] Could not resolve the fallback entry chunk');
+      }
+      return {
+        bundleFileName: fallbackChunk.fileName,
+        packageFileName,
+      };
+    }
+    const availableEntries = entryChunks.map((chunk) => chunk.fileName).join(', ') || '<none>';
+    throw new Error(
+      `[vite-plugin-mltp] Could not find bundle entry for ${packageFileName}. Available entry chunks: ${availableEntries}`,
+    );
+  });
+}
+
 /**
  * Vite plugin: after build, packages dist output into a .mltp (zip) next to dist/.
  */
@@ -89,18 +133,18 @@ export function mltpPlugin(options: MltpPluginOptions = {}): VitePlugin {
       const zip = new JSZip();
       zip.file('manifest.json', manifestRaw);
 
-      const indexChunk = Object.values(bundle).find(
-        (c) => c.type === 'chunk' && c.isEntry && c.fileName.endsWith('.js'),
+      const bundleEntries = resolveBundleEntryTargets(
+        manifestRaw,
+        bundle as Record<string, { type: 'chunk' | 'asset'; fileName: string; isEntry?: boolean }>,
       );
-      if (!indexChunk || indexChunk.type !== 'chunk') {
-        throw new Error('[vite-plugin-mltp] Could not find entry JS chunk in bundle');
+      if (bundleEntries.length === 0) {
+        throw new Error('[vite-plugin-mltp] Could not find any JS entry chunk in bundle');
       }
-      const entryName = (indexChunk as { fileName: string }).fileName;
-      const entryPath = path.join(outDir, entryName);
-      const entryBuf = await readFile(entryPath);
-      const manifestParsed = JSON.parse(manifestRaw) as { entryPoint?: string };
-      const entryFileName = manifestParsed.entryPoint ?? 'index.js';
-      zip.file(entryFileName, entryBuf);
+      for (const entry of bundleEntries) {
+        const entryPath = path.join(outDir, entry.bundleFileName);
+        const entryBuf = await readFile(entryPath);
+        zip.file(entry.packageFileName, entryBuf);
+      }
 
       const extras = await collectOptionalFiles(root, manifestPath);
       for (const f of extras) {

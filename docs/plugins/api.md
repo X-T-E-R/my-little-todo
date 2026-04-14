@@ -1,6 +1,6 @@
 # Plugin API 参考
 
-类型定义与 `definePlugin` 来自 **`@my-little-todo/plugin-sdk`**。
+类型定义与插件入口来自 **`@my-little-todo/plugin-sdk`**。
 
 ## `definePlugin(definition)`
 
@@ -17,6 +17,68 @@ export default definePlugin({
 });
 ```
 
+## `defineServerPlugin(definition)`
+
+```ts
+import { defineServerPlugin } from '@my-little-todo/plugin-sdk';
+
+export default defineServerPlugin({
+  async activate(ctx) {
+    ctx.logger.info('server plugin ready');
+  },
+  tools: {
+    async echo(args) {
+      return { content: { ok: true, args } };
+    },
+  },
+  routes: {
+    'GET /healthz': async () => ({
+      status: 200,
+      json: { ok: true },
+    }),
+  },
+});
+```
+
+> `defineServerPlugin()` 是新的 server 插件骨架入口。最终由共享 `plugin-runner` 执行，而不是直接运行在宿主进程里。
+
+### 推荐目录结构
+
+```text
+src/
+  index.tsx
+  server.ts
+manifest.json
+vite.config.ts
+```
+
+### 推荐打包方式
+
+```ts
+import { mltpPlugin } from '@my-little-todo/plugin-sdk/vite-plugin';
+import react from '@vitejs/plugin-react';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  plugins: [react(), mltpPlugin()],
+  build: {
+    lib: {
+      entry: {
+        index: 'src/index.tsx',
+        server: 'src/server.ts',
+      },
+      formats: ['es'],
+      fileName: (_format, entryName) => `${entryName}.js`,
+    },
+    rollupOptions: {
+      external: ['react', 'react-dom', 'react/jsx-runtime'],
+    },
+  },
+});
+```
+
+这个约定能让 `.mltp` 同时包含 UI 入口与 `server.entryPoint` 对应的 bundle。
+
 ## `PluginContext`
 
 | 成员 | 说明 |
@@ -27,6 +89,26 @@ export default definePlugin({
 | `events` | 简单 pub/sub（预留） |
 | `i18n` | `t(key)`、`getLanguage()`、`onLanguageChanged(handler)`，使用命名空间 `plugin:<pluginId>` |
 | `logger` | 带前缀的 `debug` / `info` / `warn` / `error` |
+
+## `PluginServerContext`
+
+| 成员 | 说明 |
+|------|------|
+| `pluginId` | 插件 id |
+| `logger` | runner 注入的 logger |
+| `host` | 可选宿主 API；用于后续受控读写能力扩展 |
+
+## server 插件约束
+
+- server 插件主语言仍然是 `TypeScript`
+- server 插件由共享 `plugin-runner` 进程加载
+- server 插件不直接拿宿主数据库连接
+- server 插件不直接改宿主根路由
+- server 能力统一通过宿主网关暴露：
+  - `/api/mcp`
+  - `/api/plugins/:pluginId/*`
+- 宿主最终对外暴露的 tool 名会带命名空间前缀：
+  - `plugin.<pluginId>.<toolName>`
 
 ## 设置页组件
 

@@ -151,12 +151,15 @@ function visitNode(
 }
 
 function registerTranslationBinding(node: ts.VariableDeclaration, scope: Scope): void {
-  if (!ts.isObjectBindingPattern(node.name) || !ts.isCallExpression(node.initializer)) return;
-  if (!ts.isIdentifier(node.initializer.expression) || node.initializer.expression.text !== 'useTranslation') {
+  const initializer = node.initializer;
+  if (!ts.isObjectBindingPattern(node.name) || !initializer || !ts.isCallExpression(initializer)) {
+    return;
+  }
+  if (!ts.isIdentifier(initializer.expression) || initializer.expression.text !== 'useTranslation') {
     return;
   }
 
-  const namespaces = extractNamespaceList(node.initializer.arguments[0]) ?? [defaultNamespace];
+  const namespaces = extractNamespaceList(initializer.arguments[0]) ?? [defaultNamespace];
   for (const element of node.name.elements) {
     const originalName = element.propertyName ?? element.name;
     if (!ts.isIdentifier(originalName) || originalName.text !== 't') continue;
@@ -420,7 +423,9 @@ function extractPlaceholders(value: string): Set<string> {
 
 function getJsxAttributeValue(attributes: ts.JsxAttributes, name: string): string | undefined {
   for (const attribute of attributes.properties) {
-    if (!ts.isJsxAttribute(attribute) || attribute.name.text !== name || !attribute.initializer) continue;
+    if (!ts.isJsxAttribute(attribute) || getJsxAttributeName(attribute.name) !== name || !attribute.initializer) {
+      continue;
+    }
     const initializer = attribute.initializer;
     if (ts.isStringLiteral(initializer)) return initializer.text;
     if (ts.isJsxExpression(initializer) && initializer.expression) {
@@ -429,6 +434,10 @@ function getJsxAttributeValue(attributes: ts.JsxAttributes, name: string): strin
   }
 
   return undefined;
+}
+
+function getJsxAttributeName(name: ts.JsxAttributeName): string | undefined {
+  return ts.isIdentifier(name) ? name.text : undefined;
 }
 
 function createsScope(node: ts.Node): boolean {

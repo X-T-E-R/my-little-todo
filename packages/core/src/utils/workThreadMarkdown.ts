@@ -164,28 +164,34 @@ function parseFrontmatter(raw: string): WorkThreadMarkdownPatch['frontmatter'] {
 function parseChecklistActions(markdown: string): WorkThread['nextActions'] {
   const lines = normalizeLineBreaks(markdown).split('\n');
   const now = Date.now();
-  return lines
-    .map((line, index) => {
-      const match = /^- \[( |x|X)\] (.+)$/.exec(line.trim());
-      if (!match) return null;
-      return {
-        id: `md-action-${index}-${match[2].trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}`,
-        text: match[2].trim(),
-        done: match[1].toLowerCase() === 'x',
-        source: 'user' as const,
-        createdAt: now,
-      };
-    })
-    .filter((item): item is WorkThread['nextActions'][number] => Boolean(item));
+  const actions: WorkThread['nextActions'] = [];
+  for (const [index, line] of lines.entries()) {
+    const match = /^- \[( |x|X)\] (.+)$/.exec(line.trim());
+    if (!match) continue;
+    const checked = match[1];
+    const text = match[2]?.trim();
+    if (!checked || !text) continue;
+    actions.push({
+      id: `md-action-${index}-${text.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}`,
+      text,
+      done: checked.toLowerCase() === 'x',
+      source: 'user',
+      createdAt: now,
+    });
+  }
+  return actions;
 }
 
 function parseBlockMetadata(line: string, prefix: string): { kind: string; title: string } | null {
   const normalized = line.trim();
   const match = new RegExp(`^> ${prefix}:([^\\]]+)\\] (.+)$`, 'i').exec(normalized);
   if (!match) return null;
+  const kind = match[1]?.trim().toLowerCase();
+  const title = match[2]?.trim();
+  if (!kind || !title) return null;
   return {
-    kind: match[1].trim().toLowerCase(),
-    title: match[2].trim(),
+    kind,
+    title,
   };
 }
 
@@ -195,16 +201,22 @@ function parseQuotedBlocks(markdown: string) {
   const interrupts: WorkThread['interrupts'] = [];
   let i = 0;
   while (i < lines.length) {
-    const waitingMeta = parseBlockMetadata(lines[i], '\\[!waiting');
-    const interruptMeta = parseBlockMetadata(lines[i], '\\[!interrupt');
+    const currentLine = lines[i];
+    if (currentLine === undefined) break;
+    const waitingMeta = parseBlockMetadata(currentLine, '\\[!waiting');
+    const interruptMeta = parseBlockMetadata(currentLine, '\\[!interrupt');
     if (!waitingMeta && !interruptMeta) {
       i += 1;
       continue;
     }
     const detailLines: string[] = [];
     let j = i + 1;
-    while (j < lines.length && lines[j].startsWith('> ')) {
-      detailLines.push(lines[j].slice(2));
+    while (j < lines.length) {
+      const detailLine = lines[j];
+      if (detailLine === undefined || !detailLine.startsWith('> ')) {
+        break;
+      }
+      detailLines.push(detailLine.slice(2));
       j += 1;
     }
     const detail = detailLines.join('\n').trim() || undefined;

@@ -1,6 +1,11 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use axum::{
+    routing::{get, post},
+    Json, Router,
+};
 use http_body_util::BodyExt;
+use serde_json::json;
 use tower::ServiceExt;
 
 use mlt_server::config::{AuthMode, ServerConfig};
@@ -31,6 +36,86 @@ fn temp_data_dir() -> String {
 async fn body_json(body: Body) -> serde_json::Value {
     let bytes = body.collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+async fn spawn_mock_plugin_runner() -> (String, String, tokio::task::JoinHandle<()>) {
+    let runner_token = "mock-runner-token".to_string();
+    let app = Router::new()
+        .route(
+            "/echo",
+            get({
+                let token = runner_token.clone();
+                move |request: Request<Body>| {
+                    let token = token.clone();
+                    async move {
+                        if request
+                            .headers()
+                            .get("x-mlt-plugin-token")
+                            .and_then(|value| value.to_str().ok())
+                            != Some(token.as_str())
+                        {
+                            return (
+                                StatusCode::UNAUTHORIZED,
+                                Json(json!({ "error": "missing runner token" })),
+                            );
+                        }
+                        (
+                            StatusCode::OK,
+                            Json(json!({ "ok": true, "message": "echo-from-runner" })),
+                        )
+                    }
+                }
+            }),
+        )
+        .route(
+            "/mcp/tools/call",
+            post({
+                let token = runner_token.clone();
+                move |request: Request<Body>| {
+                    let token = token.clone();
+                    async move {
+                        if request
+                            .headers()
+                            .get("x-mlt-plugin-token")
+                            .and_then(|value| value.to_str().ok())
+                            != Some(token.as_str())
+                        {
+                            return (
+                                StatusCode::UNAUTHORIZED,
+                                Json(json!({ "error": "missing runner token" })),
+                            );
+                        }
+                        let payload =
+                            body_json(request.into_body()).await;
+                        let tool_name = payload["name"].as_str().unwrap_or("unknown");
+                        (
+                            StatusCode::OK,
+                            Json(json!({
+                                "content": [{
+                                    "type": "text",
+                                    "text": serde_json::json!({
+                                        "tool": tool_name,
+                                        "ok": true,
+                                        "message": "from-runner"
+                                    }).to_string()
+                                }]
+                            })),
+                        )
+                    }
+                }
+            }),
+        );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("mock plugin runner should bind");
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("mock runner should serve");
+    });
+    (format!("http://{}", addr), runner_token, handle)
 }
 
 fn json_request(method: &str, uri: &str, token: Option<&str>, body: Option<&str>) -> Request<Body> {
@@ -942,7 +1027,9 @@ async fn mcp_task_tools_use_new_contract() {
         .as_str()
         .expect("mcp create should return text payload");
     let payload: serde_json::Value = serde_json::from_str(text).unwrap();
-    let task_id = payload["id"].as_str().expect("create_task should return id");
+    let task_id = payload["id"]
+        .as_str()
+        .expect("create_task should return id");
 
     let get_task = app
         .clone()
@@ -1020,6 +1107,551 @@ async fn mcp_task_tools_use_new_contract() {
         .expect("task entry should appear in mcp stream list");
     assert_eq!(entry["task_id"], task_id);
     assert!(entry.get("extracted_task_id").is_none());
+}
+
+#[tokio::test]
+async fn mcp_work_thread_tools_and_gateway_follow_module_toggle() {
+    let app = setup_app(AuthMode::None).await;
+
+    let set_full = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/settings")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"key":"mcp-permission-level","value":"full"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(set_full.status(), StatusCode::OK);
+
+    let tools_before = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mcp")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 101,
+                        "method": "tools/list",
+                        "params": {}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(tools_before.status(), StatusCode::OK);
+    let tools_before_json = body_json(tools_before.into_body()).await;
+    let tool_names_before: Vec<&str> = tools_before_json["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert!(
+        tool_names_before.contains(&"work_thread.list"),
+        "work thread MCP tools should be listed when module is enabled"
+    );
+    assert!(
+        tool_names_before.contains(&"work_thread.create"),
+        "full permission should expose work_thread.create"
+    );
+
+    let create_thread = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mcp")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 102,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "work_thread.create",
+                            "arguments": {
+                                "title": "MCP thread",
+                                "mission": "Ship the thread gateway",
+                                "lane": "execution"
+                            }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_thread.status(), StatusCode::OK);
+    let create_thread_json = body_json(create_thread.into_body()).await;
+    let created_text = create_thread_json["result"]["content"][0]["text"]
+        .as_str()
+        .expect("work_thread.create should return text payload");
+    let created_payload: serde_json::Value = serde_json::from_str(created_text).unwrap();
+    let thread_id = created_payload["id"]
+        .as_str()
+        .expect("created thread should include id");
+    assert_eq!(created_payload["title"], "MCP thread");
+
+    let gateway_list = app
+        .clone()
+        .oneshot(
+            Request::get("/api/plugins/work-thread/threads")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(gateway_list.status(), StatusCode::OK);
+    let gateway_list_json = body_json(gateway_list.into_body()).await;
+    assert!(
+        gateway_list_json["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|thread| thread["id"] == thread_id),
+        "gateway list should expose created thread"
+    );
+
+    let disable_module = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/settings")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"key":"module:work-thread:enabled","value":"false"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(disable_module.status(), StatusCode::OK);
+
+    let tools_after = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mcp")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 103,
+                        "method": "tools/list",
+                        "params": {}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(tools_after.status(), StatusCode::OK);
+    let tools_after_json = body_json(tools_after.into_body()).await;
+    let tool_names_after: Vec<&str> = tools_after_json["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert!(
+        !tool_names_after.contains(&"work_thread.list"),
+        "work thread MCP tools should disappear when module is disabled"
+    );
+
+    let call_after_disable = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mcp")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 104,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "work_thread.get",
+                            "arguments": { "id": thread_id }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(call_after_disable.status(), StatusCode::OK);
+    let call_after_disable_json = body_json(call_after_disable.into_body()).await;
+    assert!(
+        call_after_disable_json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("disabled"),
+        "disabled work thread provider should return a disabled error"
+    );
+
+    let gateway_after_disable = app
+        .oneshot(
+            Request::get("/api/plugins/work-thread/threads")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        gateway_after_disable.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn plugin_gateway_returns_404_for_unknown_and_503_for_unavailable_server_plugins() {
+    let app = setup_app(AuthMode::None).await;
+
+    let unknown = app
+        .clone()
+        .oneshot(
+            Request::get("/api/plugins/not-installed/ping")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    let registry_payload = serde_json::json!({
+        "demo-server": {
+            "id": "demo-server",
+            "manifest": {
+                "id": "demo-server",
+                "name": "Demo Server",
+                "version": "0.1.0",
+                "minAppVersion": "0.1.0",
+                "permissions": ["ui:settings", "server:run", "mcp:expose", "http:expose"],
+                "entryPoint": "index.js",
+                "server": {
+                    "entryPoint": "server.js",
+                    "capabilities": ["mcp", "http"],
+                    "mcpTools": [
+                        {
+                            "name": "plugin.demo-server.echo",
+                            "description": "Echo",
+                            "permission": "read"
+                        }
+                    ],
+                    "httpRoutes": [
+                        {
+                            "path": "/echo",
+                            "method": "GET"
+                        }
+                    ]
+                }
+            },
+            "installedAt": "2026-04-14T00:00:00.000Z",
+            "enabled": true,
+            "source": "file",
+            "stability": "beta",
+            "serverApproved": true,
+            "serverStatus": "unavailable"
+        }
+    });
+
+    let put_registry = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/settings")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "key": "plugin:_system:installed_registry",
+                        "value": registry_payload.to_string()
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put_registry.status(), StatusCode::OK);
+
+    let unavailable = app
+        .oneshot(
+            Request::get("/api/plugins/demo-server/echo")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn plugin_registry_sync_exposes_runner_tools_and_http_routes() {
+    let app = setup_app(AuthMode::None).await;
+    let (runner_base, runner_token, runner_handle) = spawn_mock_plugin_runner().await;
+
+    let registry_payload = serde_json::json!({
+        "demo-server": {
+            "id": "demo-server",
+            "manifest": {
+                "id": "demo-server",
+                "name": "Demo Server",
+                "version": "0.1.0",
+                "minAppVersion": "0.1.0",
+                "permissions": ["server:run", "mcp:expose", "http:expose"],
+                "entryPoint": "index.js",
+                "server": {
+                    "entryPoint": "server.js",
+                    "capabilities": ["mcp", "http"],
+                    "mcpTools": [
+                        {
+                            "name": "echo",
+                            "description": "Echo",
+                            "permission": "read"
+                        }
+                    ],
+                    "httpRoutes": [
+                        {
+                            "path": "/echo",
+                            "method": "GET"
+                        }
+                    ]
+                }
+            },
+            "installedAt": "2026-04-14T00:00:00.000Z",
+            "enabled": true,
+            "source": "file",
+            "stability": "beta",
+            "serverApproved": true,
+            "serverStatus": "running"
+        }
+    });
+
+    let put_registry = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/settings")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "key": "plugin:_system:installed_registry",
+                        "value": registry_payload.to_string()
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put_registry.status(), StatusCode::OK);
+
+    let register = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/plugins/extensions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "pluginId": "demo-server",
+                        "status": "running",
+                        "proxyBaseUrl": runner_base,
+                        "runnerToken": runner_token,
+                        "mcpTools": [
+                            {
+                                "name": "echo",
+                                "description": "Echo",
+                                "permission": "read"
+                            }
+                        ],
+                        "httpRoutes": [
+                            {
+                                "path": "/echo",
+                                "method": "GET"
+                            }
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(register.status(), StatusCode::OK);
+
+    let tools = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mcp")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 301,
+                        "method": "tools/list",
+                        "params": {}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(tools.status(), StatusCode::OK);
+    let tools_json = body_json(tools.into_body()).await;
+    let tool_names: Vec<&str> = tools_json["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert!(tool_names.contains(&"plugin.demo-server.echo"));
+
+    let tool_call = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mcp")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 302,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "plugin.demo-server.echo",
+                            "arguments": { "message": "hi" }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(tool_call.status(), StatusCode::OK);
+    let tool_call_json = body_json(tool_call.into_body()).await;
+    let text = tool_call_json["result"]["content"][0]["text"]
+        .as_str()
+        .expect("plugin tool call should return text payload");
+    let payload: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(payload["tool"], "echo");
+    assert_eq!(payload["message"], "from-runner");
+
+    let http_proxy = app
+        .clone()
+        .oneshot(
+            Request::get("/api/plugins/demo-server/echo")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(http_proxy.status(), StatusCode::OK);
+    let proxy_json = body_json(http_proxy.into_body()).await;
+    assert_eq!(proxy_json["message"], "echo-from-runner");
+
+    let disable_registry = serde_json::json!({
+        "demo-server": {
+            "id": "demo-server",
+            "manifest": registry_payload["demo-server"]["manifest"],
+            "installedAt": "2026-04-14T00:00:00.000Z",
+            "enabled": false,
+            "source": "file",
+            "stability": "beta",
+            "serverApproved": true,
+            "serverStatus": "inactive"
+        }
+    });
+
+    let put_disabled = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/settings")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "key": "plugin:_system:installed_registry",
+                        "value": disable_registry.to_string()
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put_disabled.status(), StatusCode::OK);
+
+    let tools_after_disable = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/mcp")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": 303,
+                        "method": "tools/list",
+                        "params": {}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(tools_after_disable.status(), StatusCode::OK);
+    let tools_after_disable_json = body_json(tools_after_disable.into_body()).await;
+    let tool_names_after_disable: Vec<&str> = tools_after_disable_json["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert!(!tool_names_after_disable.contains(&"plugin.demo-server.echo"));
+
+    let proxy_after_disable = app
+        .oneshot(
+            Request::get("/api/plugins/demo-server/echo")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        proxy_after_disable.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+
+    runner_handle.abort();
 }
 
 // ── Auth Flow (AuthMode::Multi) ──────────────────────────────────────
@@ -1395,7 +2027,10 @@ async fn file_host_routes_alias_blob_storage_and_config() {
         .unwrap();
     assert_eq!(upload.status(), StatusCode::OK);
     let upload_json = body_json(upload.into_body()).await;
-    assert_eq!(upload_json["url"], "/api/file-host/".to_string() + upload_json["id"].as_str().unwrap());
+    assert_eq!(
+        upload_json["url"],
+        "/api/file-host/".to_string() + upload_json["id"].as_str().unwrap()
+    );
 
     let config = app
         .clone()
@@ -1413,7 +2048,10 @@ async fn file_host_routes_alias_blob_storage_and_config() {
     assert_eq!(config_json["allow_attachments"], true);
     assert_eq!(config_json["default_provider"], "mlt-server");
     assert_eq!(config_json["storage"], "mlt-server");
-    assert_eq!(config_json["public_base_url"], "https://cdn.example.com/files");
+    assert_eq!(
+        config_json["public_base_url"],
+        "https://cdn.example.com/files"
+    );
 
     let blob_id = upload_json["id"].as_str().unwrap();
     let fetch = app

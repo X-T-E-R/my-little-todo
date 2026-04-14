@@ -4,8 +4,25 @@
   "version": "0.1.0",
   "minAppVersion": "0.5.0",
   "author": { "name": "My Little Todo" },
-  "description": "Demo plugin: settings page + KV counter.",
-  "permissions": ["data:read", "data:write", "ui:settings"],
+  "description": "Demo plugin: settings page + KV counter + optional server echo tool.",
+  "permissions": ["data:read", "data:write", "ui:settings", "server:run", "mcp:expose", "http:expose"],
   "entryPoint": "index.js",
-  "styleSheet": "styles.css"
+  "styleSheet": "styles.css",
+  "server": {
+    "entryPoint": "server.js",
+    "capabilities": ["mcp", "http"],
+    "mcpTools": [
+      {
+        "name": "hello_echo",
+        "description": "Echo request payload back to the caller.",
+        "permission": "read"
+      }
+    ],
+    "httpRoutes": [
+      {
+        "path": "/echo",
+        "method": "GET"
+      }
+    ]
+  }
 }

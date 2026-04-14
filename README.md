@@ -20,6 +20,15 @@ Traditional todo apps are "ledgers" that faithfully record your debts. My Little
 
 ## Release Boundary
 
+This repository is still in a pre-release skeleton refactor stage for extensions and host infrastructure. The current direction is:
+
+- keep product-domain modules and the `TS + React` plugin model
+- rebuild server plugins around a shared `plugin-runner`
+- keep `/api/mcp` and `/api/plugins/:pluginId/*` as host-owned gateways
+- freeze auth/sync/MCP scope instead of turning them into separate platforms
+
+See [docs/architecture/03-host-plugin-platform.md](docs/architecture/03-host-plugin-platform.md).
+
 Stable release scope:
 
 - Task CRUD

@@ -12,6 +12,9 @@ export interface InstalledPluginRecord {
   source: 'file' | 'marketplace';
   sourceUrl?: string;
   stability: StabilityLevel;
+  serverApproved?: boolean;
+  serverStatus?: 'inactive' | 'starting' | 'running' | 'unavailable';
+  serverLastError?: string;
 }
 
 /** Loaded plugin module exports from dynamic import */
