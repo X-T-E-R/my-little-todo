@@ -14,7 +14,7 @@ Traditional todo apps are "ledgers" that faithfully record your debts. My Little
 - **Focus on Now** — Open the app and see only one thing + two buttons ("Start" / "Skip")
 - **Work Thread Runtime** — A resumable context workspace that keeps mission, resume card, working set, waiting conditions, and Now scheduling aligned
 - **Learn, Not Punish** — Every rejection, procrastination, and deviation is training data, not a mistake
-- **Open-Source Infra Pivot** — Auth now defaults to out-of-box embedded mode, with optional Zitadel enhancement; sync is hosted shared mode through the main project server
+- **Open-Source Infra Pivot** — Server auth now defaults to out-of-box embedded mode with optional Zitadel/OIDC; native apps stay local-first and can optionally sync through My Little Todo Server or WebDAV
 - **Multi-Platform** — Tauri desktop (Windows/macOS/Linux), Android app, and web deployment share the same core Todo model
 - **Beta Extensions** — AI, S3, server-side backup/restore, window context, desktop widget, think/work thread, and plugins remain outside the stable SLA
 
@@ -63,7 +63,7 @@ A local-first app that works out of the box — no server required.
 1. Download the installer from [Releases](https://github.com/X-T-E-R/my-little-todo/releases) (Windows .msi/.exe, macOS .dmg, Linux .AppImage)
 2. Install and launch — the first run will guide you through the initial setup
 3. Data is stored in a local SQLite database — no account or server needed
-4. If you use a shared deployment, point multiple clients to the same My Little Todo server. The default server is out-of-box usable with embedded auth + hosted shared data.
+4. If you use a shared deployment, web clients can point to the same My Little Todo server; native clients can also add that server later as an optional sync target.
 
 Before upgrading the desktop app, create a full JSON export from `Settings -> Data`.
 

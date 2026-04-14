@@ -69,6 +69,7 @@ fn data_partition(state: &AppState, user_id: &str) -> String {
 
 fn auth_provider_name(state: &AppState) -> &'static str {
     match state.config.auth_provider {
+        crate::config::AuthProvider::None => "none",
         crate::config::AuthProvider::Embedded => "embedded",
         crate::config::AuthProvider::Zitadel => "zitadel",
     }
@@ -147,9 +148,11 @@ fn hydrate_task_import_row(
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        let linked_stream = stream_rows_by_id
-            .get(&task_id)
-            .or_else(|| obj.get("source_stream_id").and_then(|v| v.as_str()).and_then(|id| stream_rows_by_id.get(id)));
+        let linked_stream = stream_rows_by_id.get(&task_id).or_else(|| {
+            obj.get("source_stream_id")
+                .and_then(|v| v.as_str())
+                .and_then(|id| stream_rows_by_id.get(id))
+        });
 
         if obj
             .get("body")
@@ -165,7 +168,12 @@ fn hydrate_task_import_row(
             }
         }
 
-        if obj.get("source_stream_id").map(|v| v.is_null()).unwrap_or(true) && !task_id.is_empty() {
+        if obj
+            .get("source_stream_id")
+            .map(|v| v.is_null())
+            .unwrap_or(true)
+            && !task_id.is_empty()
+        {
             obj.insert("source_stream_id".into(), Value::String(task_id));
         }
 

@@ -270,6 +270,16 @@ pub fn create_app(
         ))
         .with_state(state.clone());
 
+    let sync_routes = Router::new()
+        .route("/sync/changes", get(routes::sync::get_changes))
+        .route("/sync/status", get(routes::sync::get_status))
+        .route("/sync/push", post(routes::sync::push_changes))
+        .layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ))
+        .with_state(state.clone());
+
     let health_state = state.clone();
     let static_dir = config.static_dir.clone();
 
@@ -285,6 +295,7 @@ pub fn create_app(
         .nest("/api", mcp_routes)
         .nest("/api", plugin_routes)
         .nest("/api", blob_routes)
+        .nest("/api", sync_routes)
         .route(
             "/health",
             get(move || async move {
@@ -294,6 +305,7 @@ pub fn create_app(
                     "git_hash": health_state.git_hash,
                     "db": format!("{:?}", health_state.config.db_type),
                     "auth": match health_state.config.auth_provider {
+                        AuthProvider::None => "none",
                         AuthProvider::Embedded => "embedded",
                         AuthProvider::Zitadel => "zitadel",
                     },
@@ -386,6 +398,7 @@ pub async fn start(
         bind_addr,
         config.db_type,
         match config.auth_provider {
+            AuthProvider::None => "none",
             AuthProvider::Embedded => "embedded",
             AuthProvider::Zitadel => "zitadel",
         }

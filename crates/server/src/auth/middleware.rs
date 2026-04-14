@@ -16,6 +16,8 @@ pub struct ErrorBody {
     error: String,
 }
 
+const LOCAL_USER_ID: &str = "local-desktop-user";
+
 fn unauthorized(message: &str) -> (StatusCode, Json<ErrorBody>) {
     (
         StatusCode::UNAUTHORIZED,
@@ -37,6 +39,11 @@ pub async fn auth_middleware(
     mut req: Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, (StatusCode, Json<ErrorBody>)> {
+    if state.config.auth_provider == AuthProvider::None {
+        req.extensions_mut().insert(LOCAL_USER_ID.to_string());
+        return Ok(next.run(req).await);
+    }
+
     let auth_header = req
         .headers()
         .get("authorization")
@@ -49,6 +56,7 @@ pub async fn auth_middleware(
         .ok_or_else(|| unauthorized("Authentication required"))?;
 
     let user_id = match state.config.auth_provider {
+        AuthProvider::None => LOCAL_USER_ID.to_string(),
         AuthProvider::Zitadel => {
             let identity = external::verify_access_token(token, state.config.as_ref())
                 .await
@@ -57,7 +65,9 @@ pub async fn auth_middleware(
                 .db
                 .ensure_external_user(&identity.subject, &identity.username, identity.is_admin)
                 .await
-                .map_err(|err| unauthorized(&format!("Failed to provision external user: {}", err)))?;
+                .map_err(|err| {
+                    unauthorized(&format!("Failed to provision external user: {}", err))
+                })?;
             if !user.is_enabled {
                 return Err(unauthorized("This account has been disabled"));
             }

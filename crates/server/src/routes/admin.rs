@@ -64,6 +64,11 @@ pub(crate) async fn require_admin(
     state: &AppState,
     user_id: &str,
 ) -> Result<(), (axum::http::StatusCode, Json<ErrorBody>)> {
+    if state.config.auth_provider == AuthProvider::None {
+        let _ = user_id;
+        return Ok(());
+    }
+
     let user = state
         .db
         .get_user_by_id(user_id)
@@ -151,7 +156,10 @@ pub struct CreateInviteRequest {
     pub expires_in_days: Option<i64>,
 }
 
-fn validate_credentials(username: &str, password: &str) -> Result<(), (axum::http::StatusCode, Json<ErrorBody>)> {
+fn validate_credentials(
+    username: &str,
+    password: &str,
+) -> Result<(), (axum::http::StatusCode, Json<ErrorBody>)> {
     if username.trim().is_empty() || password.is_empty() {
         return Err(bad_request("Username and password are required"));
     }
@@ -163,6 +171,7 @@ fn validate_credentials(username: &str, password: &str) -> Result<(), (axum::htt
 
 fn auth_provider_name(provider: &AuthProvider) -> &'static str {
     match provider {
+        AuthProvider::None => "none",
         AuthProvider::Embedded => "embedded",
         AuthProvider::Zitadel => "zitadel",
     }
@@ -203,6 +212,10 @@ pub async fn list_users(
     axum::Extension(user_id): axum::Extension<String>,
 ) -> AdminResult<Vec<UserListItem>> {
     require_admin(&state, &user_id).await?;
+
+    if state.config.auth_provider == AuthProvider::None {
+        return Ok(Json(Vec::new()));
+    }
 
     let users = state
         .db
@@ -373,12 +386,18 @@ pub async fn list_invites(
 ) -> AdminResult<Vec<InviteListItem>> {
     require_admin(&state, &user_id).await?;
 
+    if state.config.auth_provider == AuthProvider::None {
+        return Ok(Json(Vec::new()));
+    }
+
     let invites = state
         .db
         .list_invites()
         .await
         .map_err(|e| internal(&e.to_string()))?;
-    Ok(Json(invites.into_iter().map(InviteListItem::from).collect()))
+    Ok(Json(
+        invites.into_iter().map(InviteListItem::from).collect(),
+    ))
 }
 
 pub async fn create_invite(

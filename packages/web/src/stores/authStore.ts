@@ -9,7 +9,7 @@ interface UserInfo {
 }
 
 export interface SessionBootstrap {
-  auth_provider: 'embedded' | 'zitadel' | string;
+  auth_provider: 'none' | 'embedded' | 'zitadel' | string;
   needs_setup: boolean;
   signup_policy: 'admin_only' | 'open' | 'invite_only' | string;
   sync_mode: 'hosted' | string;
@@ -24,6 +24,7 @@ export interface SessionBootstrap {
 }
 
 type AuthMode = 'embedded' | 'external' | null;
+type AuthRuntime = 'server' | 'local-native';
 
 interface AuthState {
   token: string | null;
@@ -34,7 +35,7 @@ interface AuthState {
   loading: boolean;
   bootstrap: SessionBootstrap | null;
 
-  setApiBase: (url: string) => void;
+  setRuntime: (runtime: AuthRuntime, url: string) => void;
   checkAuthMode: () => Promise<void>;
   setup: (username: string, password: string) => Promise<void>;
   login: (username?: string, password?: string) => Promise<void>;
@@ -53,6 +54,7 @@ const EXPIRES_AT_KEY = 'mlt-auth-expires-at';
 const TX_KEY = 'mlt-auth-oidc-tx';
 
 let _apiBase = '';
+let _authRuntime: AuthRuntime = 'server';
 
 function getApiBase(): string {
   return _apiBase;
@@ -109,9 +111,9 @@ function clearTokens() {
 
 function base64UrlEncode(data: Uint8Array): string {
   let binary = '';
-  data.forEach((byte) => {
+  for (const byte of data) {
     binary += String.fromCharCode(byte);
-  });
+  }
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
@@ -142,7 +144,9 @@ async function fetchBootstrap(): Promise<SessionBootstrap> {
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(apiUrl(path), init);
   if (!response.ok) {
-    const data = await response.json().catch(() => ({ error: `Request failed: HTTP ${response.status}` }));
+    const data = await response
+      .json()
+      .catch(() => ({ error: `Request failed: HTTP ${response.status}` }));
     throw new Error(
       typeof data?.error === 'string' ? data.error : `Request failed: HTTP ${response.status}`,
     );
@@ -177,7 +181,27 @@ async function tokenRequest(
 }
 
 function resolveAuthMode(bootstrap: SessionBootstrap): AuthMode {
+  if (bootstrap.auth_provider === 'none') return null;
   return bootstrap.auth_provider === 'zitadel' ? 'external' : 'embedded';
+}
+
+function localDesktopUser(): UserInfo {
+  return {
+    id: 'local-desktop-user',
+    username: 'local',
+    is_admin: true,
+    is_enabled: true,
+    created_at: 'local',
+  };
+}
+
+function localNativeBootstrap(): SessionBootstrap {
+  return {
+    auth_provider: 'none',
+    needs_setup: false,
+    signup_policy: 'none',
+    sync_mode: 'local',
+  };
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -196,16 +220,34 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   loading: true,
   bootstrap: null,
 
-  setApiBase: (url: string) => {
+  setRuntime: (runtime: AuthRuntime, url: string) => {
+    _authRuntime = runtime;
     _apiBase = url;
+    if (runtime === 'local-native') {
+      clearTokens();
+    }
   },
 
   checkAuthMode: async () => {
+    if (_authRuntime === 'local-native') {
+      set({
+        bootstrap: localNativeBootstrap(),
+        authMode: null,
+        needsSetup: false,
+        signupPolicy: null,
+        token: null,
+        user: localDesktopUser(),
+        loading: false,
+      });
+      return;
+    }
+
     try {
       const bootstrap = await fetchBootstrap();
+      const authMode = resolveAuthMode(bootstrap);
       set({
         bootstrap,
-        authMode: resolveAuthMode(bootstrap),
+        authMode,
         needsSetup: bootstrap.needs_setup,
         signupPolicy:
           bootstrap.signup_policy === 'admin_only' ||
@@ -213,6 +255,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           bootstrap.signup_policy === 'invite_only'
             ? bootstrap.signup_policy
             : null,
+        user:
+          bootstrap.auth_provider === 'none' ? localDesktopUser() : get().token ? get().user : null,
         loading: false,
       });
     } catch {
@@ -227,6 +271,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   setup: async (username: string, password: string) => {
+    if (_authRuntime === 'local-native') {
+      set({
+        bootstrap: localNativeBootstrap(),
+        authMode: null,
+        needsSetup: false,
+        signupPolicy: null,
+        token: null,
+        user: localDesktopUser(),
+      });
+      return;
+    }
+
     const data = await fetchJson<{ token: string; user: UserInfo }>('/api/session/setup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -237,6 +293,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   login: async (username?: string, password?: string) => {
+    if (_authRuntime === 'local-native') {
+      set({
+        bootstrap: localNativeBootstrap(),
+        authMode: null,
+        needsSetup: false,
+        signupPolicy: null,
+        token: null,
+        user: localDesktopUser(),
+      });
+      return;
+    }
+
     const bootstrap = get().bootstrap ?? (await fetchBootstrap());
 
     if (bootstrap.auth_provider === 'zitadel') {
@@ -289,6 +357,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   register: async (username: string, password: string, inviteCode?: string) => {
+    if (_authRuntime === 'local-native') {
+      set({
+        bootstrap: localNativeBootstrap(),
+        authMode: null,
+        needsSetup: false,
+        signupPolicy: null,
+        token: null,
+        user: localDesktopUser(),
+      });
+      return;
+    }
+
     const data = await fetchJson<{ token: string; user: UserInfo }>('/api/session/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -299,6 +379,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    if (_authRuntime === 'local-native') {
+      set({
+        bootstrap: localNativeBootstrap(),
+        authMode: null,
+        needsSetup: false,
+        signupPolicy: null,
+        token: null,
+        user: localDesktopUser(),
+      });
+      return;
+    }
+
     const bootstrap = get().bootstrap;
     const token = getAuthToken();
     const idToken = getIdToken();
@@ -323,18 +415,40 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   changePassword: async () => {
+    if (_authRuntime === 'local-native') {
+      throw new Error('Local desktop mode does not use account passwords.');
+    }
+
     const bootstrap = get().bootstrap;
     if (bootstrap?.auth_provider === 'zitadel' && bootstrap.issuer) {
-      window.open(`${bootstrap.issuer.replace(/\/+$/, '')}/ui/console`, '_blank', 'noopener,noreferrer');
+      window.open(
+        `${bootstrap.issuer.replace(/\/+$/, '')}/ui/console`,
+        '_blank',
+        'noopener,noreferrer',
+      );
       return;
     }
     throw new Error('Embedded mode currently requires an admin to reset passwords.');
   },
 
   checkAuth: async () => {
+    if (_authRuntime === 'local-native') {
+      set({
+        bootstrap: localNativeBootstrap(),
+        token: null,
+        user: localDesktopUser(),
+      });
+      return true;
+    }
+
     const bootstrap = get().bootstrap;
     if (!bootstrap) {
       return false;
+    }
+
+    if (bootstrap.auth_provider === 'none') {
+      set({ token: null, user: localDesktopUser() });
+      return true;
     }
 
     if (!get().token) return false;
@@ -388,6 +502,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   completeAuthCallback: async () => {
+    if (_authRuntime === 'local-native') return false;
+
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const state = params.get('state');

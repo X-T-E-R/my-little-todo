@@ -4,14 +4,17 @@
 
 ## 顶层架构决策
 
-### 产品形态：开箱即用 + Hosted 共享
+### 产品形态：本地优先原生端 + Hosted Web
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   My Little Todo                    │
 │                                                     │
-│  Web / Desktop / Mobile 客户端                      │
-│  └── 统一连接同一个主项目服务端                      │
+│  Web / PWA 客户端                                   │
+│  └── 直接连接主项目服务端                            │
+│                                                     │
+│  Desktop / Android 原生客户端                        │
+│  └── 本地 SQLite + 可选 sync provider                │
 │                                                     │
 │  /api/session/*   认证与会话                         │
 │  /api/tasks       任务 CRUD                          │
@@ -30,10 +33,13 @@
   - 默认 `embedded`
   - 必须开箱即用
   - `embedded` 保留多用户与管理员面板
-- Sync：`hosted`
+- Hosted Web：`hosted`
   - 只部署主项目即可用
-  - 所有客户端共享同一个中心后端
-  - 不再维护 `/api/sync/*` 自研协议
+  - Web / PWA 直接读写主项目服务端
+- Native Sync：
+  - 原生端运行时仍为本地 SQLite
+  - 只在用户显式配置时才启用 sync provider
+  - provider 可选 `api-server`、`webdav`
 
 ### 为什么继续使用 Rust 后端
 
@@ -41,10 +47,16 @@
 - 服务端现在承担统一认证、中心数据存储、导入导出、管理面板能力
 - Rust 的类型系统让配置、路由、权限边界更稳定
 
-### 为什么不再把 Sync 主线做成 Electric / 自研协议
+### 为什么不把 native runtime 继续做成 server-first
 
-- 当前真实需求是“一个服务端 + 多个客户端”共享同一份数据
-- 为这个场景额外引入 Electric 或重新扩展旧 sync provider，只会增加部署与维护面
+- 桌面与移动端的核心体验仍然是本地优先、离线可用
+- 把 native app 启动依赖到 cloud URL / auth / hosted backend，会破坏原始产品边界
+- 原生端更适合把服务端或第三方存储作为“可选同步目标”，而不是运行时前提
+
+### 为什么不再把 Hosted Web 主线做成 Electric / 自研协议
+
+- Hosted web 的真实需求是“一个服务端 + 多个浏览器客户端”共享同一份数据
+- 为这个场景额外引入 Electric 会增加部署与维护面
 - 直接复用现有服务端 CRUD 路径更短、更稳，也更符合“开箱即用优先”
 
 ---
@@ -135,17 +147,17 @@ zitadel_admin_role = "mlt-admin"
 - Zustand
 - Framer Motion
 
-前端当前关键点不是离线优先同步，而是：
+前端当前关键边界是：
 
-- 统一调用主项目服务端
-- 根据 `auth_provider` 分支处理 embedded / zitadel 登录流
-- 在 hosted 模式下读写中心后端数据
+- hosted web 根据 `auth_provider` 分支处理 embedded / zitadel 登录流
+- hosted web 直接读写主项目服务端
+- native 客户端继续使用本地 SQLite，并通过可选 sync provider 同步
 
 ---
 
 ## 数据层
 
-### Hosted 共享模式
+### Hosted Web 模式
 
 当前主线的数据流：
 
@@ -166,8 +178,29 @@ SQLite / Postgres
 核心定义：
 
 - 远端真相源：主项目服务端数据库
-- 客户端：服务端数据的使用者，不再维护独立同步协议
-- WebDAV / API-server sync：不再属于产品同步能力
+- hosted web 客户端：服务端数据的直接使用者
+
+### Native Sync 模式
+
+当前原生端的数据流：
+
+```
+用户操作
+  ↓
+Zustand Store
+  ↓
+Tauri / Capacitor SQLite
+  ↓
+SyncEngine（可选）
+  ↓
+API Server 或 WebDAV
+```
+
+核心定义：
+
+- 本地 SQLite 是 native runtime 的真相源
+- `api-server` 与 `webdav` 是可选同步 provider
+- auth 只属于服务端宿主；native 本体不要求登录
 
 ### 导出 / 导入
 

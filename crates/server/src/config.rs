@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthProvider {
+    None,
     #[default]
     Embedded,
     Zitadel,
@@ -85,6 +86,7 @@ fn parse_csv_env(value: &str) -> Vec<String> {
 
 fn parse_auth_provider(value: &str) -> Option<AuthProvider> {
     match value {
+        "none" => Some(AuthProvider::None),
         "embedded" => Some(AuthProvider::Embedded),
         "zitadel" => Some(AuthProvider::Zitadel),
         _ => None,

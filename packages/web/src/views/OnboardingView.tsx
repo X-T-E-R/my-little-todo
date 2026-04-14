@@ -208,13 +208,11 @@ function QuickConfigStep({
   onSaveConfig,
 }: {
   onNext: () => void;
-  onSaveConfig?: (config: { useMode: string; cloudUrl: string; lanAccess: boolean }) => void;
+  onSaveConfig?: (config: { lanAccess: boolean }) => void;
 }) {
   const { t } = useTranslation('onboarding');
   const [theme, setTheme] = useState<'system' | 'light' | 'dark'>('system');
   const [lanAccess] = useState(false);
-  const [useMode] = useState<'local' | 'cloud'>('local');
-  const [cloudUrl] = useState('');
 
   const themeOptions = [
     { key: 'system' as const, label: t('Follow system'), icon: Monitor },
@@ -298,16 +296,10 @@ function QuickConfigStep({
         <motion.button
           type="button"
           onClick={() => {
-            localStorage.setItem('mlt-use-mode', useMode);
-            if (useMode === 'cloud' && cloudUrl) {
-              localStorage.setItem('mlt-cloud-url', cloudUrl);
-            } else {
-              localStorage.removeItem('mlt-cloud-url');
-            }
             if (lanAccess) {
               localStorage.setItem('mlt-lan-access', 'true');
             }
-            onSaveConfig?.({ useMode, cloudUrl, lanAccess });
+            onSaveConfig?.({ lanAccess });
             onNext();
           }}
           whileHover={{ scale: 1.02 }}

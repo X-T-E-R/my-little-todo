@@ -9,7 +9,9 @@ import { setDataStore } from './storage/dataStore';
 import { createDirectExecutor, startAutoSync } from './storage/offlineQueue';
 import { setSettingsApiBase } from './storage/settingsApi';
 import { useAuthStore } from './stores/authStore';
+import { getSyncEngine } from './sync';
 import { getPlatform, initPlatform } from './utils/platform';
+import { resolveRuntimeMode } from './utils/runtimeMode';
 import { AnnotatorShell } from './widgets/AnnotatorShell';
 import { ContextBarShell } from './widgets/ContextBarShell';
 import { WidgetShell } from './widgets/WidgetShell';
@@ -26,26 +28,58 @@ let _apiBaseUrl = '';
 async function initStorage() {
   await initPlatform();
   const platform = getPlatform();
-  const url = platform === 'web-hosted' ? '' : localStorage.getItem('mlt-cloud-url') || '';
-  _apiBaseUrl = url;
-  useAuthStore.getState().setApiBase(url);
-  setSettingsApiBase(url);
-  setDataStore(createApiDataStore(url));
+  const cloudUrl = platform === 'web-standalone' ? localStorage.getItem('mlt-cloud-url') || '' : '';
+  const runtime = resolveRuntimeMode(platform, cloudUrl);
+
+  _apiBaseUrl = runtime.apiBase;
+  useAuthStore.getState().setRuntime(runtime.authRuntime, runtime.apiBase);
+  setSettingsApiBase(runtime.apiBase);
+
+  if (runtime.storeKind === 'tauri-sqlite') {
+    const { createTauriSqliteDataStore } = await import('./storage/tauriSqliteStore');
+    const store = await createTauriSqliteDataStore();
+    setDataStore(store);
+
+    const { migrateLegacyData } = await import('./storage/migrateLegacy');
+    await migrateLegacyData(store);
+  } else if (runtime.storeKind === 'capacitor-sqlite') {
+    const { createCapacitorSqliteDataStore } = await import(
+      /* @vite-ignore */ './storage/capacitorSqliteStore'
+    );
+    setDataStore(await createCapacitorSqliteDataStore());
+  } else {
+    setDataStore(createApiDataStore(runtime.apiBase));
+  }
+
+  return runtime;
 }
 
 async function main() {
-  await initStorage();
-  const platform = getPlatform();
+  const runtime = await initStorage();
 
   // Offline queue replay only applies to API-based stores
-  if (_apiBaseUrl && (platform === 'web-hosted' || platform === 'web-standalone')) {
+  if (runtime.storeKind === 'api' && _apiBaseUrl) {
     startAutoSync(createDirectExecutor(_apiBaseUrl));
   }
 
+  if (runtime.storeKind !== 'api') {
+    const { initSyncFromConfig } = await import('./sync/syncManager');
+    await initSyncFromConfig().catch((err) => {
+      console.warn('[SyncEngine] Failed to initialize from config:', err);
+    });
+
+    const flush = () => getSyncEngine().flushPendingLocalSync();
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+  }
+
   await useAuthStore.getState().checkAuthMode();
-  await useAuthStore.getState().completeAuthCallback().catch((err) => {
-    console.warn('[Auth] Failed to complete callback:', err);
-  });
+  await useAuthStore
+    .getState()
+    .completeAuthCallback()
+    .catch((err) => {
+      console.warn('[Auth] Failed to complete callback:', err);
+    });
 
   const root = document.getElementById('root');
   if (!root) {

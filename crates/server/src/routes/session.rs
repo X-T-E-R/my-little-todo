@@ -21,6 +21,9 @@ pub struct ErrorBody {
 
 type SessionResult<T> = Result<Json<T>, (StatusCode, Json<ErrorBody>)>;
 
+const LOCAL_USER_ID: &str = "local-desktop-user";
+const LOCAL_USERNAME: &str = "local";
+
 fn unauthorized(msg: &str) -> (StatusCode, Json<ErrorBody>) {
     (
         StatusCode::UNAUTHORIZED,
@@ -59,6 +62,7 @@ fn internal(msg: &str) -> (StatusCode, Json<ErrorBody>) {
 
 fn auth_provider_name(provider: &AuthProvider) -> &'static str {
     match provider {
+        AuthProvider::None => "none",
         AuthProvider::Embedded => "embedded",
         AuthProvider::Zitadel => "zitadel",
     }
@@ -69,6 +73,16 @@ fn signup_policy_name(policy: &EmbeddedSignupPolicy) -> &'static str {
         EmbeddedSignupPolicy::AdminOnly => "admin_only",
         EmbeddedSignupPolicy::Open => "open",
         EmbeddedSignupPolicy::InviteOnly => "invite_only",
+    }
+}
+
+fn local_session_user() -> SessionUserResponse {
+    SessionUserResponse {
+        id: LOCAL_USER_ID.to_string(),
+        username: LOCAL_USERNAME.to_string(),
+        is_admin: true,
+        is_enabled: true,
+        created_at: "local".to_string(),
     }
 }
 
@@ -173,7 +187,10 @@ pub struct RegisterRequest {
     pub invite_code: Option<String>,
 }
 
-fn validate_credentials(username: &str, password: &str) -> Result<(), (StatusCode, Json<ErrorBody>)> {
+fn validate_credentials(
+    username: &str,
+    password: &str,
+) -> Result<(), (StatusCode, Json<ErrorBody>)> {
     if username.trim().is_empty() || password.is_empty() {
         return Err(bad_request("Username and password are required"));
     }
@@ -223,7 +240,9 @@ pub async fn bootstrap(State(state): State<AppState>) -> SessionResult<SessionBo
         false
     };
 
-    let oidc = if state.config.auth_provider == AuthProvider::Zitadel && external::is_configured(state.config.as_ref()) {
+    let oidc = if state.config.auth_provider == AuthProvider::Zitadel
+        && external::is_configured(state.config.as_ref())
+    {
         Some(
             external::fetch_openid_configuration(state.config.as_ref())
                 .await
@@ -236,7 +255,11 @@ pub async fn bootstrap(State(state): State<AppState>) -> SessionResult<SessionBo
     Ok(Json(SessionBootstrapResponse {
         auth_provider: auth_provider_name(&state.config.auth_provider).to_string(),
         needs_setup,
-        signup_policy: signup_policy_name(&state.config.embedded_signup_policy).to_string(),
+        signup_policy: if state.config.auth_provider == AuthProvider::None {
+            "none".to_string()
+        } else {
+            signup_policy_name(&state.config.embedded_signup_policy).to_string()
+        },
         sync_mode: sync_mode_name(&state.config.sync_mode).to_string(),
         issuer: (state.config.auth_provider == AuthProvider::Zitadel)
             .then(|| state.config.zitadel_issuer.clone())
@@ -253,7 +276,9 @@ pub async fn bootstrap(State(state): State<AppState>) -> SessionResult<SessionBo
         discovery_url: (state.config.auth_provider == AuthProvider::Zitadel)
             .then(|| external::discovery_url(state.config.as_ref()))
             .flatten(),
-        authorization_endpoint: oidc.as_ref().map(|config| config.authorization_endpoint.clone()),
+        authorization_endpoint: oidc
+            .as_ref()
+            .map(|config| config.authorization_endpoint.clone()),
         token_endpoint: oidc.as_ref().map(|config| config.token_endpoint.clone()),
         end_session_endpoint: oidc.and_then(|config| config.end_session_endpoint),
     }))
@@ -321,7 +346,9 @@ pub async fn register(
 
     let invite = match state.config.embedded_signup_policy {
         EmbeddedSignupPolicy::AdminOnly => {
-            return Err(bad_request("Self-service signup is disabled by the server policy"));
+            return Err(bad_request(
+                "Self-service signup is disabled by the server policy",
+            ));
         }
         EmbeddedSignupPolicy::Open => None,
         EmbeddedSignupPolicy::InviteOnly => {
@@ -417,6 +444,11 @@ pub async fn me(
     State(state): State<AppState>,
     axum::Extension(user_id): axum::Extension<String>,
 ) -> SessionResult<SessionUserResponse> {
+    if state.config.auth_provider == AuthProvider::None {
+        let _ = user_id;
+        return Ok(Json(local_session_user()));
+    }
+
     let user = state
         .db
         .get_user_by_id(&user_id)
