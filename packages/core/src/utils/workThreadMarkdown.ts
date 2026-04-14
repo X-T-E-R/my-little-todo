@@ -22,8 +22,6 @@ export interface WorkThreadMarkdownPatch {
   interrupts: WorkThread['interrupts'];
 }
 
-const WAITING_PREFIX = '[!waiting';
-const INTERRUPT_PREFIX = '[!interrupt';
 const STRUCTURED_HEADING_RE =
   /^#{3,6}\s+(waiting|interrupt|等待|中断)\s*[·•|-]\s*([a-z]+)\s*[:：]\s*(.+)$/i;
 
