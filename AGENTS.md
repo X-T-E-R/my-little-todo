@@ -45,3 +45,9 @@
 - Server 插件：继续 `TS`
 - 不迁移到 Extism 作为主插件体系
 - 如未来引入 Extism，只能作为“纯逻辑副体系”，不能替代 TS + React 主模型
+
+## Worktree 约定
+
+- 需要隔离实现现场时，默认在项目根目录使用 `.worktrees/`
+- `.worktrees/` 必须保持被 Git 忽略，避免把 worktree 内容误纳入仓库状态
+- 若后续新增或调整 worktree 流程，优先更新本文件中的约定，而不是只留在会话说明里
