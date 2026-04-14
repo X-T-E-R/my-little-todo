@@ -70,8 +70,8 @@
 
 ### 4. 可替换基础设施层
 
-- auth：当前冻结范围，未来可替换为 `Ory` / `ZITADEL`
-- sync：当前冻结范围，未来可替换为 `Electric`
+- auth：当前主线是 `embedded | zitadel`
+- sync：当前主线是 `hosted`
 - MCP SDK：runner 侧一律使用官方 SDK
 
 ---
@@ -87,9 +87,9 @@
 ### Auth
 
 - 当前只保留：
-  - 本地用户
-  - 基本 token
-  - 轻量自托管
+  - `embedded` 开箱即用本地多用户
+  - 可选 `zitadel` OIDC 增强认证
+  - 轻量 app-local session
 - 不继续做：
   - MFA
   - SSO
@@ -100,9 +100,9 @@
 ### Sync
 
 - 当前只保留：
-  - 本地存储
-  - API 同步
-  - Markdown sync
+  - 主项目服务端的 `hosted` 共享模式
+  - 中心后端数据库共享读写
+  - file-host 导入/导出能力
 - 不继续做：
   - 平台级实时协作
   - 复杂冲突求解

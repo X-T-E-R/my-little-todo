@@ -164,6 +164,10 @@
   "Data Directory": "数据目录",
   "Backend Type": "后端类型",
   "Auth Mode": "认证模式",
+  "Auth Provider": "认证提供方",
+  "Identity Provider": "身份提供方",
+  "Password, MFA, session, and account recovery are now managed by the external identity provider.": "密码、MFA、会话与账号恢复现已由外部身份提供方统一管理。",
+  "Open Account Console": "打开账号控制台",
 
   "Export Data": "导出数据",
   "Export all data to a local file for backup and transfer. Exported files include version info (v{{version}}).": "将所有数据导出到本地文件，方便备份与转移。导出文件包含版本信息 (v{{version}})。",
@@ -216,6 +220,12 @@
   "Backend Connection": "后端连接",
   "Data is read, written, and synced through the API server. The PC desktop version auto-starts an embedded server; the web version uses the current domain.": "数据通过 API 服务器进行读写和同步。PC 桌面版自动启动内嵌服务器；网页版使用当前域名。",
   "Data is stored and synced through the API server.": "数据通过 API 服务器进行存储和同步。",
+  "Hosted Sync": "Hosted 共享模式",
+  "This app now treats the server as the authoritative backend in hosted mode. Deploying the main project server is enough to share data across clients.": "此应用现已在 hosted 模式下将服务端视为权威后端。只部署主项目服务端，就足以让多个客户端共享同一份数据。",
+  "Desktop and mobile clients now connect to the shared server backend instead of configuring per-device sync targets.": "桌面端与移动端现在直接连接共享服务端后端，不再为每台设备单独配置同步目标。",
+  "Legacy API-server and WebDAV sync targets are no longer part of the product surface. Keep WebDAV only for file-host or export/import scenarios.": "旧的 API Server / WebDAV 同步目标已不再属于产品主线。WebDAV 仅保留给文件托管或导入导出场景使用。",
+  "Clear Legacy Sync Settings": "清理旧同步设置",
+  "Legacy sync settings cleared. Future sync state will come from the shared backend only.": "旧同步设置已清理。后续同步状态将只来自共享后端。",
   "Test Connection": "测试连接",
   "Connection successful — {{details}}": "连接成功 — {{details}}",
   "Connection failed": "连接失败",
@@ -594,5 +604,7 @@
   "Stream timeline direction": "时间线方向",
   "stream_direction_hint": "自下而上：最新在底部，输入框在下方。自上而下：最新在顶部，输入框在上方。",
   "stream_direction_bottom_up": "自下而上（最新在底部）",
-  "stream_direction_top_down": "自上而下（最新在顶部）"
+  "stream_direction_top_down": "自上而下（最新在顶部）",
+  "Embedded Auth": "嵌入式认证",
+  "This server is running in embedded auth mode. Ask an admin to reset passwords if needed.": "当前服务端运行在嵌入式认证模式下，如需修改密码请联系管理员重置。"
 }

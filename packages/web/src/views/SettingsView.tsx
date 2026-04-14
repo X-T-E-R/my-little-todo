@@ -9,7 +9,6 @@ import {
   Cloud,
   Coffee,
   Command,
-  Copy,
   Database,
   Download,
   ExternalLink,
@@ -80,10 +79,7 @@ import {
 } from '../stores';
 import { getAuthToken, useAuthStore } from '../stores/authStore';
 import { useToastStore } from '../stores/toastStore';
-import { getSyncEngine } from '../sync';
-import type { ConflictStrategy } from '../sync';
 import { probeMltServer } from '../sync/serverProbe';
-import { initSyncFromConfig } from '../sync/syncManager';
 import {
   type BackupPayload,
   buildBackupPayload,
@@ -629,40 +625,6 @@ function AccountTab() {
   const authMode = useAuthStore((s) => s.authMode);
   const logout = useAuthStore((s) => s.logout);
   const changePassword = useAuthStore((s) => s.changePassword);
-  const showToast = useToastStore((s) => s.showToast);
-
-  const [oldPw, setOldPw] = useState('');
-  const [newPw, setNewPw] = useState('');
-  const [confirmPw, setConfirmPw] = useState('');
-  const [changing, setChanging] = useState(false);
-
-  const handleChangePassword = async () => {
-    if (!newPw || newPw !== confirmPw) {
-      showToast({ type: 'error', message: t('Passwords do not match') });
-      return;
-    }
-    if (newPw.length < 4) {
-      showToast({ type: 'error', message: t('Password too short') });
-      return;
-    }
-    setChanging(true);
-    try {
-      await changePassword(oldPw, newPw);
-      showToast({ type: 'success', message: t('Password changed successfully') });
-      setOldPw('');
-      setNewPw('');
-      setConfirmPw('');
-    } catch (err) {
-      showToast({
-        type: 'error',
-        message: t('Change password failed: {{message}}', {
-          message: err instanceof Error ? err.message : String(err),
-        }),
-      });
-    } finally {
-      setChanging(false);
-    }
-  };
 
   const handleLogout = () => {
     logout();
@@ -703,55 +665,36 @@ function AccountTab() {
 
       <hr style={{ borderColor: 'var(--color-border)' }} />
 
-      {/* Change Password */}
-      {authMode !== 'none' && (
+      {/* Identity Provider */}
+      {authMode && (
         <>
           <section>
             <div className="flex items-center gap-2 mb-3">
               <Key size={16} className="text-[var(--color-accent)]" />
-              <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Change Password')}</h3>
+              <h3 className="text-sm font-bold text-[var(--color-text)]">
+                {authMode === 'external' ? t('Identity Provider') : t('Embedded Auth')}
+              </h3>
             </div>
-            <div className="space-y-3">
-              <input
-                type="password"
-                value={oldPw}
-                onChange={(e) => setOldPw(e.target.value)}
-                placeholder={t('Current Password')}
-                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
-              />
-              <input
-                type="password"
-                value={newPw}
-                onChange={(e) => setNewPw(e.target.value)}
-                placeholder={t('New Password')}
-                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
-              />
-              <input
-                type="password"
-                value={confirmPw}
-                onChange={(e) => setConfirmPw(e.target.value)}
-                placeholder={t('Confirm New Password')}
-                className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors"
-              />
-              <button
-                type="button"
-                onClick={handleChangePassword}
-                disabled={changing || !oldPw || !newPw || !confirmPw}
-                className="rounded-xl px-4 py-2 text-sm font-medium transition-all bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50"
-              >
-                {changing ? t('Saving...') : t('Change Password')}
-              </button>
+            <div className="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+              <p className="text-xs text-[var(--color-text-tertiary)]">
+                {authMode === 'external'
+                  ? t(
+                      'Password, MFA, session, and account recovery are now managed by the external identity provider.',
+                    )
+                  : t('This server is running in embedded auth mode. Ask an admin to reset passwords if needed.')}
+              </p>
+              {authMode === 'external' ? (
+                <button
+                  type="button"
+                  onClick={() => void changePassword()}
+                  className="rounded-xl px-4 py-2 text-sm font-medium transition-all bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50"
+                >
+                  {t('Open Account Console')}
+                </button>
+              ) : null}
             </div>
           </section>
 
-          <hr style={{ borderColor: 'var(--color-border)' }} />
-        </>
-      )}
-
-      {/* API Token */}
-      {authMode !== 'none' && (
-        <>
-          <ApiTokenSection />
           <hr style={{ borderColor: 'var(--color-border)' }} />
         </>
       )}
@@ -1105,7 +1048,7 @@ const APP_VERSION = __APP_VERSION__;
 type DataTabStorageInfo = {
   db_type?: string;
   data_dir?: string;
-  auth_mode?: string;
+  auth_provider?: string;
   admin_export_enabled?: boolean;
 };
 
@@ -1534,7 +1477,8 @@ function DataTab() {
                 <strong>{dbLabel[storageInfo.db_type ?? ''] ?? storageInfo.db_type}</strong>
               </span>
               <span>
-                {t('Auth Mode')}: <strong>{storageInfo.auth_mode}</strong>
+                {t('Auth Provider')}:{' '}
+                <strong>{storageInfo.auth_provider ?? 'embedded'}</strong>
               </span>
             </div>
             {!storageInfo.admin_export_enabled && (
@@ -1559,7 +1503,7 @@ function DataTab() {
               {t('Backend Type')}: <strong>SQLite</strong>
             </span>
             <span>
-              {t('Auth Mode')}: <strong>none</strong>
+              {t('Auth Provider')}: <strong>local</strong>
             </span>
           </div>
         </section>
@@ -1909,102 +1853,60 @@ function DataTab() {
 
 function WebApiRealtimeSyncSection() {
   const { t } = useTranslation('settings');
+  const [clearing, setClearing] = useState(false);
+  const [cleanupMessage, setCleanupMessage] = useState('');
+
+  const handleClearLegacySync = useCallback(async () => {
+    setClearing(true);
+    setCleanupMessage('');
+    try {
+      await Promise.all([
+        deleteSetting('sync-provider'),
+        deleteSetting('sync-config'),
+        deleteSetting('sync-interval'),
+        deleteSetting('sync-conflict-strategy'),
+        deleteSetting('sync-indicator-style'),
+      ]);
+      setCleanupMessage(
+        t('Legacy sync settings cleared. Future sync state will come from the shared backend only.'),
+      );
+    } catch (error) {
+      setCleanupMessage(
+        t('Error: {{message}}', {
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    } finally {
+      setClearing(false);
+    }
+  }, [t]);
+
   return (
-    <section>
+    <section className="space-y-3">
       <div className="flex items-center gap-2 mb-3">
         <Cloud size={16} className="text-[var(--color-accent)]" />
-        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Cloud Sync')}</h3>
+        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Hosted Sync')}</h3>
       </div>
       <p className="text-xs text-[var(--color-text-tertiary)]">
         {t(
-          'Data syncs in real time through the API server. No separate sync target is needed on this client.',
+          'This app now treats the server as the authoritative backend in hosted mode. Deploying the main project server is enough to share data across clients.',
         )}
       </p>
-    </section>
-  );
-}
-
-function SyncIndicatorStyleSection() {
-  const { t } = useTranslation('settings');
-  const [style, setStyle] = useState<'dot' | 'status'>('dot');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    void getSetting('sync-indicator-style').then((value) => {
-      if (cancelled) return;
-      setStyle(value === 'status' ? 'status' : 'dot');
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const updateStyle = useCallback(async (next: 'dot' | 'status') => {
-    setStyle(next);
-    setSaving(true);
-    try {
-      await putSetting('sync-indicator-style', next);
-    } finally {
-      window.setTimeout(() => setSaving(false), 250);
-    }
-  }, []);
-
-  return (
-    <section>
-      <div className="flex items-center gap-2 mb-3">
-        <RefreshCw size={16} className="text-[var(--color-accent)]" />
-        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Sync indicator style')}</h3>
-      </div>
-      <p className="mb-3 text-xs leading-relaxed text-[var(--color-text-tertiary)]">
-        {t('Choose how sync appears in the global status dock.')}
+      <p className="text-xs text-[var(--color-text-tertiary)]">
+        {t(
+          'Legacy API-server and WebDAV sync targets are no longer part of the product surface. Keep WebDAV only for file-host or export/import scenarios.',
+        )}
       </p>
-
-      <div
-        className="inline-flex rounded-xl p-1"
-        style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
-        role="tablist"
-        aria-label={t('Sync indicator style')}
+      <button
+        type="button"
+        onClick={() => void handleClearLegacySync()}
+        disabled={clearing}
+        className="rounded-xl border border-[var(--color-border)] px-4 py-2 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] disabled:opacity-50"
       >
-        {(
-          [
-            {
-              id: 'dot' as const,
-              label: t('Compact dot'),
-              hint: t('Keep sync quiet when healthy; only expand for attention states.'),
-            },
-            {
-              id: 'status' as const,
-              label: t('Status chip'),
-              hint: t('Show recent sync status in the dock even when everything is healthy.'),
-            },
-          ] as const
-        ).map((option) => {
-          const active = style === option.id;
-          return (
-            <button
-              key={option.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => void updateStyle(option.id)}
-              className="min-w-[9rem] rounded-lg px-3 py-2 text-left transition-colors"
-              style={{
-                background: active ? 'var(--color-surface)' : 'transparent',
-                color: active ? 'var(--color-text)' : 'var(--color-text-secondary)',
-              }}
-            >
-              <div className="text-xs font-medium">{option.label}</div>
-              <div className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-tertiary)]">
-                {option.hint}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-
-      {saving ? (
-        <p className="mt-2 text-[11px] text-[var(--color-text-tertiary)]">{t('Saving...')}</p>
+        {clearing ? t('Saving...') : t('Clear Legacy Sync Settings')}
+      </button>
+      {cleanupMessage ? (
+        <p className="text-xs text-[var(--color-text-secondary)]">{cleanupMessage}</p>
       ) : null}
     </section>
   );
@@ -2064,11 +1966,11 @@ function SyncTab() {
         <section>
           <div className="flex items-center gap-2 mb-3">
             <HardDriveDownload size={16} className="text-[var(--color-accent)]" />
-            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Local Storage')}</h3>
+            <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Backend Connection')}</h3>
           </div>
           <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
             {t(
-              'Data is stored locally in SQLite. Configure sync targets below to keep data in sync across devices.',
+              'Desktop and mobile clients now connect to the shared server backend instead of configuring per-device sync targets.',
             )}
           </p>
         </section>
@@ -2167,514 +2069,17 @@ function SyncTab() {
         </section>
       )}
 
-      <hr style={{ borderColor: 'var(--color-border)' }} />
-      <SyncIndicatorStyleSection />
-      <hr style={{ borderColor: 'var(--color-border)' }} />
-      {isTauriEnv() ? <CloudSyncSection /> : <WebApiRealtimeSyncSection />}
+      <WebApiRealtimeSyncSection />
     </div>
   );
 }
 
-function ApiTokenSection() {
-  const { t } = useTranslation('settings');
-  const [duration, setDuration] = useState('31536000');
-  const [generatedToken, setGeneratedToken] = useState('');
-  const [generating, setGenerating] = useState(false);
-  const showToast = useToastStore((s) => s.showToast);
-
-  const handleGenerate = async () => {
-    setGenerating(true);
-    try {
-      const authToken = getAuthToken();
-      const h: HeadersInit = { 'Content-Type': 'application/json' };
-      if (authToken) h.Authorization = `Bearer ${authToken}`;
-      const res = await fetch(`${getSettingsApiBase()}/api/auth/api-token`, {
-        method: 'POST',
-        headers: h,
-        body: JSON.stringify({ duration: Number(duration) || 0 }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      setGeneratedToken(data.token);
-    } catch (err) {
-      showToast({
-        type: 'error',
-        message: t('Error: {{message}}', {
-          message: err instanceof Error ? err.message : String(err),
-        }),
-      });
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(generatedToken);
-      showToast({ type: 'success', message: t('Copied!') });
-    } catch {
-      showToast({ type: 'error', message: t('Copy failed') });
-    }
-  };
-
-  const inputClass =
-    'w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors';
-
-  return (
-    <section>
-      <div className="flex items-center gap-2 mb-3">
-        <Key size={16} className="text-[var(--color-accent)]" />
-        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('API Token')}</h3>
-      </div>
-      <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-        {t('Generate a long-lived token for sync clients, MCP integrations, or API access.')}
-      </p>
-
-      <div className="space-y-3">
-        <div>
-          <label
-            htmlFor="token-validity"
-            className="text-xs font-medium text-[var(--color-text-secondary)] mb-1 block"
-          >
-            {t('Token Validity')}
-          </label>
-          <select
-            id="token-validity"
-            value={duration}
-            onChange={(e) => setDuration(e.target.value)}
-            className={inputClass}
-          >
-            <option value="2592000">{t('30 days')}</option>
-            <option value="7776000">{t('90 days')}</option>
-            <option value="31536000">{t('1 year')}</option>
-            <option value="0">{t('Never expires')}</option>
-          </select>
-        </div>
-
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={generating}
-          className="rounded-xl px-4 py-2 text-sm font-medium transition-all bg-[var(--color-accent)] text-white hover:scale-[1.02] active:scale-95 disabled:opacity-50"
-        >
-          {generating ? t('Saving...') : t('Generate Token')}
-        </button>
-
-        {generatedToken && (
-          <div className="space-y-2">
-            <textarea
-              readOnly
-              value={generatedToken}
-              rows={3}
-              className={`${inputClass} font-mono text-xs`}
-              onClick={(e) => e.currentTarget.select()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  e.currentTarget.select();
-                }
-              }}
-            />
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)]"
-            >
-              <Copy size={12} />
-              {t('Copy')}
-            </button>
-            <p className="text-[10px] text-[var(--color-text-tertiary)]">
-              {t('Copy this token now. It will not be shown again.')}
-            </p>
-          </div>
-        )}
-      </div>
-    </section>
-  );
+export function ApiTokenSection() {
+  return null;
 }
 
-function CloudSyncSection() {
-  const { t } = useTranslation('settings');
-  const [provider, setProvider] = useState<'' | 'api-server' | 'webdav'>('');
-  const [apiAuthMode, setApiAuthMode] = useState<'token' | 'credentials'>('credentials');
-  const [config, setConfig] = useState({
-    endpoint: '',
-    token: '',
-    bucket: '',
-    access_key: '',
-    secret_key: '',
-    region: '',
-    username: '',
-    password: '',
-  });
-  const [syncInterval, setSyncInterval] = useState('300000');
-  const [conflictStrategy, setConflictStrategy] = useState<ConflictStrategy>('lww');
-  const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState('');
-  const [syncing, setSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState('');
-  const [lastSyncAt, setLastSyncAt] = useState(0);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const store = getDataStore();
-        const p = await store.getSetting('sync-provider');
-        if (p) {
-          if (p === 's3') {
-            setProvider('');
-          } else {
-            setProvider(p as '' | 'api-server' | 'webdav');
-          }
-          const raw = await store.getSetting('sync-config');
-          if (raw) {
-            try {
-              const parsed = JSON.parse(raw);
-              setConfig((prev) => ({ ...prev, ...parsed }));
-              if (parsed.auth_mode === 'token' || parsed.auth_mode === 'credentials') {
-                setApiAuthMode(parsed.auth_mode);
-              }
-            } catch {
-              /* ignore */
-            }
-          }
-        }
-        const iv = await store.getSetting('sync-interval');
-        if (iv) setSyncInterval(iv);
-        const cs = await store.getSetting('sync-conflict-strategy');
-        if (cs === 'lww' || cs === 'manual') setConflictStrategy(cs);
-      } catch {
-        /* ignore */
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    const engine = getSyncEngine();
-    const unsub = engine.onStateChange((states) => {
-      const allStates = Array.from(states.values());
-      const latest = allStates.reduce(
-        (a, b) => (b.lastSyncAt > a.lastSyncAt ? b : a),
-        allStates[0],
-      );
-      if (latest) setLastSyncAt(latest.lastSyncAt);
-    });
-    const states = engine.getAllStates();
-    if (states.length > 0) {
-      setLastSyncAt(Math.max(...states.map((s) => s.lastSyncAt)));
-    }
-    return unsub;
-  }, []);
-
-  const handleSave = async () => {
-    if (!provider) return;
-    setSaving(true);
-    setStatus('');
-    try {
-      const store = getDataStore();
-      await store.putSetting('sync-provider', provider);
-      const cfgToSave: Record<string, string> = {};
-      if (provider === 'api-server') {
-        cfgToSave.endpoint = config.endpoint;
-        cfgToSave.auth_mode = apiAuthMode;
-        if (apiAuthMode === 'token') {
-          if (config.token) cfgToSave.token = config.token;
-        } else {
-          cfgToSave.username = config.username;
-          cfgToSave.password = config.password;
-        }
-      } else {
-        cfgToSave.endpoint = config.endpoint;
-        cfgToSave.username = config.username;
-        cfgToSave.password = config.password;
-      }
-      await store.putSetting('sync-config', JSON.stringify(cfgToSave));
-      await store.putSetting('sync-interval', syncInterval);
-      await store.putSetting('sync-conflict-strategy', conflictStrategy);
-      await initSyncFromConfig();
-      setStatus(t('Configuration Saved'));
-    } catch (err) {
-      setStatus(
-        t('Save failed: {{message}}', {
-          message: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSyncNow = async () => {
-    setSyncing(true);
-    setSyncStatus('');
-    try {
-      const engine = getSyncEngine();
-      if (engine.hasTargets()) {
-        await engine.syncAll();
-        const firstErr = engine.getFirstError();
-        if (firstErr) {
-          setSyncStatus(t('Sync failed: {{message}}', { message: firstErr }));
-        } else {
-          setSyncStatus(t('Sync completed'));
-        }
-      } else {
-        setSyncStatus(t('No sync target configured'));
-      }
-    } catch (err) {
-      setSyncStatus(
-        t('Sync failed: {{message}}', {
-          message: err instanceof Error ? err.message : String(err),
-        }),
-      );
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const inputClass =
-    'w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)] transition-colors';
-  const labelClass = 'text-xs font-medium text-[var(--color-text-secondary)] mb-1 block';
-
-  return (
-    <section>
-      <div className="flex items-center gap-2 mb-3">
-        <Cloud size={16} className="text-[var(--color-accent)]" />
-        <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Cloud Sync')}</h3>
-      </div>
-      <p className="text-xs text-[var(--color-text-tertiary)] mb-3">
-        {t(
-          'Sync data across devices via an API server or WebDAV. Configure a sync target and interval below.',
-        )}
-      </p>
-
-      <div className="space-y-4">
-        <div>
-          <label htmlFor="sync-provider" className={labelClass}>
-            {t('Sync Provider')}
-          </label>
-          <select
-            id="sync-provider"
-            value={provider}
-            onChange={(e) => setProvider(e.target.value as '' | 'api-server' | 'webdav')}
-            className={inputClass}
-          >
-            <option value="">{t('Not Configured')}</option>
-            <option value="api-server">{t('API Server (My Little Todo)')}</option>
-            <option value="webdav">{t('WebDAV')}</option>
-          </select>
-        </div>
-
-        {provider === 'api-server' && (
-          <div className="space-y-3">
-            <div>
-              <label htmlFor="sync-server-url" className={labelClass}>
-                {t('Server URL')}
-              </label>
-              <input
-                id="sync-server-url"
-                type="url"
-                value={config.endpoint}
-                onChange={(e) => setConfig({ ...config, endpoint: e.target.value })}
-                placeholder="https://your-server.com"
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <p className={labelClass}>{t('Authentication Mode')}</p>
-              <div className="flex rounded-xl border border-[var(--color-border)] overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setApiAuthMode('credentials')}
-                  className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-                    apiAuthMode === 'credentials'
-                      ? 'bg-[var(--color-accent)] text-white'
-                      : 'bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)]'
-                  }`}
-                >
-                  {t('Username & Password')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setApiAuthMode('token')}
-                  className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-                    apiAuthMode === 'token'
-                      ? 'bg-[var(--color-accent)] text-white'
-                      : 'bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)]'
-                  }`}
-                >
-                  {t('Token / API Key')}
-                </button>
-              </div>
-            </div>
-            {apiAuthMode === 'credentials' ? (
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label htmlFor="sync-api-username" className={labelClass}>
-                    {t('Username')}
-                  </label>
-                  <input
-                    id="sync-api-username"
-                    type="text"
-                    value={config.username}
-                    onChange={(e) => setConfig({ ...config, username: e.target.value })}
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="sync-api-password" className={labelClass}>
-                    {t('Password')}
-                  </label>
-                  <input
-                    id="sync-api-password"
-                    type="password"
-                    value={config.password}
-                    onChange={(e) => setConfig({ ...config, password: e.target.value })}
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div>
-                <label htmlFor="sync-api-token" className={labelClass}>
-                  {t('Token / API Key')}
-                </label>
-                <input
-                  id="sync-api-token"
-                  type="password"
-                  value={config.token}
-                  onChange={(e) => setConfig({ ...config, token: e.target.value })}
-                  placeholder={t('Paste JWT or long-lived API token')}
-                  className={inputClass}
-                />
-                <p className="text-[10px] text-[var(--color-text-tertiary)] mt-1">
-                  {t('Generate a long-lived token from the server admin panel or API.')}
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {provider === 'webdav' && (
-          <div className="space-y-3">
-            <div>
-              <label htmlFor="sync-webdav-url" className={labelClass}>
-                {t('WebDAV URL')}
-              </label>
-              <input
-                id="sync-webdav-url"
-                type="url"
-                value={config.endpoint}
-                onChange={(e) => setConfig({ ...config, endpoint: e.target.value })}
-                placeholder="https://dav.example.com/sync/"
-                className={inputClass}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label htmlFor="sync-webdav-username" className={labelClass}>
-                  {t('Username (Optional)')}
-                </label>
-                <input
-                  id="sync-webdav-username"
-                  type="text"
-                  value={config.username}
-                  onChange={(e) => setConfig({ ...config, username: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label htmlFor="sync-webdav-password" className={labelClass}>
-                  {t('Password (Optional)')}
-                </label>
-                <input
-                  id="sync-webdav-password"
-                  type="password"
-                  value={config.password}
-                  onChange={(e) => setConfig({ ...config, password: e.target.value })}
-                  className={inputClass}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {provider && (
-          <>
-            <hr style={{ borderColor: 'var(--color-border)' }} />
-            <div>
-              <label htmlFor="sync-interval" className={labelClass}>
-                {t('Sync Interval')}
-              </label>
-              <select
-                id="sync-interval"
-                value={syncInterval}
-                onChange={(e) => setSyncInterval(e.target.value)}
-                className={inputClass}
-              >
-                <option value="60000">{t('Every 1 minute')}</option>
-                <option value="300000">{t('Every 5 minutes')}</option>
-                <option value="900000">{t('Every 15 minutes')}</option>
-                <option value="1800000">{t('Every 30 minutes')}</option>
-                <option value="3600000">{t('Every 1 hour')}</option>
-                <option value="0">{t('Manual only')}</option>
-              </select>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-[var(--color-text)]">
-                  {t('Auto-resolve conflicts (Last Write Wins)')}
-                </p>
-                <p className="text-xs text-[var(--color-text-tertiary)]">
-                  {conflictStrategy === 'lww'
-                    ? t('Conflicts are resolved automatically by timestamp.')
-                    : t('You will be prompted to choose when conflicts occur.')}
-                </p>
-              </div>
-              <ToggleSwitch
-                checked={conflictStrategy === 'lww'}
-                onChange={(v) => setConflictStrategy(v ? 'lww' : 'manual')}
-              />
-            </div>
-          </>
-        )}
-
-        {provider && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="rounded-xl px-4 py-2 text-sm font-medium text-white transition-all bg-[var(--color-accent)] hover:scale-[1.02] active:scale-95 disabled:opacity-50"
-            >
-              {saving ? t('Saving...') : t('Save Configuration')}
-            </button>
-            <button
-              type="button"
-              onClick={handleSyncNow}
-              disabled={syncing}
-              className="flex items-center gap-1.5 rounded-xl border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg)] disabled:opacity-50"
-            >
-              {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-              {syncing ? t('Syncing...') : t('Sync Now')}
-            </button>
-          </div>
-        )}
-
-        {lastSyncAt > 0 && (
-          <p className="text-xs text-[var(--color-text-tertiary)]">
-            {t('Last synced')}: {new Date(lastSyncAt).toLocaleString()}
-          </p>
-        )}
-
-        {status && <p className="text-xs text-[var(--color-text-secondary)]">{status}</p>}
-        {syncStatus && <p className="text-xs text-[var(--color-text-secondary)]">{syncStatus}</p>}
-      </div>
-    </section>
-  );
+export function CloudSyncSection() {
+  return null;
 }
 
 function UpdateDialog({
@@ -3550,7 +2955,7 @@ export function SettingsView() {
 
   const allTabs = [...PRIMARY_TABS, ABOUT_TAB].filter((tab) => {
     if (tab.id === 'shortcuts' && !showShortcuts) return false;
-    if (tab.id === 'account' && authMode === 'none') return false;
+    if (tab.id === 'account' && !authMode) return false;
     return true;
   });
 

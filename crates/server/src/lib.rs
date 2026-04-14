@@ -14,10 +14,10 @@ use std::sync::Arc;
 use axum::{
     http::{header, HeaderValue, Method},
     middleware as axum_mw,
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
-use config::ServerConfig;
+use config::{AuthProvider, ServerConfig};
 use providers::DatabaseProvider;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -49,22 +49,19 @@ pub fn create_app(
         git_hash,
     };
 
-    // Auth routes (no auth middleware)
-    let auth_routes = Router::new()
-        .route("/auth/mode", get(routes::auth::get_mode))
-        .route("/auth/register", post(routes::auth::register))
-        .route("/auth/login", post(routes::auth::login))
-        .with_state(state.clone());
-
-    // Protected auth routes
-    let auth_protected = Router::new()
-        .route("/auth/me", get(routes::auth::me))
-        .route("/auth/change-password", post(routes::auth::change_password))
-        .route("/auth/api-token", post(routes::auth::generate_api_token))
-        .layer(axum_mw::from_fn_with_state(
-            state.clone(),
-            auth::middleware::auth_middleware,
-        ))
+    let session_routes = Router::new()
+        .route("/session/bootstrap", get(routes::session::bootstrap))
+        .route("/session/setup", post(routes::session::setup))
+        .route("/session/register", post(routes::session::register))
+        .route("/session/login", post(routes::session::login))
+        .route("/session/logout", post(routes::session::logout))
+        .route(
+            "/session/me",
+            get(routes::session::me).layer(axum_mw::from_fn_with_state(
+                state.clone(),
+                auth::middleware::auth_middleware,
+            )),
+        )
         .with_state(state.clone());
 
     // Tasks + stream (protected)
@@ -126,11 +123,22 @@ pub fn create_app(
 
     // Admin routes (protected, requires admin role)
     let admin_routes = Router::new()
-        .route("/admin/users", get(routes::admin::list_users))
+        .route(
+            "/admin/users",
+            get(routes::admin::list_users).post(routes::admin::create_user),
+        )
         .route("/admin/users/{id}", delete(routes::admin::delete_user))
         .route(
             "/admin/users/{id}/password",
             post(routes::admin::reset_user_password),
+        )
+        .route(
+            "/admin/users/{id}/status",
+            patch(routes::admin::set_user_status),
+        )
+        .route(
+            "/admin/invites",
+            get(routes::admin::list_invites).post(routes::admin::create_invite),
         )
         .route(
             "/admin/file-host/config",
@@ -262,23 +270,11 @@ pub fn create_app(
         ))
         .with_state(state.clone());
 
-    // Sync routes (protected)
-    let sync_routes = Router::new()
-        .route("/sync/changes", get(routes::sync::get_changes))
-        .route("/sync/status", get(routes::sync::get_status))
-        .route("/sync/push", post(routes::sync::push_changes))
-        .layer(axum_mw::from_fn_with_state(
-            state.clone(),
-            auth::middleware::auth_middleware,
-        ))
-        .with_state(state.clone());
-
     let health_state = state.clone();
     let static_dir = config.static_dir.clone();
 
     let router = Router::new()
-        .nest("/api", auth_routes)
-        .nest("/api", auth_protected)
+        .nest("/api", session_routes)
         .nest("/api", task_routes)
         .nest("/api", stream_routes)
         .nest("/api", settings_routes)
@@ -289,7 +285,6 @@ pub fn create_app(
         .nest("/api", mcp_routes)
         .nest("/api", plugin_routes)
         .nest("/api", blob_routes)
-        .nest("/api", sync_routes)
         .route(
             "/health",
             get(move || async move {
@@ -298,7 +293,11 @@ pub fn create_app(
                     "version": health_state.version,
                     "git_hash": health_state.git_hash,
                     "db": format!("{:?}", health_state.config.db_type),
-                    "auth": format!("{:?}", health_state.config.auth_mode),
+                    "auth": match health_state.config.auth_provider {
+                        AuthProvider::Embedded => "embedded",
+                        AuthProvider::Zitadel => "zitadel",
+                    },
+                    "sync_mode": "hosted",
                     "timestamp": timestamp_now(),
                 }))
             }),
@@ -373,23 +372,6 @@ pub async fn start(
 ) -> anyhow::Result<()> {
     let db = providers::create_provider(&config).await?;
 
-    // Auto-create default admin for single-user mode
-    if config.auth_mode == config::AuthMode::Single {
-        let count = db.count_users().await?;
-        if count == 0 {
-            if let Some(ref password) = config.default_admin_password {
-                let hash = auth::hash_password(password)?;
-                db.create_user(&providers::NewUser {
-                    username: "admin".into(),
-                    password_hash: hash,
-                    is_admin: true,
-                })
-                .await?;
-                println!("[Auth] Created default admin user");
-            }
-        }
-    }
-
     // L0 config backup: store a copy of the active config in the DB
     let toml_backup = config.to_toml_string();
     let _ = db
@@ -400,8 +382,13 @@ pub async fn start(
     let bind_addr = format!("{}:{}", config.host, config.port);
 
     println!(
-        "[Server] Starting on http://{} (db={:?}, auth={:?})",
-        bind_addr, config.db_type, config.auth_mode
+        "[Server] Starting on http://{} (db={:?}, auth_provider={}, sync_mode=hosted)",
+        bind_addr,
+        config.db_type,
+        match config.auth_provider {
+            AuthProvider::Embedded => "embedded",
+            AuthProvider::Zitadel => "zitadel",
+        }
     );
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;

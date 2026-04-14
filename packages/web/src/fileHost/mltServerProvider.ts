@@ -5,22 +5,7 @@ async function loginIfNeeded(config: MltServerFileHostConfig): Promise<string | 
   if (config.authMode === 'token') {
     return config.token || getAuthToken();
   }
-  if (config.authMode === 'session') {
-    return getAuthToken();
-  }
-  if (!config.username || !config.password) return null;
-
-  const baseUrl = config.endpoint.replace(/\/+$/, '');
-  const res = await fetch(`${baseUrl}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: config.username, password: config.password }),
-  });
-  if (!res.ok) {
-    throw new Error(`MLT Server login failed: HTTP ${res.status}`);
-  }
-  const data = (await res.json()) as { token?: string };
-  return data.token ?? null;
+  return getAuthToken();
 }
 
 function absolutize(baseUrl: string, url: string): string {

@@ -8,6 +8,11 @@
     "types": ["vite/client"],
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@my-little-todo/core": ["../core/src/index.ts"],
+      "@my-little-todo/plugin-sdk": ["../plugin-sdk/src/index.ts"]
+    },
 
     /* Bundler mode */
     "moduleResolution": "bundler",

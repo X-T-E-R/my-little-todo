@@ -9,7 +9,7 @@ export function taskRoleIds(task: Pick<Task, 'roleId' | 'roleIds'>): string[] {
 
 /** Merge single- or multi-role updates into a consistent Task patch. */
 export function withTaskRoles(
-  task: Task,
+  _task: Task,
   roleIds: string[] | undefined,
 ): Pick<Task, 'roleId' | 'roleIds'> {
   const cleaned = [...new Set((roleIds ?? []).filter(Boolean))];

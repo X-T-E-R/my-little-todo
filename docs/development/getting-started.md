@@ -151,36 +151,28 @@ All implementations support soft deletion (`deleted_at` + `version` fields) for 
 
 ### Sync Development
 
-Native clients can sync with an API server. When developing/testing sync features:
+The pre-release mainline no longer develops the legacy `/api/sync/*` protocol.
+Current direction is:
+
+- Auth: `embedded | zitadel`
+- Sync: `hosted`
+- Session bootstrap: `GET /api/session/bootstrap`
+- Current user lookup: `GET /api/session/me`
+
+When developing/testing the current server-backed flow:
 
 ```bash
-# Start the backend server with auth disabled for easy testing
-AUTH_MODE=none pnpm dev:web
-```
-
-Or with authentication enabled (default `multi` mode):
-
-```bash
+# Start the backend
 pnpm dev:web
-# Register a user at http://localhost:5173, then configure sync in Settings → Cloud Sync
 ```
 
-The `ApiServerSyncTarget` supports two authentication modes:
-
-- **Token mode**: paste a JWT or long-lived API token directly
-- **Credentials mode**: the client auto-logs in with username/password and caches the JWT
-
-To generate a long-lived API token for testing:
+If you have configured ZITADEL locally, sign in through the browser flow and verify the
+session contract:
 
 ```bash
-# First get a JWT via login
-TOKEN=$(curl -s -X POST http://127.0.0.1:3001/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"admin"}' | jq -r .token)
-
-# Then generate a long-lived token (0 = never expires)
-curl -s -X POST http://127.0.0.1:3001/api/auth/api-token \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"duration": 0}'
+curl -s http://127.0.0.1:3001/api/session/bootstrap
 ```
+
+For migration notes from the retired self-built auth/sync stack, see:
+
+- `docs/deployment/auth-sync-migration.md`

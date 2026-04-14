@@ -19,7 +19,7 @@ export interface FileRoutingRule {
 
 export interface MltServerFileHostConfig {
   endpoint: string;
-  authMode: 'session' | 'token' | 'credentials';
+  authMode: 'session' | 'token';
   token: string;
   username: string;
   password: string;

@@ -14,7 +14,7 @@
 - **专注此刻** — 打开应用只看到一件事 + 两个按钮（"开始做" / "不想做"）
 - **Work Thread 运行时** — 用可恢复的上下文工作区，把 mission、resume card、working set、waiting 条件和 Now 调度串起来
 - **学习而非惩罚** — 你的每一次拒绝、拖延、不按计划执行都是训练数据，不是错误
-- **稳定的本地优先核心** — 桌面端和 Android 使用本地 SQLite；正式稳定同步目标为 API 服务器和 WebDAV
+- **开源基础设施收口** — 认证默认切到开箱即用 embedded 模式，可选接 Zitadel；同步统一收口为主项目服务端的 hosted 共享模式
 - **多平台** — Tauri 桌面端（Windows/macOS/Linux）、Android 应用和 Web 部署共享同一套核心 Todo 模型
 - **Beta 扩展能力** — AI、S3、服务端备份恢复、窗口上下文、桌面小组件、think/work thread、插件生态暂不纳入稳定 SLA
 
@@ -37,8 +37,7 @@
 - 基础附件
 - JSON 导入导出
 - 本地 SQLite
-- API 同步
-- WebDAV 同步
+- OIDC 会话引导
 - 升级迁移
 - 基础设置
 
@@ -64,10 +63,7 @@
 1. 从 [Releases](https://github.com/X-T-E-R/my-little-todo/releases) 下载对应平台的安装包（Windows .msi/.exe、macOS .dmg、Linux .AppImage）
 2. 安装并启动，首次打开会进入引导设置
 3. 数据存储在本地 SQLite 数据库中，无需账户或服务器
-4. 可在设置 → 云同步中配置同步方式实现多端同步：
-   - **API 服务器** — 与 My Little Todo 服务器同步（支持用户名密码或 API Token 认证）
-   - **WebDAV** — 通过任意 WebDAV 兼容服务器同步
-   - **S3（Beta）** — 仅保留为受限路径，不属于当前稳定 SLA
+4. 如果要连接共享部署，只需让多个客户端指向同一个 My Little Todo 服务端即可。默认服务端就是开箱即用的 embedded auth + hosted 共享模式。
 
 升级桌面端前，请先在 `设置 -> 数据` 中做一次完整 JSON 导出。
 
@@ -84,22 +80,20 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - AUTH_MODE=multi
-      - JWT_SECRET=change-me-to-a-random-string
+      - AUTH_PROVIDER=embedded
+      - EMBEDDED_SIGNUP_POLICY=invite_only
+      - SYNC_MODE=hosted
     restart: unless-stopped
 ```
 
 然后执行：
 
 ```bash
-# 生成安全的 JWT 密钥
-echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
-
 # 启动
 docker compose up -d
 ```
 
-**首次使用**：访问 `http://localhost:3001/admin` 创建第一个管理员账户。管理员创建完成后，用户即可通过 `http://localhost:3001` 访问 Web 端登录使用。管理功能（用户管理、统计）在 `/admin` 页面管理。
+**首次使用**：访问 `http://localhost:3001`，创建第一个 owner/admin 账户，然后在 `/admin` 里继续邀请或创建其他用户。默认路径不需要额外安装 ZITADEL、Electric 或 Postgres。
 
 数据存储在主机的 `./data/` 目录中，方便备份和查看。
 
@@ -118,36 +112,36 @@ docker compose pull && docker compose up -d
 |------|--------|------|
 | `PORT` | `3001` | 服务器端口 |
 | `HOST` | `0.0.0.0` | 绑定地址 |
-| `AUTH_MODE` | `multi` | `none` / `single` / `multi` |
-| `DB_TYPE` | `sqlite` | `sqlite` / `postgres` / `mysql`（详见 [docker-compose.yml](docker-compose.yml)） |
-| `DATABASE_URL` | — | 数据库连接字符串（PG/MySQL 必须设置） |
-| `JWT_SECRET` | 随机 | JWT 密钥（**生产环境请务必设置！**） |
-| `DEFAULT_ADMIN_PASSWORD` | — | 初始管理员密码 |
+| `AUTH_PROVIDER` | `embedded` | `embedded` / `zitadel` |
+| `EMBEDDED_SIGNUP_POLICY` | `invite_only` | `invite_only` / `open` / `admin_only` |
+| `SYNC_MODE` | `hosted` | 仅支持 hosted 共享模式 |
+| `DB_TYPE` | `sqlite` | `sqlite` / `postgres` |
+| `DATABASE_URL` | — | 数据库连接字符串 |
+| `ZITADEL_ISSUER` | — | OIDC issuer 地址 |
+| `ZITADEL_CLIENT_ID` | — | OIDC client id |
+| `ZITADEL_AUDIENCE` | — | 可选 API audience |
+| `ZITADEL_ADMIN_ROLE` | — | 可选的管理员映射 claim/role |
 | `DATA_DIR` | `/app/data` | 数据存储目录 |
 | `STATIC_DIR` | `/app/static` | 前端静态文件目录 |
 
 </details>
 
 <details>
-<summary>同步 API 与认证</summary>
+<summary>会话引导接口</summary>
 
-桌面端和移动端可通过 `/api/sync/*` 端点与服务器同步。认证方式：
+客户端现在通过以下接口获取认证/同步运行配置：
 
-- **用户名和密码** — 客户端自动通过 `POST /api/auth/login` 登录并缓存 JWT
-- **API Token** — 通过 `POST /api/auth/api-token` 生成长期 Token（需已有 JWT）。可选有效期：30 天、90 天、1 年、永不过期
+- `GET /api/session/bootstrap`
+- `POST /api/session/setup`
+- `POST /api/session/login`
+- `POST /api/session/logout`
+- `GET /api/session/me`
 
-也可以在 Web 管理界面生成 API Token：设置 → 账户 → API Token。
-
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/sync/changes?since={version}` | GET | 拉取指定版本后的变更 |
-| `/api/sync/status` | GET | 获取当前同步版本号 |
-| `/api/sync/push` | POST | 推送本地变更到服务器 |
-| `/api/auth/api-token` | POST | 生成长期 API Token |
-
-所有同步端点需要 `Authorization: Bearer <token>` 请求头。
+旧 `/api/auth/*` 与 `/api/sync/*` 已不再属于运行时主链路。
 
 </details>
+
+迁移说明见：[docs/deployment/auth-sync-migration.md](docs/deployment/auth-sync-migration.md)
 
 如需配置反向代理（Nginx / Caddy），将域名指向 `localhost:3001` 即可，无需额外的 location 规则。
 
@@ -162,7 +156,7 @@ docker compose pull && docker compose up -d
 ### PWA 网页应用 — 适合手机
 
 1. 在手机或平板浏览器中访问已部署的服务器地址（如 `https://your-domain.com`）
-2. 登录或注册账号
+2. 首次使用时创建 owner 账户，或使用管理员发出的邀请注册/登录
 3. 使用浏览器的「添加到主屏幕」功能将应用安装到桌面
 4. PWA 支持离线缓存，即使断网也能查看已加载的数据
 

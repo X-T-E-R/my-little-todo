@@ -14,7 +14,7 @@ Traditional todo apps are "ledgers" that faithfully record your debts. My Little
 - **Focus on Now** — Open the app and see only one thing + two buttons ("Start" / "Skip")
 - **Work Thread Runtime** — A resumable context workspace that keeps mission, resume card, working set, waiting conditions, and Now scheduling aligned
 - **Learn, Not Punish** — Every rejection, procrastination, and deviation is training data, not a mistake
-- **Stable Local-First Core** — Desktop and Android store data in local SQLite; stable sync targets are API server and WebDAV
+- **Open-Source Infra Pivot** — Auth now defaults to out-of-box embedded mode, with optional Zitadel enhancement; sync is hosted shared mode through the main project server
 - **Multi-Platform** — Tauri desktop (Windows/macOS/Linux), Android app, and web deployment share the same core Todo model
 - **Beta Extensions** — AI, S3, server-side backup/restore, window context, desktop widget, think/work thread, and plugins remain outside the stable SLA
 
@@ -37,8 +37,7 @@ Stable release scope:
 - Basic attachments
 - JSON import and export
 - Local SQLite
-- API sync
-- WebDAV sync
+- OIDC session bootstrap
 - Upgrade migrations
 - Core settings
 
@@ -64,10 +63,7 @@ A local-first app that works out of the box — no server required.
 1. Download the installer from [Releases](https://github.com/X-T-E-R/my-little-todo/releases) (Windows .msi/.exe, macOS .dmg, Linux .AppImage)
 2. Install and launch — the first run will guide you through the initial setup
 3. Data is stored in a local SQLite database — no account or server needed
-4. Optionally configure a sync method in Settings → Sync to sync across devices:
-   - **API Server** — sync with a My Little Todo server (supports username/password or API token auth)
-   - **WebDAV** — sync via any WebDAV-compatible server
-   - **S3 (Beta)** — kept as a limited path only; not part of the current stable SLA
+4. If you use a shared deployment, point multiple clients to the same My Little Todo server. The default server is out-of-box usable with embedded auth + hosted shared data.
 
 Before upgrading the desktop app, create a full JSON export from `Settings -> Data`.
 
@@ -84,22 +80,20 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - AUTH_MODE=multi
-      - JWT_SECRET=change-me-to-a-random-string
+      - AUTH_PROVIDER=embedded
+      - EMBEDDED_SIGNUP_POLICY=invite_only
+      - SYNC_MODE=hosted
     restart: unless-stopped
 ```
 
 Then run:
 
 ```bash
-# Generate a secure JWT secret
-echo "JWT_SECRET=$(openssl rand -base64 32)" > .env
-
 # Start
 docker compose up -d
 ```
 
-**First-time setup**: Visit `http://localhost:3001/admin` to create the first admin account. Once done, users can access the web app at `http://localhost:3001`. Admin tasks (user management, stats) are managed at the `/admin` page.
+**First-time setup**: open `http://localhost:3001`, create the first owner/admin account, then invite or create more users from `/admin`. This default path does not require ZITADEL, Electric, or Postgres.
 
 Data is stored in `./data/` on the host — easy to backup and inspect.
 
@@ -118,36 +112,36 @@ docker compose pull && docker compose up -d
 |----------|---------|-------------|
 | `PORT` | `3001` | Server port |
 | `HOST` | `0.0.0.0` | Bind address |
-| `AUTH_MODE` | `multi` | `none` / `single` / `multi` |
-| `DB_TYPE` | `sqlite` | `sqlite` / `postgres` / `mysql` (see [docker-compose.yml](docker-compose.yml) for PG/MySQL examples) |
-| `DATABASE_URL` | — | Database connection string (required for PG/MySQL) |
-| `JWT_SECRET` | random | Secret key for JWT tokens (**set this in production!**) |
-| `DEFAULT_ADMIN_PASSWORD` | — | Initial admin password |
+| `AUTH_PROVIDER` | `embedded` | `embedded` / `zitadel` |
+| `EMBEDDED_SIGNUP_POLICY` | `invite_only` | `invite_only` / `open` / `admin_only` |
+| `SYNC_MODE` | `hosted` | Hosted shared mode only |
+| `DB_TYPE` | `sqlite` | `sqlite` / `postgres` |
+| `DATABASE_URL` | — | Database connection string |
+| `ZITADEL_ISSUER` | — | OIDC issuer URL |
+| `ZITADEL_CLIENT_ID` | — | OIDC client id |
+| `ZITADEL_AUDIENCE` | — | Optional API audience |
+| `ZITADEL_ADMIN_ROLE` | — | Optional claim/role mapped to app admin |
 | `DATA_DIR` | `/app/data` | Data storage directory |
 | `STATIC_DIR` | `/app/static` | Frontend static files directory |
 
 </details>
 
 <details>
-<summary>Sync API & Authentication</summary>
+<summary>Session Bootstrap</summary>
 
-Desktop and mobile clients can sync with the server using the `/api/sync/*` endpoints. Authentication options:
+Clients now bootstrap auth/sync from:
 
-- **Username & Password** — the client auto-logs in via `POST /api/auth/login` and caches the JWT
-- **API Token** — generate a long-lived token via `POST /api/auth/api-token` (requires an existing JWT). Available durations: 30 days, 90 days, 1 year, or never-expires
+- `GET /api/session/bootstrap`
+- `POST /api/session/setup`
+- `POST /api/session/login`
+- `POST /api/session/logout`
+- `GET /api/session/me`
 
-You can also generate API tokens from the web UI: Settings → Account → API Token.
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/sync/changes?since={version}` | GET | Pull changes since a version |
-| `/api/sync/status` | GET | Get current sync version |
-| `/api/sync/push` | POST | Push local changes to server |
-| `/api/auth/api-token` | POST | Generate long-lived API token |
-
-All sync endpoints require `Authorization: Bearer <token>` header.
+Legacy `/api/auth/*` and `/api/sync/*` routes are no longer part of the runtime main path.
 
 </details>
+
+Migration notes: [docs/deployment/auth-sync-migration.md](docs/deployment/auth-sync-migration.md)
 
 To set up a reverse proxy (Nginx / Caddy), point your domain to `localhost:3001` — no special location rules needed.
 
@@ -162,7 +156,7 @@ For standalone binary deployment without Docker, see [docs/deployment/binary.md]
 ### PWA Web App — For Mobile
 
 1. Open your deployed server URL in a mobile browser (e.g., `https://your-domain.com`)
-2. Log in or register
+2. On the first install, create the owner account or sign in with an invited account
 3. Use the browser's "Add to Home Screen" feature to install the app
 4. PWA supports offline caching — previously loaded data remains accessible without network
 

@@ -10,7 +10,14 @@ async fn main() {
     println!("My Little Todo Server v{} ({})", VERSION, GIT_HASH);
     println!("  Port:      {}", config.port);
     println!("  DB:        {:?}", config.db_type);
-    println!("  Auth:      {:?}", config.auth_mode);
+    println!(
+        "  Auth:      {}",
+        if !config.zitadel_issuer.is_empty() && !config.zitadel_client_id.is_empty() {
+            "zitadel"
+        } else {
+            "legacy"
+        }
+    );
     println!("  Data dir:  {}", config.data_dir);
 
     if let Err(e) = mlt_server::start(config, VERSION, GIT_HASH).await {

@@ -1,13 +1,14 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
+import enAdmin from './en/admin.json';
 import zhAdmin from './zh-CN/admin.json';
 
 export const defaultNS = 'admin' as const;
 
 export const resources = {
   'zh-CN': { admin: zhAdmin },
-  en: { admin: {} },
+  en: { admin: enAdmin },
 } as const;
 
 function detectLanguage(): string {

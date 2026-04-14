@@ -1,34 +1,46 @@
-# My Little Todo — Server Configuration (L0)
+# My Little Todo — Server Configuration
 # Copy this file to `config.toml` and edit as needed.
 # Environment variables override TOML values when set.
 
 port = 3001
-
-# Bind address: "127.0.0.1" (local only) | "0.0.0.0" (all interfaces, for LAN sharing)
-#   PC Tauri default: "127.0.0.1"
-#   Standalone server default: "0.0.0.0"
 host = "0.0.0.0"
 
-# Auth mode: "none" | "single" | "multi"
-#   none   — no authentication (local PC mode, default for Tauri)
-#   single — single user, auto-creates admin account
-#   multi  — multi-user registration enabled (default for server)
-auth_mode = "multi"
+# Auth provider:
+# - "embedded": out-of-box username/password auth with multi-user + admin panel
+# - "zitadel": optional external OIDC/OAuth enhancement
+auth_provider = "embedded"
 
-# Storage backend: "sqlite" | "postgres" | "mysql"
-#   sqlite — embedded SQLite database (default, recommended)
+# Embedded signup policy:
+# - "invite_only": admin creates invite codes, users self-register with an invite
+# - "open": anyone can self-register after initial setup
+# - "admin_only": only admins can create users
+embedded_signup_policy = "invite_only"
+
+# Hosted sync is the only runtime mode:
+# all clients connect to the same My Little Todo server and share the same backend data.
+sync_mode = "hosted"
+
+# Storage backend: "sqlite" | "postgres"
+# SQLite is the default out-of-box shared backend.
 db_type = "sqlite"
-
-# Data directory (used by sqlite backend)
 data_dir = "./data"
 
-# Database URL (required for postgres/mysql, optional for sqlite)
-# database_url = "sqlite:./data/my-little-todo.db?mode=rwc"
-# database_url = "postgres://user:pass@localhost/mlt"
-# database_url = "mysql://user:pass@localhost/mlt"
+# Optional database URL.
+# Leave empty to use ./data/my-little-todo.db with sqlite.
+# database_url = "postgres://postgres:postgres@localhost:5432/my_little_todo"
 
-# JWT secret for authentication tokens (auto-generated if not set)
-# jwt_secret = "change-me-to-a-secure-random-string"
+# Optional Zitadel / OIDC configuration.
+# These are only required when auth_provider = "zitadel".
+# zitadel_issuer = "https://zitadel.example.com"
+# zitadel_client_id = "web"
+# zitadel_audience = "api://mlt"
+# zitadel_admin_role = "mlt-admin"
 
-# Default admin password for single-user mode (only used on first startup)
-# default_admin_password = "admin123"
+# Optional static frontend directory
+# static_dir = "./static"
+
+# Optional CORS allowlist for browser clients hosted on another origin
+# cors_allowed_origins = ["http://localhost:5173"]
+
+# Optional admin export directories
+# admin_export_dirs = ["./exports"]

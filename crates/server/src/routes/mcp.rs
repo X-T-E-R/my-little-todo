@@ -7,7 +7,6 @@ use chrono::{NaiveDate, TimeZone, Utc};
 use reqwest::Client;
 use uuid::Uuid;
 
-use crate::config::AuthMode;
 use crate::extension_registry::{ExtensionStatus, RegisteredExtension, RegisteredMcpTool};
 use crate::task_stream_facade;
 use crate::work_thread_facade;
@@ -221,10 +220,8 @@ fn filter_tasks_acl(mut tasks: Vec<Value>, acl: &RoleAcl) -> Vec<Value> {
 }
 
 fn data_partition(state: &AppState, auth_user_id: &str) -> String {
-    match state.config.auth_mode {
-        AuthMode::Multi => auth_user_id.to_string(),
-        AuthMode::Single | AuthMode::None => String::new(),
-    }
+    let _ = state;
+    auth_user_id.to_string()
 }
 
 fn normalize_task_for_mcp(mut v: Value) -> Value {

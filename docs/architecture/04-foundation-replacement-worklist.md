@@ -2,6 +2,13 @@
 
 > 给并行 AI agent 的执行文档。目标不是继续堆平台能力，而是把当前未发布产品收敛成“产品领域 + 双宿主 + 共享 runner + 可替换基础设施”。
 
+> 2026-04-14 更新：本文中与 auth / sync 相关的待办已结束并被当前主线取代。
+> 现行方案是：
+> - Auth：`embedded | zitadel`，默认 `embedded`，必须开箱即用
+> - Sync：`hosted`，默认只部署主项目即可共享使用
+> - 旧 `/api/auth/*`、`/api/sync/*`、Electric 主线与 provider seam 规划不再继续推进
+> 若需查看当前口径，请以 [auth-sync-migration.md](/C:/Users/xxoy1/.codex/worktrees/8021/my-little-todo/docs/deployment/auth-sync-migration.md) 与架构总览文档为准。
+
 ---
 
 ## 总目标
@@ -19,7 +26,7 @@
 - 重构结果：
   - 宿主只做 lifecycle / gateway / ACL / registry
   - runner 只做插件 server 执行
-  - auth / sync / MCP 都有明确“冻结边界”和未来替换口
+  - auth / sync / MCP 都有明确边界，其中 auth / sync 已按最终方案收口
 
 ---
 
@@ -222,89 +229,92 @@
 
 ## Workstream E：Auth Provider Seams
 
+> 状态：已归档，当前不再按本节执行。
+
 ### 背景
 
-当前 auth 已经能工作，但产品未发布，不应该继续长成身份平台。
+当前 auth 主线已经收口为：
+
+- `embedded`：默认开箱即用，多用户 + 管理员面板
+- `zitadel`：可选 OIDC 增强认证
+- 统一 session 接口：`/api/session/*`
 
 ### 目标
 
-冻结当前 auth 范围，并抽成可替换 provider seam，为未来接 `Ory` 或 `ZITADEL` 留出口。
+避免继续把 auth 扩张成身份平台，同时保留默认可用与可选增强认证。
 
 ### 交付范围
 
-- 审计当前 auth 功能边界
-- 明确以下为冻结范围：
-  - 本地用户
-  - JWT / basic token
-  - 轻量自托管
-- 抽象 provider seam：
-  - login
-  - register
-  - me/session lookup
-  - api token issue / revoke
-- 在文档和代码里明确：
-  - 不做 MFA
-  - 不做 SSO
-  - 不做组织/租户
+- `auth_provider = "embedded" | "zitadel"`
+- 默认 `embedded`
+- embedded 会话与用户管理统一走 `/api/session/*`、`/api/admin/*`
+- 不再保留旧 `/api/auth/*`、legacy JWT fallback
+- 文档明确：不做 MFA / 组织 / 租户 / 企业级身份平台扩张
 
 ### 不做
 
-- 不立即接入 Ory / ZITADEL
-- 不做数据迁移项目
+- 不接入 Ory
+- 不恢复旧 `auth_mode`
+- 不恢复本地 JWT / basic token 主链路
 
 ### 建议落点
 
 - `crates/server/src/auth/*`
 - `crates/server/src/config.rs`
-- 新增 `docs/architecture/auth-boundary.md`
+- `crates/server/src/routes/session.rs`
+- `crates/server/src/routes/admin.rs`
 
 ### 验收
 
-- auth 入口被 provider seam 包裹
-- 新需求不会再直接往当前 auth 里堆企业特性
-- 文档明确未来替换方向与当前非目标
+- fresh install 默认进入 embedded setup
+- 管理员可管理本地用户与邀请码
+- zitadel 保持可选增强认证路径
+- 文档明确默认主线与非目标
 
 ---
 
 ## Workstream F：Sync Provider Seams
 
+> 状态：已归档，当前不再按本节执行。
+
 ### 背景
 
-当前 sync 已覆盖本地、API、WebDAV、部分 Markdown 路径，但不该继续长成实时协作平台。
+当前 sync 主线已经收口为单一 `hosted` 共享模式。
 
 ### 目标
 
-冻结 sync 范围，并为未来 serious server-centric sync / realtime 路线预留 `Electric` 替换口。
+明确共享能力来自主项目服务端与中心后端数据库，而不是客户端同步协议。
 
 ### 交付范围
 
-- 审计现有 sync target
-- 抽象 sync provider seam：
-  - push
-  - pull
-  - status/version
-  - conflict policy hook
-- 在文档和代码里明确以下非目标：
-  - CRDT
-  - 实时协作
+- `sync_mode = "hosted"` 成为唯一主线
+- Web / Desktop / Mobile 统一连接同一服务端共享数据
+- 不再恢复 `/api/sync/*`、`SyncEngine`、provider 矩阵
+- WebDAV / file-host 仅保留导入导出叙事，不再属于 sync 主链路
+- 文档明确非目标：
+  - Electric 主线
+  - CRDT / 实时协作平台
   - 多主复制
   - 复杂冲突求解平台
 
 ### 不做
 
-- 不立即集成 Electric
-- 不把现有本地优先模型推翻重来
+- 不集成 Electric 作为运行时主线
+- 不恢复旧 API-server / WebDAV sync provider
+- 不再新造一层 sync provider 抽象
 
 ### 建议落点
 
-- `packages/web/src/sync/*`
-- `crates/server/src/routes/sync.rs`
-- 新增 `docs/architecture/sync-boundary.md`
+- `crates/server/src/routes/data.rs`
+- `packages/web/src/fileHost/*`
+- `packages/web/src/sync/serverProbe.ts`
+- `docs/deployment/auth-sync-migration.md`
 
 ### 验收
 
-- sync 行为入口有清晰 provider seam
-- “现有 sync 能继续工作”和“未来可替换”两件事都能同时成立
+- 默认部署只启动主项目即可使用
+- 多客户端连接同一服务端后可共享同一份数据
+- 仓库主文档不再把 `/api/sync/*` 或 Electric 当成当前主线
 
 ---
 
@@ -346,8 +356,6 @@
 ### Wave 1
 
 - A：Runner 正式化
-- E：Auth Provider Seams
-- F：Sync Provider Seams
 
 ### Wave 2
 

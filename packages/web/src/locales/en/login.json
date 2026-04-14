@@ -1,1 +1,27 @@
-{}
+{
+  "Initial setup": "Initial setup",
+  "Create account": "Create account",
+  "Login": "Login",
+  "identity provider": "identity provider",
+  "Sign in to continue": "Sign in to continue",
+  "This app now uses {{provider}} for authentication.": "This app now uses {{provider}} for authentication.",
+  "Redirecting...": "Redirecting...",
+  "Continue with {{provider}}": "Continue with {{provider}}",
+  "Open identity provider": "Open identity provider",
+  "Create the first owner/admin account to start using this hosted server.": "Create the first owner/admin account to start using this hosted server.",
+  "Create a new account with an invite code from your server admin.": "Create a new account with an invite code from your server admin.",
+  "Create a new My Little Todo account": "Create a new My Little Todo account",
+  "Login to My Little Todo": "Login to My Little Todo",
+  "Username": "Username",
+  "Enter username": "Enter username",
+  "Password": "Password",
+  "Enter password": "Enter password",
+  "Please wait...": "Please wait...",
+  "Register": "Register",
+  "Already have an account? Login": "Already have an account? Login",
+  "No account? Register": "No account? Register",
+  "Invite code": "Invite code",
+  "Paste invite code": "Paste invite code",
+  "This server only allows admins to create accounts. Ask your admin to add you from the admin panel.": "This server only allows admins to create accounts. Ask your admin to add you from the admin panel.",
+  "Create owner account": "Create owner account"
+}

@@ -7,8 +7,6 @@ import { EnergyIndicator } from './components/EnergyIndicator';
 import { QuickInputBar } from './components/QuickInputBar';
 import { RoleLandingCard } from './components/RoleLandingCard';
 import { RoleSidebar } from './components/RoleSidebar';
-import { StatusDock } from './components/StatusDock';
-import { SyncConflictDialog } from './components/SyncConflictDialog';
 import { ToastContainer } from './components/Toast';
 import { useForegroundBridge } from './hooks/useForegroundBridge';
 import { useModuleStore } from './modules';
@@ -133,7 +131,7 @@ function useAppInitialization({
 }) {
   useEffect(() => {
     if (!authChecked) return;
-    if (authMode !== 'none' && !token) return;
+    if (authMode && !token) return;
 
     loadStream();
     loadTasks();
@@ -512,7 +510,7 @@ export function App() {
 
   const { authMode, token, loading: authLoading, checkAuthMode, checkAuth } = useAuthStore();
   const native = isNativeClient();
-  const [authChecked, setAuthChecked] = useState(native);
+  const [authChecked, setAuthChecked] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -520,13 +518,13 @@ export function App() {
   }, [checkAuthMode]);
 
   useEffect(() => {
-    if (native || authLoading) return;
-    if (authMode === 'none' || !token) {
+    if (authLoading) return;
+    if (!authMode || !token) {
       setAuthChecked(true);
       return;
     }
     checkAuth().then(() => setAuthChecked(true));
-  }, [native, authLoading, authMode, token, checkAuth]);
+  }, [authLoading, authMode, token, checkAuth]);
 
   const handleViewChange = useCallback((newView: View) => {
     if (newView === 'board' && !useModuleStore.getState().isEnabled('kanban')) return;
@@ -597,7 +595,7 @@ export function App() {
     return <LoadingScreen label={t('Loading')} />;
   }
 
-  if (authMode !== 'none' && !token) {
+  if (authMode && !token) {
     return (
       <React.Suspense fallback={<LoadingScreen label={t('Loading')} />}>
         <LoginView />
@@ -694,8 +692,6 @@ export function App() {
       <React.Suspense fallback={null}>
         <AiChatPanel showLauncher={false} />
       </React.Suspense>
-      <StatusDock />
-      <SyncConflictDialog />
     </div>
   );
 }

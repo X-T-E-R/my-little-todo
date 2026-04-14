@@ -4,7 +4,10 @@ import '@web/locales';
 import '@web/styles/globals.css';
 import { App } from '@web/App';
 import { ErrorBoundary } from '@web/components/ErrorBoundary';
+import { createApiDataStore } from '@web/storage/apiDataStore';
 import { setDataStore } from '@web/storage/dataStore';
+import { setSettingsApiBase } from '@web/storage/settingsApi';
+import { useAuthStore } from '@web/stores/authStore';
 import { initPlatform } from '@web/utils/platform';
 
 {
@@ -15,14 +18,18 @@ import { initPlatform } from '@web/utils/platform';
 
 async function initStorage() {
   await initPlatform();
-
-  const { createCapacitorSqliteDataStore } = await import('@web/storage/capacitorSqliteStore');
-  const store = await createCapacitorSqliteDataStore();
-  setDataStore(store);
+  const url = localStorage.getItem('mlt-cloud-url') || '';
+  useAuthStore.getState().setApiBase(url);
+  setSettingsApiBase(url);
+  setDataStore(createApiDataStore(url));
 }
 
 async function main() {
   await initStorage();
+  await useAuthStore.getState().checkAuthMode();
+  await useAuthStore.getState().completeAuthCallback().catch((err) => {
+    console.warn('[Auth] Failed to complete callback:', err);
+  });
 
   const root = document.getElementById('root');
   if (!root) throw new Error('Missing root element #root');

@@ -9,7 +9,6 @@ import { setDataStore } from './storage/dataStore';
 import { createDirectExecutor, startAutoSync } from './storage/offlineQueue';
 import { setSettingsApiBase } from './storage/settingsApi';
 import { useAuthStore } from './stores/authStore';
-import { getSyncEngine } from './sync';
 import { getPlatform, initPlatform } from './utils/platform';
 import { AnnotatorShell } from './widgets/AnnotatorShell';
 import { ContextBarShell } from './widgets/ContextBarShell';
@@ -27,34 +26,11 @@ let _apiBaseUrl = '';
 async function initStorage() {
   await initPlatform();
   const platform = getPlatform();
-
-  if (platform === 'tauri') {
-    const { createTauriSqliteDataStore } = await import('./storage/tauriSqliteStore');
-    const store = await createTauriSqliteDataStore();
-    _apiBaseUrl = '';
-    useAuthStore.getState().setApiBase('');
-    setSettingsApiBase('');
-    setDataStore(store);
-
-    const { migrateLegacyData } = await import('./storage/migrateLegacy');
-    await migrateLegacyData(store);
-  } else if (platform === 'capacitor') {
-    const { createCapacitorSqliteDataStore } = await import(
-      /* @vite-ignore */ './storage/capacitorSqliteStore'
-    );
-    const store = await createCapacitorSqliteDataStore();
-    _apiBaseUrl = '';
-    useAuthStore.getState().setApiBase('');
-    setSettingsApiBase('');
-    setDataStore(store);
-  } else {
-    // web-hosted / web-standalone: API server IS the storage
-    const url = '';
-    _apiBaseUrl = url;
-    useAuthStore.getState().setApiBase(url);
-    setSettingsApiBase(url);
-    setDataStore(createApiDataStore(url));
-  }
+  const url = platform === 'web-hosted' ? '' : localStorage.getItem('mlt-cloud-url') || '';
+  _apiBaseUrl = url;
+  useAuthStore.getState().setApiBase(url);
+  setSettingsApiBase(url);
+  setDataStore(createApiDataStore(url));
 }
 
 async function main() {
@@ -66,17 +42,10 @@ async function main() {
     startAutoSync(createDirectExecutor(_apiBaseUrl));
   }
 
-  // Sync engine: only Tauri uses local SQLite + incremental sync targets (API/WebDAV).
-  // Web and Capacitor use the API as primary storage — no separate sync engine.
-  if (platform === 'tauri' || platform === 'capacitor') {
-    const { initSyncFromConfig } = await import('./sync/syncManager');
-    await initSyncFromConfig().catch((err) =>
-      console.warn('[SyncEngine] Failed to initialize from config:', err),
-    );
-    const flush = () => getSyncEngine().flushPendingLocalSync();
-    window.addEventListener('pagehide', flush);
-    window.addEventListener('beforeunload', flush);
-  }
+  await useAuthStore.getState().checkAuthMode();
+  await useAuthStore.getState().completeAuthCallback().catch((err) => {
+    console.warn('[Auth] Failed to complete callback:', err);
+  });
 
   const root = document.getElementById('root');
   if (!root) {

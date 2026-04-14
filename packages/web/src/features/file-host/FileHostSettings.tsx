@@ -80,10 +80,8 @@ export function FileHostSettings() {
   const [routing, setRouting] = useState<FileRoutingRule[]>([]);
   const [overridesText, setOverridesText] = useState('');
   const [mltEndpoint, setMltEndpoint] = useState('');
-  const [mltAuthMode, setMltAuthMode] = useState<'session' | 'token' | 'credentials'>('session');
+  const [mltAuthMode, setMltAuthMode] = useState<'session' | 'token'>('session');
   const [mltToken, setMltToken] = useState('');
-  const [mltUsername, setMltUsername] = useState('');
-  const [mltPassword, setMltPassword] = useState('');
   const [webdavEndpoint, setWebdavEndpoint] = useState('');
   const [webdavPublicBaseUrl, setWebdavPublicBaseUrl] = useState('');
   const [webdavUsername, setWebdavUsername] = useState('');
@@ -126,8 +124,6 @@ export function FileHostSettings() {
       setMltEndpoint(config.providers.mltServer.endpoint);
       setMltAuthMode(config.providers.mltServer.authMode);
       setMltToken(config.providers.mltServer.token);
-      setMltUsername(config.providers.mltServer.username);
-      setMltPassword(config.providers.mltServer.password);
       setWebdavEndpoint(config.providers.webdav.endpoint);
       setWebdavPublicBaseUrl(config.providers.webdav.publicBaseUrl);
       setWebdavUsername(config.providers.webdav.username);
@@ -168,8 +164,8 @@ export function FileHostSettings() {
           endpoint: mltEndpoint,
           authMode: mltAuthMode,
           token: mltToken,
-          username: mltUsername,
-          password: mltPassword,
+          username: '',
+          password: '',
         },
         webdav: {
           endpoint: webdavEndpoint,
@@ -198,7 +194,7 @@ export function FileHostSettings() {
       ]);
     }
 
-    setSaved(true);
+      setSaved(true);
     window.setTimeout(() => setSaved(false), 2000);
   };
 
@@ -346,14 +342,11 @@ export function FileHostSettings() {
         />
         <select
           value={mltAuthMode}
-          onChange={(event) =>
-            setMltAuthMode(event.target.value as 'session' | 'token' | 'credentials')
-          }
+          onChange={(event) => setMltAuthMode(event.target.value as 'session' | 'token')}
           className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
         >
           <option value="session">{t('Reuse current session')}</option>
           <option value="token">{t('Bearer token')}</option>
-          <option value="credentials">{t('Username and password')}</option>
         </select>
         {mltAuthMode === 'token' ? (
           <input
@@ -363,24 +356,6 @@ export function FileHostSettings() {
             placeholder={t('Bearer token')}
             className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
           />
-        ) : null}
-        {mltAuthMode === 'credentials' ? (
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input
-              type="text"
-              value={mltUsername}
-              onChange={(event) => setMltUsername(event.target.value)}
-              placeholder={t('Username')}
-              className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
-            />
-            <input
-              type="password"
-              value={mltPassword}
-              onChange={(event) => setMltPassword(event.target.value)}
-              placeholder={t('Password')}
-              className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm outline-none"
-            />
-          </div>
         ) : null}
       </section>
 

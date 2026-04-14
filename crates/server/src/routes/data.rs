@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::fs;
 
-use crate::config::{AuthMode, DbType, ServerConfig};
+use crate::config::{DbType, ServerConfig};
 use crate::providers;
 use crate::AppState;
 
@@ -63,9 +63,14 @@ async fn require_admin(
 }
 
 fn data_partition(state: &AppState, user_id: &str) -> String {
-    match state.config.auth_mode {
-        AuthMode::Multi => user_id.to_string(),
-        AuthMode::Single | AuthMode::None => String::new(),
+    let _ = state;
+    user_id.to_string()
+}
+
+fn auth_provider_name(state: &AppState) -> &'static str {
+    match state.config.auth_provider {
+        crate::config::AuthProvider::Embedded => "embedded",
+        crate::config::AuthProvider::Zitadel => "zitadel",
     }
 }
 
@@ -183,7 +188,7 @@ pub struct StorageInfoResponse {
     pub db_type: String,
     pub data_dir: String,
     pub database_url: Option<String>,
-    pub auth_mode: String,
+    pub auth_provider: String,
     pub l0_config_toml: String,
     pub admin_export_enabled: bool,
 }
@@ -209,10 +214,7 @@ pub async fn storage_info(
                 u
             }
         }),
-        auth_mode: serde_json::to_value(&c.auth_mode)
-            .ok()
-            .and_then(|v| v.as_str().map(String::from))
-            .unwrap_or_else(|| format!("{:?}", c.auth_mode)),
+        auth_provider: auth_provider_name(&state).to_string(),
         l0_config_toml: c.to_toml_string(),
         admin_export_enabled: !c.admin_export_dirs.is_empty(),
     }))
@@ -260,9 +262,13 @@ pub async fn migrate_data(
         database_url: body.target_database_url,
         port: state.config.port,
         host: state.config.host.clone(),
-        auth_mode: state.config.auth_mode.clone(),
-        jwt_secret: state.config.jwt_secret.clone(),
-        default_admin_password: state.config.default_admin_password.clone(),
+        auth_provider: state.config.auth_provider.clone(),
+        embedded_signup_policy: state.config.embedded_signup_policy.clone(),
+        sync_mode: state.config.sync_mode.clone(),
+        zitadel_issuer: state.config.zitadel_issuer.clone(),
+        zitadel_client_id: state.config.zitadel_client_id.clone(),
+        zitadel_audience: state.config.zitadel_audience.clone(),
+        zitadel_admin_role: state.config.zitadel_admin_role.clone(),
         static_dir: None,
         cors_allowed_origins: state.config.cors_allowed_origins.clone(),
         admin_export_dirs: state.config.admin_export_dirs.clone(),

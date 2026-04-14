@@ -1,11 +1,10 @@
 pub mod admin;
 pub mod ai_proxy;
-pub mod auth;
 pub mod backup;
 pub mod blobs;
 pub mod data;
 pub mod mcp;
 pub mod plugins;
+pub mod session;
 pub mod stream;
-pub mod sync;
 pub mod tasks;

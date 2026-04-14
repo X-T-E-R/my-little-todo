@@ -5,15 +5,12 @@ use axum::{
 };
 use serde_json::{json, Value};
 
-use crate::config::AuthMode;
 use crate::task_stream_facade;
 use crate::AppState;
 
 fn data_partition(state: &AppState, ext_user_id: &str) -> String {
-    match state.config.auth_mode {
-        AuthMode::Multi => ext_user_id.to_string(),
-        AuthMode::Single | AuthMode::None => String::new(),
-    }
+    let _ = state;
+    ext_user_id.to_string()
 }
 
 #[derive(serde::Serialize)]

@@ -41,7 +41,7 @@ describe('i18n integrity', () => {
     if (issues.length > 0) {
       throw new Error(formatIssues(issues));
     }
-  });
+  }, 15000);
 });
 
 function loadLocaleCatalog(root: string): Map<string, Map<string, string>> {

@@ -6,6 +6,7 @@ export interface MltServerHealth {
   version?: string;
   auth?: string;
   db?: string;
+  syncMode?: string;
 }
 
 function isCrossOriginTarget(baseUrl: string): boolean {
@@ -118,48 +119,24 @@ export async function probeMltServer(
     const { response: authResponse, bodyText: authText } = await requestText(
       httpClient,
       normalizedBaseUrl,
-      '/api/auth/mode',
+      '/api/session/bootstrap',
       5000,
     );
     if (authResponse.status === 404) {
       throw new Error(
-        'This server is missing /api/auth/mode and looks older than the current My Little Todo app.',
+        'This server is missing /api/session/bootstrap and looks older than the current My Little Todo app.',
       );
     }
     if (!authResponse.ok) {
-      throw new Error(`Authentication probe failed: HTTP ${authResponse.status}`);
+      throw new Error(`Session bootstrap probe failed: HTTP ${authResponse.status}`);
     }
     const authJson = parseJsonObject(
       authText,
       authResponse,
-      joinUrl(normalizedBaseUrl, '/api/auth/mode'),
+      joinUrl(normalizedBaseUrl, '/api/session/bootstrap'),
     );
-    if (typeof authJson.mode !== 'string') {
-      throw new Error('The server returned an invalid auth mode response.');
-    }
-
-    const { response: syncResponse, bodyText: syncText } = await requestText(
-      httpClient,
-      normalizedBaseUrl,
-      '/api/sync/status',
-      5000,
-    );
-    if (syncResponse.status === 404) {
-      throw new Error(
-        'This server is missing /api/sync/status and looks older than the current My Little Todo app.',
-      );
-    }
-    if (syncResponse.ok) {
-      const syncJson = parseJsonObject(
-        syncText,
-        syncResponse,
-        joinUrl(normalizedBaseUrl, '/api/sync/status'),
-      );
-      if (typeof syncJson.current_version !== 'number') {
-        throw new Error('The server returned an invalid sync status response.');
-      }
-    } else if (![401, 403].includes(syncResponse.status)) {
-      throw new Error(`Sync probe failed: HTTP ${syncResponse.status}`);
+    if (typeof authJson.auth_provider !== 'string') {
+      throw new Error('The server returned an invalid session bootstrap response.');
     }
 
     return {
@@ -167,6 +144,12 @@ export async function probeMltServer(
       version: typeof healthJson.version === 'string' ? healthJson.version : undefined,
       auth: typeof healthJson.auth === 'string' ? healthJson.auth : undefined,
       db: typeof healthJson.db === 'string' ? healthJson.db : undefined,
+      syncMode:
+        typeof authJson.sync_mode === 'string'
+          ? authJson.sync_mode
+          : typeof healthJson.sync_mode === 'string'
+            ? healthJson.sync_mode
+            : undefined,
     };
   } catch (err) {
     throw formatSyncRequestError(

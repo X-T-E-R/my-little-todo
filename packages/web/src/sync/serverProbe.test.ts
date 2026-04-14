@@ -5,9 +5,22 @@ describe('probeMltServer', () => {
   it('accepts the current MLT server contract', async () => {
     const request = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ status: 'ok', version: '0.5.6', auth: 'Multi' }))
-      .mockResolvedValueOnce(jsonResponse({ mode: 'multi', needs_setup: false }))
-      .mockResolvedValueOnce(jsonResponse({ current_version: 42 }));
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: 'ok',
+          version: '0.5.6',
+          auth: 'embedded',
+          db: 'sqlite',
+          sync_mode: 'hosted',
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          auth_provider: 'embedded',
+          signup_policy: 'invite_only',
+          sync_mode: 'hosted',
+        }),
+      );
 
     await expect(
       probeMltServer('https://example.com', {
@@ -16,10 +29,12 @@ describe('probeMltServer', () => {
     ).resolves.toMatchObject({
       status: 'ok',
       version: '0.5.6',
-      auth: 'Multi',
+      auth: 'embedded',
+      db: 'sqlite',
+      syncMode: 'hosted',
     });
 
-    expect(request).toHaveBeenCalledTimes(3);
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
   it('rejects HTML health responses as invalid servers', async () => {
@@ -37,7 +52,7 @@ describe('probeMltServer', () => {
     ).rejects.toThrow('returned an HTML page');
   });
 
-  it('rejects older servers that are missing auth mode endpoint', async () => {
+  it('rejects older servers that are missing session bootstrap endpoint', async () => {
     const request = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ status: 'ok', version: '0.4.0' }))
@@ -47,7 +62,7 @@ describe('probeMltServer', () => {
       probeMltServer('https://example.com', {
         request,
       }),
-    ).rejects.toThrow('missing /api/auth/mode');
+    ).rejects.toThrow('missing /api/session/bootstrap');
   });
 });
 

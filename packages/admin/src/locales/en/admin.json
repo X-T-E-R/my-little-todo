@@ -1,1 +1,25 @@
-{}
+{
+  "Dashboard": "Dashboard",
+  "Total Users": "Total Users",
+  "Database Type": "Database Type",
+  "Auth Provider": "Auth Provider",
+  "User Management": "User Management",
+  "Username": "Username",
+  "Role": "Role",
+  "Created At": "Created At",
+  "Actions": "Actions",
+  "Admin": "Admin",
+  "User": "User",
+  "Delete User": "Delete User",
+  "Confirm delete user {{username}}?": "Delete user {{username}}?",
+  "Loading...": "Loading...",
+  "Admin privileges required": "Admin privileges required",
+  "Log Out": "Log Out",
+  "Admin Session Required": "Admin Session Required",
+  "Admin now reuses the same OIDC bearer token as the main app.": "Admin now reuses the same OIDC bearer token as the main app.",
+  "If you already signed in through the main app in this browser, refresh to reuse that session. Otherwise paste an access token below.": "If you already signed in through the main app in this browser, refresh to reuse that session. Otherwise paste an access token below.",
+  "Paste Access Token": "Paste Access Token",
+  "Open Main App": "Open Main App",
+  "Use Access Token": "Use Access Token",
+  "Verifying...": "Verifying..."
+}

@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Postgres;
 
-use super::traits::{BlobMeta, ChangeRecord, DatabaseProvider, NewUser, User};
+use super::traits::{
+    BlobMeta, ChangeRecord, DatabaseProvider, InviteRecord, NewUser, SessionRecord, User,
+};
 
 async fn bump_version_pg<'e, E: sqlx::Executor<'e, Database = Postgres>>(
     e: E,
@@ -224,7 +226,7 @@ pub struct PostgresProvider {
 }
 
 /// Schema migrations: 1=initial, 2=blobs, 3=sync columns+version_seq, 4=tasks+stream_entries, 5=stream updated_at, 6=align, 7=tasks.role_ids
-const CURRENT_SCHEMA_VERSION: i64 = 10;
+const CURRENT_SCHEMA_VERSION: i64 = 11;
 
 impl PostgresProvider {
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
@@ -545,6 +547,53 @@ impl PostgresProvider {
                 .await?;
         }
 
+        if current_version < 11 {
+            let has_is_enabled: bool = sqlx::query_as::<_, (i64,)>(
+                "SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'is_enabled'",
+            )
+            .fetch_one(&pool)
+            .await
+            .map(|r| r.0 > 0)
+            .unwrap_or(false);
+
+            if !has_is_enabled {
+                sqlx::query("ALTER TABLE users ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT TRUE")
+                    .execute(&pool)
+                    .await?;
+            }
+
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS sessions (
+                    token TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ
+                )",
+            )
+            .execute(&pool)
+            .await?;
+            sqlx::query("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id)")
+                .execute(&pool)
+                .await?;
+
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS invites (
+                    code TEXT PRIMARY KEY,
+                    created_by TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ,
+                    consumed_at TIMESTAMPTZ,
+                    consumed_by TEXT
+                )",
+            )
+            .execute(&pool)
+            .await?;
+
+            sqlx::query("INSERT INTO schema_version (version) VALUES (11) ON CONFLICT DO NOTHING")
+                .execute(&pool)
+                .await?;
+        }
+
         let _ = CURRENT_SCHEMA_VERSION;
         Ok(Self { pool })
     }
@@ -827,9 +876,28 @@ impl DatabaseProvider for PostgresProvider {
         Ok(())
     }
 
+    async fn create_user(&self, new_user: &NewUser) -> anyhow::Result<User> {
+        let id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO users (id, username, password_hash, is_admin, is_enabled)
+             VALUES ($1, $2, $3, $4, TRUE)",
+        )
+        .bind(&id)
+        .bind(&new_user.username)
+        .bind(&new_user.password_hash)
+        .bind(new_user.is_admin)
+        .execute(&self.pool)
+        .await?;
+
+        self.get_user_by_id(&id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Failed to read back created user"))
+    }
+
     async fn get_user_by_username(&self, username: &str) -> anyhow::Result<Option<User>> {
-        let row: Option<(String, String, String, bool, String)> = sqlx::query_as(
-            "SELECT id, username, password_hash, is_admin, created_at::text FROM users WHERE username = $1",
+        let row: Option<(String, String, String, bool, bool, String)> = sqlx::query_as(
+            "SELECT id, username, password_hash, is_admin, is_enabled, created_at::text
+             FROM users WHERE username = $1",
         )
         .bind(username)
         .fetch_optional(&self.pool)
@@ -840,13 +908,15 @@ impl DatabaseProvider for PostgresProvider {
             username: r.1,
             password_hash: r.2,
             is_admin: r.3,
-            created_at: r.4,
+            is_enabled: r.4,
+            created_at: r.5,
         }))
     }
 
     async fn get_user_by_id(&self, id: &str) -> anyhow::Result<Option<User>> {
-        let row: Option<(String, String, String, bool, String)> = sqlx::query_as(
-            "SELECT id, username, password_hash, is_admin, created_at::text FROM users WHERE id = $1",
+        let row: Option<(String, String, String, bool, bool, String)> = sqlx::query_as(
+            "SELECT id, username, password_hash, is_admin, is_enabled, created_at::text
+             FROM users WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -857,25 +927,48 @@ impl DatabaseProvider for PostgresProvider {
             username: r.1,
             password_hash: r.2,
             is_admin: r.3,
-            created_at: r.4,
+            is_enabled: r.4,
+            created_at: r.5,
         }))
     }
 
-    async fn create_user(&self, user: &NewUser) -> anyhow::Result<User> {
-        let id = uuid::Uuid::new_v4().to_string();
+    async fn ensure_external_user(
+        &self,
+        subject: &str,
+        username: &str,
+        is_admin: bool,
+    ) -> anyhow::Result<User> {
+        let mut resolved_username = username.trim().to_string();
+        if resolved_username.is_empty() {
+            resolved_username = subject.to_string();
+        }
+
+        if let Some(existing) = self.get_user_by_username(&resolved_username).await? {
+            if existing.id != subject {
+                resolved_username = format!(
+                    "{}#{}",
+                    resolved_username,
+                    subject.chars().take(6).collect::<String>()
+                );
+            }
+        }
+
         sqlx::query(
-            "INSERT INTO users (id, username, password_hash, is_admin) VALUES ($1, $2, $3, $4)",
+            "INSERT INTO users (id, username, password_hash, is_admin, is_enabled)
+             VALUES ($1, $2, '', $3, TRUE)
+             ON CONFLICT(id) DO UPDATE SET
+                username = EXCLUDED.username,
+                is_admin = EXCLUDED.is_admin",
         )
-        .bind(&id)
-        .bind(&user.username)
-        .bind(&user.password_hash)
-        .bind(user.is_admin)
+        .bind(subject)
+        .bind(&resolved_username)
+        .bind(is_admin)
         .execute(&self.pool)
         .await?;
 
-        self.get_user_by_id(&id)
+        self.get_user_by_id(subject)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("Failed to read back created user"))
+            .ok_or_else(|| anyhow::anyhow!("Failed to read back external user"))
     }
 
     async fn update_user_password(&self, id: &str, password_hash: &str) -> anyhow::Result<()> {
@@ -887,7 +980,20 @@ impl DatabaseProvider for PostgresProvider {
         Ok(())
     }
 
+    async fn set_user_enabled(&self, id: &str, enabled: bool) -> anyhow::Result<()> {
+        sqlx::query("UPDATE users SET is_enabled = $1 WHERE id = $2")
+            .bind(enabled)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn delete_user(&self, id: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM sessions WHERE user_id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(id)
             .execute(&self.pool)
@@ -896,8 +1002,9 @@ impl DatabaseProvider for PostgresProvider {
     }
 
     async fn list_users(&self) -> anyhow::Result<Vec<User>> {
-        let rows: Vec<(String, String, String, bool, String)> = sqlx::query_as(
-            "SELECT id, username, password_hash, is_admin, created_at::text FROM users ORDER BY created_at",
+        let rows: Vec<(String, String, String, bool, bool, String)> = sqlx::query_as(
+            "SELECT id, username, password_hash, is_admin, is_enabled, created_at::text
+             FROM users ORDER BY created_at",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -909,7 +1016,8 @@ impl DatabaseProvider for PostgresProvider {
                 username: r.1,
                 password_hash: r.2,
                 is_admin: r.3,
-                created_at: r.4,
+                is_enabled: r.4,
+                created_at: r.5,
             })
             .collect())
     }
@@ -919,6 +1027,132 @@ impl DatabaseProvider for PostgresProvider {
             .fetch_one(&self.pool)
             .await?;
         Ok(row.0)
+    }
+
+    async fn create_session(
+        &self,
+        user_id: &str,
+        token: &str,
+        expires_at: Option<&str>,
+    ) -> anyhow::Result<SessionRecord> {
+        sqlx::query(
+            "INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, $3::timestamptz)",
+        )
+        .bind(token)
+        .bind(user_id)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await?;
+
+        self.get_session(token)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Failed to read back session"))
+    }
+
+    async fn get_session(&self, token: &str) -> anyhow::Result<Option<SessionRecord>> {
+        let row: Option<(String, String, String, Option<String>)> = sqlx::query_as(
+            "SELECT token, user_id, created_at::text, expires_at::text FROM sessions WHERE token = $1",
+        )
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| SessionRecord {
+            token: r.0,
+            user_id: r.1,
+            created_at: r.2,
+            expires_at: r.3,
+        }))
+    }
+
+    async fn delete_session(&self, token: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM sessions WHERE token = $1")
+            .bind(token)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn delete_sessions_for_user(&self, user_id: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM sessions WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn create_invite(
+        &self,
+        code: &str,
+        created_by: &str,
+        expires_at: Option<&str>,
+    ) -> anyhow::Result<InviteRecord> {
+        sqlx::query(
+            "INSERT INTO invites (code, created_by, expires_at) VALUES ($1, $2, $3::timestamptz)",
+        )
+        .bind(code)
+        .bind(created_by)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await?;
+
+        self.get_invite(code)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Failed to read back invite"))
+    }
+
+    async fn get_invite(&self, code: &str) -> anyhow::Result<Option<InviteRecord>> {
+        let row: Option<(String, String, String, Option<String>, Option<String>, Option<String>)> =
+            sqlx::query_as(
+                "SELECT code, created_by, created_at::text, expires_at::text, consumed_at::text, consumed_by
+                 FROM invites WHERE code = $1",
+            )
+            .bind(code)
+            .fetch_optional(&self.pool)
+            .await?;
+
+        Ok(row.map(|r| InviteRecord {
+            code: r.0,
+            created_by: r.1,
+            created_at: r.2,
+            expires_at: r.3,
+            consumed_at: r.4,
+            consumed_by: r.5,
+        }))
+    }
+
+    async fn consume_invite(&self, code: &str, consumed_by: &str) -> anyhow::Result<()> {
+        sqlx::query(
+            "UPDATE invites SET consumed_at = NOW(), consumed_by = $1
+             WHERE code = $2 AND consumed_at IS NULL",
+        )
+        .bind(consumed_by)
+        .bind(code)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn list_invites(&self) -> anyhow::Result<Vec<InviteRecord>> {
+        let rows: Vec<(String, String, String, Option<String>, Option<String>, Option<String>)> =
+            sqlx::query_as(
+                "SELECT code, created_by, created_at::text, expires_at::text, consumed_at::text, consumed_by
+                 FROM invites ORDER BY created_at DESC",
+            )
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| InviteRecord {
+                code: r.0,
+                created_by: r.1,
+                created_at: r.2,
+                expires_at: r.3,
+                consumed_at: r.4,
+                consumed_by: r.5,
+            })
+            .collect())
     }
 
     async fn get_setting(&self, user_id: &str, key: &str) -> anyhow::Result<Option<String>> {

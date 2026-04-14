@@ -45,8 +45,20 @@ export async function loadFileHostConfig(): Promise<FileHostProviderConfig> {
     ]);
 
   const legacyAttachmentConfig = await getDataStore().getAttachmentConfig();
-  const syncProvider = await getSetting('sync-provider');
-  const syncConfig = parseJson<Record<string, string>>(await getSetting('sync-config'), {});
+  const mltServerConfig = parseJson<{
+    endpoint?: string;
+    authMode?: 'session' | 'token';
+    token?: string;
+    username?: string;
+    password?: string;
+  }>(mltServerRaw, {});
+  const webdavConfig = parseJson<{
+    endpoint?: string;
+    publicBaseUrl?: string;
+    username?: string;
+    password?: string;
+    directory?: string;
+  }>(webdavRaw, {});
 
   return {
     enabled: enabledRaw !== 'false' && legacyAttachmentConfig.allow_attachments !== false,
@@ -56,26 +68,18 @@ export async function loadFileHostConfig(): Promise<FileHostProviderConfig> {
     extensionOverrides: parseJson<Record<string, FileCategory>>(overridesRaw, {}),
     providers: {
       mltServer: {
-        endpoint:
-          parseJson<{ endpoint?: string }>(mltServerRaw, {}).endpoint ??
-          (syncProvider === 'api-server' ? syncConfig.endpoint ?? '' : ''),
-        authMode: parseJson<{ authMode?: 'session' | 'token' | 'credentials' }>(mltServerRaw, {})
-          .authMode ??
-          (syncProvider === 'api-server'
-            ? ((syncConfig.auth_mode as 'token' | 'credentials' | undefined) ?? 'credentials')
-            : 'session'),
-        token: parseJson<{ token?: string }>(mltServerRaw, {}).token ?? syncConfig.token ?? '',
-        username:
-          parseJson<{ username?: string }>(mltServerRaw, {}).username ?? syncConfig.username ?? '',
-        password:
-          parseJson<{ password?: string }>(mltServerRaw, {}).password ?? syncConfig.password ?? '',
+        endpoint: mltServerConfig.endpoint ?? '',
+        authMode: mltServerConfig.authMode ?? 'session',
+        token: mltServerConfig.token ?? '',
+        username: mltServerConfig.username ?? '',
+        password: mltServerConfig.password ?? '',
       },
       webdav: {
-        endpoint: parseJson<{ endpoint?: string }>(webdavRaw, {}).endpoint ?? '',
-        publicBaseUrl: parseJson<{ publicBaseUrl?: string }>(webdavRaw, {}).publicBaseUrl ?? '',
-        username: parseJson<{ username?: string }>(webdavRaw, {}).username ?? '',
-        password: parseJson<{ password?: string }>(webdavRaw, {}).password ?? '',
-        directory: parseJson<{ directory?: string }>(webdavRaw, {}).directory ?? 'uploads',
+        endpoint: webdavConfig.endpoint ?? '',
+        publicBaseUrl: webdavConfig.publicBaseUrl ?? '',
+        username: webdavConfig.username ?? '',
+        password: webdavConfig.password ?? '',
+        directory: webdavConfig.directory ?? 'uploads',
       },
     },
   };

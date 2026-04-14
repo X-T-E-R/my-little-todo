@@ -1,33 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-
-vi.mock('../stores/authStore', () => ({
-  getAuthToken: () => null,
-}));
-
 import { ApiServerSyncTarget } from './apiSyncTarget';
 
 describe('ApiServerSyncTarget', () => {
-  it('logs in with credentials and reuses the JWT for sync requests', async () => {
+  it('fails fast with a migration message after validating a current server', async () => {
     const request = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ status: 'ok', version: '0.5.6', auth: 'Multi' }))
-      .mockResolvedValueOnce(jsonResponse({ mode: 'multi', needs_setup: false }))
-      .mockResolvedValueOnce(jsonResponse({ current_version: 0 }))
-      .mockResolvedValueOnce(jsonResponse({ token: 'jwt-1' }))
       .mockResolvedValueOnce(
-        jsonResponse({
-          changes: [
-            {
-              table: 'tasks',
-              key: 'task-1',
-              data: '{"id":"task-1"}',
-              version: 2,
-              updated_at: 1_700_000_000_000,
-              deleted_at: null,
-            },
-          ],
-          current_version: 2,
-        }),
+        jsonResponse({ status: 'ok', version: '0.5.6', auth: 'embedded', db: 'sqlite', sync_mode: 'hosted' }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ auth_provider: 'embedded', sync_mode: 'hosted', signup_policy: 'invite_only' }),
       );
 
     const target = new ApiServerSyncTarget({
@@ -39,63 +21,13 @@ describe('ApiServerSyncTarget', () => {
       httpClient: { request },
     });
 
-    const result = await target.pull(0);
-
-    expect(request).toHaveBeenCalledTimes(5);
+    await expect(target.pull(0)).rejects.toThrow('Legacy API-server sync has been removed');
+    expect(request).toHaveBeenCalledTimes(2);
     expect(request.mock.calls[0]?.[0]).toMatchObject({
       url: 'https://example.com/health',
     });
     expect(request.mock.calls[1]?.[0]).toMatchObject({
-      url: 'https://example.com/api/auth/mode',
-    });
-    expect(request.mock.calls[2]?.[0]).toMatchObject({
-      url: 'https://example.com/api/sync/status',
-    });
-    expect(request.mock.calls[3]?.[0]).toMatchObject({
-      url: 'https://example.com/api/auth/login',
-      method: 'POST',
-    });
-    expect(request.mock.calls[4]?.[0]).toMatchObject({
-      url: 'https://example.com/api/sync/changes?since=0',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer jwt-1',
-      },
-    });
-    expect(result.currentVersion).toBe(2);
-    expect(result.changes[0]?.updatedAt).toBe(new Date(1_700_000_000_000).toISOString());
-  });
-
-  it('refreshes credentials and retries once on 401', async () => {
-    const request = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ status: 'ok', version: '0.5.6', auth: 'Multi' }))
-      .mockResolvedValueOnce(jsonResponse({ mode: 'multi', needs_setup: false }))
-      .mockResolvedValueOnce(jsonResponse({ current_version: 0 }))
-      .mockResolvedValueOnce(jsonResponse({ token: 'jwt-1' }))
-      .mockResolvedValueOnce(jsonResponse({ error: 'expired' }, 401))
-      .mockResolvedValueOnce(jsonResponse({ token: 'jwt-2' }))
-      .mockResolvedValueOnce(jsonResponse({ current_version: 9 }));
-
-    const target = new ApiServerSyncTarget({
-      id: 'api',
-      baseUrl: 'https://example.com',
-      authMode: 'credentials',
-      username: 'demo',
-      password: 'secret',
-      httpClient: { request },
-    });
-
-    const version = await target.getRemoteVersion();
-
-    expect(version).toBe(9);
-    expect(request).toHaveBeenCalledTimes(7);
-    expect(request.mock.calls[6]?.[0]).toMatchObject({
-      url: 'https://example.com/api/sync/status',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer jwt-2',
-      },
+      url: 'https://example.com/api/session/bootstrap',
     });
   });
 
@@ -117,13 +49,13 @@ describe('ApiServerSyncTarget', () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
-  it('maps timeout errors to a user-friendly message', async () => {
+  it('returns false from testConnection when legacy sync has been retired', async () => {
     const request = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ status: 'ok', version: '0.5.6', auth: 'None' }))
-      .mockResolvedValueOnce(jsonResponse({ mode: 'none', needs_setup: false }))
-      .mockResolvedValueOnce(jsonResponse({ current_version: 0 }))
-      .mockRejectedValue(new Error('Request timed out after 10000ms'));
+      .mockResolvedValueOnce(
+        jsonResponse({ status: 'ok', version: '0.5.6', auth: 'embedded', db: 'sqlite', sync_mode: 'hosted' }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ auth_provider: 'embedded', sync_mode: 'hosted' }));
     const target = new ApiServerSyncTarget({
       id: 'api',
       baseUrl: 'https://example.com',
@@ -132,7 +64,18 @@ describe('ApiServerSyncTarget', () => {
       httpClient: { request },
     });
 
-    await expect(target.getRemoteVersion()).rejects.toThrow(
+    await expect(target.testConnection()).resolves.toBe(false);
+  });
+
+  it('maps timeout errors to a user-friendly message', async () => {
+    const request = vi.fn().mockRejectedValue(new Error('Request timed out after 10000ms'));
+    const target = new ApiServerSyncTarget({
+      id: 'api',
+      baseUrl: 'https://example.com',
+      httpClient: { request },
+    });
+
+    await expect(target.pull(0)).rejects.toThrow(
       'Connection timed out while contacting https://example.com',
     );
   });

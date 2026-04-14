@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
@@ -14,6 +15,11 @@ const gitHash = (() => {
 })();
 
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'));
+
+const workspaceAlias = {
+  '@my-little-todo/core': fileURLToPath(new URL('../core/src/index.ts', import.meta.url)),
+  '@my-little-todo/plugin-sdk': fileURLToPath(new URL('../plugin-sdk/src/index.ts', import.meta.url)),
+};
 
 export default defineConfig({
   plugins: [
@@ -87,6 +93,9 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: {
+    alias: workspaceAlias,
+  },
   define: {
     'import.meta.env.VITE_STORAGE': JSON.stringify('api'),
     __APP_VERSION__: JSON.stringify(pkg.version),
