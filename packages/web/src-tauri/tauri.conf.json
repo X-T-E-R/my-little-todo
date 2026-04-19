@@ -29,7 +29,8 @@
     "active": true,
     "targets": "all",
     "externalBin": [
-      "binaries/mlt-server"
+      "binaries/mlt-server",
+      "binaries/mlt-plugin-runner"
     ],
     "createUpdaterArtifacts": true,
     "icon": [

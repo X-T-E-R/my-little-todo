@@ -11,7 +11,10 @@ vi.mock('./embeddedHostBridge', () => ({
   restartEmbeddedHost: vi.fn(),
 }));
 
-import { resolveDesktopHostBaseUrl } from './embeddedHostStore';
+import {
+  hasEmbeddedHostRuntimeConfigDrift,
+  resolveDesktopHostBaseUrl,
+} from './embeddedHostStore';
 
 describe('embeddedHostStore', () => {
   it('returns null when the embedded host module is disabled', () => {
@@ -62,5 +65,47 @@ describe('embeddedHostStore', () => {
         },
       }),
     ).toBe('http://127.0.0.1:23981');
+  });
+
+  it('detects pending runtime config drift only while the host is running', () => {
+    expect(
+      hasEmbeddedHostRuntimeConfigDrift(
+        {
+          enabled: true,
+          host: '127.0.0.1',
+          port: 24981,
+          authProvider: 'none',
+          signupPolicy: 'invite_only',
+        },
+        {
+          enabled: true,
+          host: '127.0.0.1',
+          port: 23981,
+          authProvider: 'none',
+          signupPolicy: 'invite_only',
+        },
+        'running',
+      ),
+    ).toBe(true);
+
+    expect(
+      hasEmbeddedHostRuntimeConfigDrift(
+        {
+          enabled: true,
+          host: '127.0.0.1',
+          port: 24981,
+          authProvider: 'none',
+          signupPolicy: 'invite_only',
+        },
+        {
+          enabled: true,
+          host: '127.0.0.1',
+          port: 23981,
+          authProvider: 'none',
+          signupPolicy: 'invite_only',
+        },
+        'inactive',
+      ),
+    ).toBe(false);
   });
 });

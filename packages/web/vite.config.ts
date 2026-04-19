@@ -6,6 +6,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 const host = process.env.TAURI_DEV_HOST;
+const apiProxyTarget = process.env.MLT_API_PROXY_TARGET || 'http://127.0.0.1:3001';
 
 const gitHash = (() => {
   try {
@@ -111,11 +112,11 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:3001',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
       '/health': {
-        target: 'http://127.0.0.1:3001',
+        target: apiProxyTarget,
         changeOrigin: true,
       },
     },

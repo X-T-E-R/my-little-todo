@@ -1,43 +1,39 @@
 import { Server } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useModuleStore } from '../../modules/moduleStore';
+import { useToastStore } from '../../stores/toastStore';
 import { isTauriEnv } from '../../utils/platform';
-import { useEmbeddedHostStore } from './embeddedHostStore';
+import {
+  embeddedHostBaseUrl,
+  isLoopbackHost,
+} from './embeddedHostContract';
+import {
+  hasEmbeddedHostRuntimeConfigDrift,
+  useEmbeddedHostStore,
+} from './embeddedHostStore';
 
-function ChoiceRow<T extends string>({
+function InfoField({
   label,
   value,
-  onChange,
-  options,
+  description,
 }: {
   label: string;
-  value: T;
-  onChange: (next: T) => void;
-  options: readonly { id: T; label: string }[];
+  value: string;
+  description?: string;
 }) {
   return (
-    <div>
+    <div
+      className="rounded-[var(--radius-card)] border px-4 py-3"
+      style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+    >
       <p className="text-xs font-medium text-[var(--color-text-secondary)]">{label}</p>
-      <div className="mt-2 flex flex-wrap gap-2">
-        {options.map((option) => (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => onChange(option.id)}
-            className="rounded-full px-3 py-1.5 text-xs font-medium transition-colors"
-            style={{
-              background: value === option.id ? 'var(--color-accent-soft)' : 'var(--color-bg)',
-              color: value === option.id ? 'var(--color-accent)' : 'var(--color-text-secondary)',
-              border: `1px solid ${
-                value === option.id ? 'var(--color-accent)' : 'var(--color-border)'
-              }`,
-            }}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+      <p className="mt-1 text-sm text-[var(--color-text)]">{value}</p>
+      {description ? (
+        <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-tertiary)]">
+          {description}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -45,10 +41,13 @@ function ChoiceRow<T extends string>({
 export function EmbeddedHostSettings() {
   const { t } = useTranslation('settings');
   const moduleEnabled = useModuleStore((s) => s.isEnabled('embedded-host'));
+  const showToast = useToastStore((s) => s.showToast);
   const {
     hydrated,
     config,
+    runtimeConfig,
     status,
+    baseUrl,
     lastError,
     hydrate,
     saveConfig,
@@ -58,7 +57,14 @@ export function EmbeddedHostSettings() {
   } = useEmbeddedHostStore();
   const [host, setHost] = useState(config.host);
   const [port, setPort] = useState(String(config.port));
+  const restartToastShownRef = useRef(false);
   const tauri = isTauriEnv();
+  const runtimeConfigDrift = hasEmbeddedHostRuntimeConfigDrift(config, runtimeConfig, status);
+  const currentBaseUrl =
+    moduleEnabled && status === 'running'
+      ? baseUrl ?? embeddedHostBaseUrl(runtimeConfig ?? config)
+      : null;
+  const savedBaseUrl = embeddedHostBaseUrl(config);
 
   useEffect(() => {
     void hydrate();
@@ -68,6 +74,26 @@ export function EmbeddedHostSettings() {
     setHost(config.host);
     setPort(String(config.port));
   }, [config.host, config.port]);
+
+  useEffect(() => {
+    if (!moduleEnabled || !runtimeConfigDrift) {
+      restartToastShownRef.current = false;
+      return;
+    }
+    if (restartToastShownRef.current) return;
+    restartToastShownRef.current = true;
+    showToast({
+      type: 'info',
+      message: t('Embedded host settings were saved. Restart the embedded host to apply them.'),
+      action: {
+        label: t('Restart Embedded Host'),
+        onClick: () => {
+          void restartRuntime();
+        },
+      },
+      duration: 6000,
+    });
+  }, [moduleEnabled, restartRuntime, runtimeConfigDrift, showToast, t]);
 
   if (!tauri) {
     return (
@@ -104,6 +130,54 @@ export function EmbeddedHostSettings() {
           {lastError ? (
             <p className="mt-1 text-xs text-[var(--color-danger, #ef4444)]">{lastError}</p>
           ) : null}
+
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <InfoField
+              label={t('Current endpoint')}
+              value={currentBaseUrl ?? t('Not running')}
+              description={
+                currentBaseUrl
+                  ? t('Other desktop tools should call this address right now.')
+                  : t('The embedded host is not exposing a local port right now.')
+              }
+            />
+            <InfoField
+              label={t('Saved endpoint')}
+              value={savedBaseUrl}
+              description={
+                runtimeConfigDrift
+                  ? t('Saved changes are waiting for restart.')
+                  : t('Saved settings will be used the next time the embedded host starts.')
+              }
+            />
+          </div>
+
+          {runtimeConfigDrift ? (
+            <div
+              className="mt-3 rounded-[var(--radius-card)] border px-4 py-3"
+              style={{
+                borderColor: 'var(--color-warning, #f59e0b)',
+                background: 'color-mix(in srgb, var(--color-warning, #f59e0b) 10%, var(--color-surface))',
+              }}
+            >
+              <p className="text-xs font-semibold text-[var(--color-text)]">
+                {t('Saved changes are waiting for restart.')}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                {t('Restart the embedded host to apply the new address and mode.')}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void restartRuntime()}
+                  className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-xs font-medium"
+                >
+                  {t('Restart Embedded Host')}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               type="button"
@@ -139,7 +213,18 @@ export function EmbeddedHostSettings() {
           <input
             value={host}
             onChange={(event) => setHost(event.target.value)}
-            onBlur={() => void saveConfig({ host })}
+            onBlur={() => {
+              const nextHost = host.trim() || config.host;
+              if (!isLoopbackHost(nextHost)) {
+                setHost(config.host);
+                showToast({
+                  type: 'error',
+                  message: t('Desktop embedded host currently supports 127.0.0.1 or localhost only.'),
+                });
+                return;
+              }
+              void saveConfig({ host: nextHost });
+            }}
             className="mt-2 w-full rounded-xl border px-3 py-2 text-xs outline-none transition-colors"
             style={{
               background: 'var(--color-bg)',
@@ -148,7 +233,7 @@ export function EmbeddedHostSettings() {
             }}
           />
           <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
-            {t('127.0.0.1 = local only · 0.0.0.0 = all interfaces · or specify a network interface IP')}
+            {t('127.0.0.1 / localhost = local only. LAN exposure is not wired yet in this desktop build.')}
           </p>
         </div>
 
@@ -172,36 +257,38 @@ export function EmbeddedHostSettings() {
               color: 'var(--color-text)',
             }}
           />
+          <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
+            {t('Changing the port only takes effect after the embedded host restarts.')}
+          </p>
         </div>
 
-        <ChoiceRow
-          label={t('Embedded host auth')}
-          value={config.authProvider}
-          onChange={(next) => {
-            void saveConfig({ authProvider: next });
-          }}
-          options={[
-            { id: 'none', label: t('No Auth') },
-            { id: 'embedded', label: t('Single User') },
-          ]}
-        />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <InfoField label={t('Embedded host auth')} value={t('No Auth')} />
+          <InfoField
+            label={t('Embedded host signup policy')}
+            value={t('Invite Only')}
+            description={t('Signup policy is inactive while embedded auth is unavailable.')}
+          />
+        </div>
 
-        <ChoiceRow
-          label={t('Embedded host signup policy')}
-          value={config.signupPolicy}
-          onChange={(next) => {
-            void saveConfig({ signupPolicy: next });
-          }}
-          options={[
-            { id: 'invite_only', label: t('Invite Only') },
-            { id: 'open', label: t('Open Signup') },
-            { id: 'admin_only', label: t('Admin Only') },
-          ]}
-        />
+        <div
+          className="rounded-[var(--radius-card)] border px-4 py-3"
+          style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+        >
+          <p className="text-xs font-medium text-[var(--color-text-secondary)]">
+            {t('Desktop capability status')}
+          </p>
+          <p className="mt-1 text-sm text-[var(--color-text)]">
+            {t('Desktop embedded host currently supports 127.0.0.1 / localhost and No Auth only.')}
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-tertiary)]">
+            {t('LAN exposure, embedded auth, and signup policy are not wired yet in this desktop build.')}
+          </p>
+        </div>
 
-        {!hydrated && (
+        {!hydrated ? (
           <p className="text-[11px] text-[var(--color-text-tertiary)]">{t('Loading...')}</p>
-        )}
+        ) : null}
       </section>
     </div>
   );

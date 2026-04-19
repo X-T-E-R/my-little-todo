@@ -15,9 +15,10 @@
 2. 安装依赖（在 monorepo 根目录）：`pnpm install`
 3. 构建 SDK：`pnpm --filter @my-little-todo/plugin-sdk build`
 4. 构建共享 runner 骨架：`pnpm --filter @my-little-todo/plugin-runner build`
-5. 构建示例插件：`pnpm --filter @example/mltp-hello-world build`  
+5. 如需验证桌面端可执行 runner：`pnpm --filter @my-little-todo/plugin-runner build:binary -- --target <target-triple> --output <absolute-output-path>`
+6. 构建示例插件：`pnpm --filter @example/mltp-hello-world build`
    产物：`examples/plugins/hello-world/dist/hello-world-0.1.0.mltp`
-6. 在应用 **设置 → 插件 → 第三方插件** 中，使用「从文件安装」选择该 `.mltp`。
+7. 在应用 **设置 → 插件 → 第三方插件** 中，使用「从文件安装」选择该 `.mltp`。
 
 ## 文档索引
 
@@ -52,13 +53,19 @@ server 插件的目标方向是：
 - 不依赖系统 Node
 - 不直接接触宿主数据库连接或根路由
 
+在桌面端，第三方 server 插件还有两个显式前提：
+
+- `embedded-host` 模块必须已启用并处于运行中
+- 打包好的 `mlt-plugin-runner` 必须随桌面应用一起存在
+
 ## 当前阶段说明
 
 - 目前仓库已经有：
   - `defineServerPlugin()` SDK 入口
   - `plugin-runner` 共享骨架
   - 宿主侧 extension registry / `/api/mcp` / `/api/plugins/:pluginId/*` 网关骨架
+  - Tauri 桌面端的 embedded host + bundled `mlt-plugin-runner` 生命周期接线
 - 目前还没有：
   - 完整官方 MCP SDK 接线
-  - 真正统一的桌面 sidecar / 服务器 child-process 生命周期实现
-- 所以现在的 server 插件能力属于“骨架已立、运行时仍在收敛中”的阶段
+  - 服务器宿主侧的统一 child-process runner manager
+- 所以现在的 server 插件能力已经能在桌面宿主跑起来，但整体仍处于“桌面已接通、服务器端继续收敛”的阶段

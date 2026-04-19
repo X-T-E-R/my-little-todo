@@ -20,6 +20,13 @@ import type { DataStore, LocalChangeRecord } from './dataStore';
 import { LOCAL_DESKTOP_USER_ID } from './localUser';
 import { CREATE_INDEXES_SQL, CREATE_TABLES_SQL, SCHEMA_VERSION } from './sqliteSchema';
 import {
+  DESKTOP_HOST_COMPATIBILITY_ALTERS,
+  DESKTOP_HOST_COMPATIBILITY_COLUMNS,
+  findMissingDesktopHostColumns,
+  formatDesktopHostCompatibilityRepairMessage,
+  needsDesktopHostCompatibilityRepair,
+} from './sqliteDesktopHostCompatibility';
+import {
   deriveTaskFacetFromEntry,
   hydrateTaskWithEntry,
   normalizeTaskRoleIds,
@@ -35,6 +42,83 @@ type CapDB = {
   execute(statement: string, values?: unknown[]): Promise<{ changes?: { changes?: number } }>;
   query(statement: string, values?: unknown[]): Promise<{ values?: Record<string, unknown>[] }>;
 };
+
+async function getTableColumns(
+  db: CapDB,
+  table: keyof typeof DESKTOP_HOST_COMPATIBILITY_COLUMNS,
+): Promise<string[]> {
+  const rows = await db.query(`PRAGMA table_info(${table})`);
+  return (rows.values ?? [])
+    .map((row) => (row.name != null ? String(row.name).trim() : ''))
+    .filter((column) => column.length > 0);
+}
+
+async function getMissingDesktopHostColumns(db: CapDB): Promise<string[]> {
+  const columnsByTable = Object.create(null) as Record<
+    keyof typeof DESKTOP_HOST_COMPATIBILITY_COLUMNS,
+    string[]
+  >;
+
+  for (const table of Object.keys(DESKTOP_HOST_COMPATIBILITY_COLUMNS) as Array<
+    keyof typeof DESKTOP_HOST_COMPATIBILITY_COLUMNS
+  >) {
+    columnsByTable[table] = await getTableColumns(db, table);
+  }
+
+  return findMissingDesktopHostColumns(columnsByTable);
+}
+
+async function applyDesktopHostCompatibilityMigration(db: CapDB): Promise<void> {
+  for (const sql of DESKTOP_HOST_COMPATIBILITY_ALTERS) {
+    try {
+      await db.execute(sql);
+    } catch {
+      /* column may already exist */
+    }
+  }
+
+  await db.execute('UPDATE tasks SET user_id = ? WHERE trim(COALESCE(user_id, \'\')) = \'\'', [
+    LOCAL_DESKTOP_USER_ID,
+  ]);
+  await db.execute(
+    'UPDATE stream_entries SET user_id = ? WHERE trim(COALESCE(user_id, \'\')) = \'\'',
+    [LOCAL_DESKTOP_USER_ID],
+  );
+  await db.execute('UPDATE settings SET user_id = ? WHERE trim(COALESCE(user_id, \'\')) = \'\'', [
+    LOCAL_DESKTOP_USER_ID,
+  ]);
+  await db.execute('UPDATE blobs SET owner = ? WHERE trim(COALESCE(owner, \'\')) = \'\'', [
+    LOCAL_DESKTOP_USER_ID,
+  ]);
+
+  await db.execute(`CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  try {
+    await db.execute('ALTER TABLE users ADD COLUMN is_enabled INTEGER NOT NULL DEFAULT 1');
+  } catch {
+    /* column may already exist */
+  }
+  await db.execute(`CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT
+  )`);
+  await db.execute(`CREATE TABLE IF NOT EXISTS invites (
+    code TEXT PRIMARY KEY,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT,
+    consumed_at TEXT,
+    consumed_by TEXT
+  )`);
+}
 
 function coerceBlobBytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) return value;
@@ -75,9 +159,6 @@ async function ensureSchema(db: CapDB): Promise<void> {
   for (const sql of CREATE_TABLES_SQL) {
     await db.execute(sql);
   }
-  for (const sql of CREATE_INDEXES_SQL) {
-    await db.execute(sql);
-  }
 
   await db.execute('INSERT OR IGNORE INTO version_seq (id, current_version) VALUES (1, 0)');
 
@@ -86,6 +167,11 @@ async function ensureSchema(db: CapDB): Promise<void> {
     await db.execute(
       `INSERT INTO schema_version (version, applied_at) VALUES (${SCHEMA_VERSION}, ${Date.now()})`,
     );
+    const missingDesktopHostColumns = await getMissingDesktopHostColumns(db);
+    if (missingDesktopHostColumns.length > 0) {
+      console.warn(formatDesktopHostCompatibilityRepairMessage(0, missingDesktopHostColumns));
+      await applyDesktopHostCompatibilityMigration(db);
+    }
   } else {
     const ver = rows.values[0]?.version != null ? Number(rows.values[0].version) : 0;
     if (ver < 3) {
@@ -364,91 +450,22 @@ async function ensureSchema(db: CapDB): Promise<void> {
     );
     const verBefore17 =
       rowsV16.values?.[0]?.version != null ? Number(rowsV16.values[0].version) : 0;
-    if (verBefore17 < 17) {
-      const alterColumns = [
-        `ALTER TABLE tasks ADD COLUMN user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
-        `ALTER TABLE stream_entries ADD COLUMN user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
-        `ALTER TABLE settings ADD COLUMN user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
-        `ALTER TABLE blobs ADD COLUMN owner TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
-      ];
-      for (const sql of alterColumns) {
-        try {
-          await db.execute(sql);
-        } catch {
-          /* column may already exist */
-        }
-      }
-
-      await db.execute(
-        'UPDATE tasks SET user_id = ? WHERE trim(COALESCE(user_id, \'\')) = \'\'',
-        [LOCAL_DESKTOP_USER_ID],
-      );
-      await db.execute(
-        'UPDATE stream_entries SET user_id = ? WHERE trim(COALESCE(user_id, \'\')) = \'\'',
-        [LOCAL_DESKTOP_USER_ID],
-      );
-      await db.execute(
-        'UPDATE settings SET user_id = ? WHERE trim(COALESCE(user_id, \'\')) = \'\'',
-        [LOCAL_DESKTOP_USER_ID],
-      );
-      await db.execute(
-        'UPDATE blobs SET owner = ? WHERE trim(COALESCE(owner, \'\')) = \'\'',
-        [LOCAL_DESKTOP_USER_ID],
-      );
-
-      await db.execute(`CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        username TEXT NOT NULL UNIQUE,
-        password_hash TEXT NOT NULL,
-        is_admin INTEGER NOT NULL DEFAULT 0,
-        is_enabled INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`);
-      try {
-        await db.execute(
-          'ALTER TABLE users ADD COLUMN is_enabled INTEGER NOT NULL DEFAULT 1',
+    const missingDesktopHostColumns = await getMissingDesktopHostColumns(db);
+    if (needsDesktopHostCompatibilityRepair(verBefore17, missingDesktopHostColumns)) {
+      if (missingDesktopHostColumns.length > 0) {
+        console.warn(
+          formatDesktopHostCompatibilityRepairMessage(verBefore17, missingDesktopHostColumns),
         );
-      } catch {
-        /* column may already exist */
       }
-      await db.execute(`CREATE TABLE IF NOT EXISTS sessions (
-        token TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        expires_at TEXT
-      )`);
-      await db.execute(`CREATE TABLE IF NOT EXISTS invites (
-        code TEXT PRIMARY KEY,
-        created_by TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        expires_at TEXT,
-        consumed_at TEXT,
-        consumed_by TEXT
-      )`);
-
-      const compatibilityIndexes = [
-        'CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id, id)',
-        'CREATE INDEX IF NOT EXISTS idx_tasks_user_version ON tasks(user_id, version)',
-        'CREATE UNIQUE INDEX IF NOT EXISTS idx_stream_user_id ON stream_entries(user_id, id)',
-        'CREATE INDEX IF NOT EXISTS idx_stream_user_date ON stream_entries(user_id, date_key)',
-        'CREATE INDEX IF NOT EXISTS idx_stream_user_version ON stream_entries(user_id, version)',
-        'CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_user_key ON settings(user_id, key)',
-        'CREATE INDEX IF NOT EXISTS idx_settings_user ON settings(user_id)',
-        'CREATE INDEX IF NOT EXISTS idx_blobs_owner ON blobs(owner)',
-        'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)',
-      ];
-      for (const sql of compatibilityIndexes) {
-        try {
-          await db.execute(sql);
-        } catch {
-          /* index may already exist */
-        }
-      }
-
+      await applyDesktopHostCompatibilityMigration(db);
       await db.execute(
         `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (17, ${Date.now()})`,
       );
     }
+  }
+
+  for (const sql of CREATE_INDEXES_SQL) {
+    await db.execute(sql);
   }
 }
 

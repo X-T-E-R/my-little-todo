@@ -40,6 +40,11 @@ coverage/
 pnpm-debug.log*
 *.tmp
 .worktrees/
+playwright-report/
+test-results/
+packages/web/playwright-report/
+packages/web/test-results/
+msedgedriver.exe
 
 # Internal docs (not for public release)
 参考资料/

@@ -7,6 +7,7 @@ import {
   EMBEDDED_HOST_CONFIG_KEYS,
   embeddedHostBaseUrl,
   normalizeEmbeddedHostConfig,
+  sameEmbeddedHostConfig,
   validateEmbeddedHostConfig,
   type EmbeddedHostConfig,
   type EmbeddedHostRuntimeState,
@@ -22,6 +23,7 @@ import {
 interface EmbeddedHostStoreState extends EmbeddedHostRuntimeState {
   hydrated: boolean;
   config: EmbeddedHostConfig;
+  runtimeConfig: EmbeddedHostConfig | null;
   hydrate: () => Promise<void>;
   saveConfig: (patch: Partial<EmbeddedHostConfig>) => Promise<void>;
   syncRuntimeState: () => Promise<void>;
@@ -58,9 +60,20 @@ export function getDesktopEmbeddedHostBaseUrl(): string | null {
   });
 }
 
+export function hasEmbeddedHostRuntimeConfigDrift(
+  config: EmbeddedHostConfig,
+  runtimeConfig: EmbeddedHostConfig | null,
+  status: EmbeddedHostStatus,
+): boolean {
+  if (status !== 'running') return false;
+  if (!runtimeConfig) return false;
+  return !sameEmbeddedHostConfig(config, runtimeConfig);
+}
+
 export const useEmbeddedHostStore = create<EmbeddedHostStoreState>((set, get) => ({
   hydrated: false,
   config: DEFAULT_EMBEDDED_HOST_CONFIG,
+  runtimeConfig: null,
   status: 'inactive',
   baseUrl: null,
   lastError: undefined,
@@ -82,10 +95,15 @@ export const useEmbeddedHostStore = create<EmbeddedHostStoreState>((set, get) =>
           ? signupPolicy
           : undefined,
     });
+    const state = get();
 
     set({
       hydrated: true,
       config,
+      runtimeConfig:
+        state.status === 'running' && !state.runtimeConfig
+          ? normalizeEmbeddedHostConfig(config)
+          : state.runtimeConfig,
     });
 
     if (isTauriEnv()) {
@@ -127,12 +145,17 @@ export const useEmbeddedHostStore = create<EmbeddedHostStoreState>((set, get) =>
         status: runtime.status,
         baseUrl: runtime.baseUrl,
         lastError: runtime.lastError,
+        runtimeConfig:
+          runtime.status === 'running'
+            ? get().runtimeConfig ?? normalizeEmbeddedHostConfig(get().config)
+            : null,
       });
     } catch (error) {
       set({
         status: 'failed',
         baseUrl: null,
         lastError: error instanceof Error ? error.message : String(error),
+        runtimeConfig: null,
       });
     }
   },
@@ -150,12 +173,14 @@ export const useEmbeddedHostStore = create<EmbeddedHostStoreState>((set, get) =>
         status: runtime.status,
         baseUrl: runtime.baseUrl,
         lastError: runtime.lastError,
+        runtimeConfig: runtime.status === 'running' ? config : null,
       });
     } catch (error) {
       set({
         status: 'failed',
         baseUrl: null,
         lastError: error instanceof Error ? error.message : String(error),
+        runtimeConfig: null,
       });
     }
   },
@@ -168,12 +193,14 @@ export const useEmbeddedHostStore = create<EmbeddedHostStoreState>((set, get) =>
         status: runtime.status,
         baseUrl: runtime.baseUrl,
         lastError: runtime.lastError,
+        runtimeConfig: null,
       });
     } catch (error) {
       set({
         status: 'failed',
         baseUrl: null,
         lastError: error instanceof Error ? error.message : String(error),
+        runtimeConfig: null,
       });
     }
   },
@@ -191,12 +218,14 @@ export const useEmbeddedHostStore = create<EmbeddedHostStoreState>((set, get) =>
         status: runtime.status,
         baseUrl: runtime.baseUrl,
         lastError: runtime.lastError,
+        runtimeConfig: runtime.status === 'running' ? config : null,
       });
     } catch (error) {
       set({
         status: 'failed',
         baseUrl: null,
         lastError: error instanceof Error ? error.message : String(error),
+        runtimeConfig: null,
       });
     }
   },
@@ -205,6 +234,7 @@ export const useEmbeddedHostStore = create<EmbeddedHostStoreState>((set, get) =>
     set({
       status: nextStatus,
       lastError: patch.lastError ?? get().lastError,
+      runtimeConfig: nextStatus === 'running' ? get().runtimeConfig : null,
       baseUrl:
         nextStatus === 'running' && useModuleStore.getState().isEnabled('embedded-host')
           ? patch.baseUrl ?? get().baseUrl

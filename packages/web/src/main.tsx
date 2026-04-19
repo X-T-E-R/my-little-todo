@@ -10,6 +10,7 @@ import { createDirectExecutor, startAutoSync } from './storage/offlineQueue';
 import { setSettingsApiBase } from './storage/settingsApi';
 import { useAuthStore } from './stores/authStore';
 import { getSyncEngine } from './sync';
+import { reportNativeDiagnostic } from './utils/nativeDiagnostics';
 import { getPlatform, initPlatform } from './utils/platform';
 import { resolveRuntimeMode } from './utils/runtimeMode';
 import { AnnotatorShell } from './widgets/AnnotatorShell';
@@ -108,6 +109,7 @@ async function main() {
 
 main().catch((err) => {
   console.error('Fatal initialization error:', err);
+  void reportNativeDiagnostic('error', 'Fatal initialization error', err);
   const root = document.getElementById('root');
   if (root) {
     root.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui;flex-direction:column;gap:12px;padding:24px;text-align:center">

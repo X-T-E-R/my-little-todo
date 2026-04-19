@@ -4,6 +4,7 @@ import { getAuthToken } from '../stores/authStore';
 import { getSettingsApiBase } from '../storage/settingsApi';
 import { createHttpClient } from '../utils/httpClient';
 import { isTauriEnv } from '../utils/platform';
+import { startDesktopPluginRunner } from './pluginRunnerBridge';
 import type { InstalledPluginRecord } from './types';
 
 export type ServerRuntimePatch = Pick<
@@ -44,7 +45,13 @@ const activeRunners = new Map<string, ActiveRunner>();
 
 let launcherOverride: PluginServerLauncher | null = null;
 
-function defaultLauncher(_options: PluginServerLaunchOptions): Promise<PluginServerController> {
+function defaultLauncher(options: PluginServerLaunchOptions): Promise<PluginServerController> {
+  if (isTauriEnv()) {
+    return startDesktopPluginRunner({
+      pluginId: options.pluginId,
+      entryPoint: options.entryPoint,
+    });
+  }
   return Promise.reject(
     new Error('No bundled plugin server runner is available in this build yet.'),
   );

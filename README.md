@@ -64,6 +64,7 @@ A local-first app that works out of the box — no server required.
 2. Install and launch — the first run will guide you through the initial setup
 3. Data is stored in a local SQLite database — no account or server needed
 4. If you use a shared deployment, web clients can point to the same My Little Todo server; native clients can also add that server later as an optional sync target.
+5. Desktop now includes an optional built-in `embedded-host` module. When enabled, it exposes local `/api/*`, `/api/mcp`, and plugin gateway endpoints for other desktop software. When disabled, no local API or MCP port is exposed.
 
 Before upgrading the desktop app, create a full JSON export from `Settings -> Data`.
 
@@ -190,6 +191,8 @@ Add to your MCP client configuration:
 }
 ```
 
+On Tauri desktop, this MCP endpoint is exposed by the optional `embedded-host` module instead of the main UI runtime. If the module is disabled, desktop MCP is unavailable until you enable and start it from settings.
+
 ### Available Tools
 
 | Tool | Description |
@@ -268,6 +271,13 @@ Removed public fields:
 - `PUT /api/tasks/:id` accepts the normalized task schema. Legacy fields are rejected.
 - `GET /api/stream*` returns normalized stream entry views.
 - `PUT /api/stream/:id` accepts `role_id` for the stream primary role and never exposes `extracted_task_id`.
+
+### Desktop Embedded Host Notes
+
+- Tauri desktop stays local-first even when the embedded host is enabled.
+- The embedded host is a built-in optional module and can be fully disabled.
+- When disabled, desktop does not listen on a local API/MCP port.
+- Third-party desktop server plugins depend on both the embedded host and the bundled `mlt-plugin-runner`.
 
 ## Support
 

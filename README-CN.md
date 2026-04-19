@@ -64,6 +64,7 @@
 2. 安装并启动，首次打开会进入引导设置
 3. 数据存储在本地 SQLite 数据库中，无需账户或服务器
 4. 如果要连接共享部署，只需让多个客户端指向同一个 My Little Todo 服务端即可。默认服务端就是开箱即用的 embedded auth + hosted 共享模式。
+5. 桌面端现在还有一个可选的内置 `embedded-host` 模块。开启后，会给其他桌面软件暴露本机 `/api/*`、`/api/mcp` 和插件网关；关闭后不会监听任何本地 API / MCP 端口。
 
 升级桌面端前，请先在 `设置 -> 数据` 中做一次完整 JSON 导出。
 
@@ -190,6 +191,8 @@ My Little Todo 内置原生 [MCP (Model Context Protocol)](https://modelcontextp
 }
 ```
 
+在 Tauri 桌面端，这个 MCP 地址由可选的 `embedded-host` 模块提供，不是主界面进程默认一直存在。模块关闭时，桌面 MCP 不可用，需要先在设置里启用并启动。
+
 ### 可用工具
 
 | 工具 | 说明 |
@@ -268,6 +271,13 @@ Stream 在 REST / MCP 中暴露的字段：
 - `PUT /api/tasks/:id` 必须使用新 task schema；旧字段会被拒绝。
 - `GET /api/stream*` 返回标准化 stream 主记录视图。
 - `PUT /api/stream/:id` 使用 `role_id` 作为 stream 主角色字段，且不再暴露 `extracted_task_id`。
+
+### 桌面内嵌宿主说明
+
+- Tauri 桌面端仍然是本地优先，开启内嵌宿主不会把主数据路径改成强依赖本地 API。
+- `embedded-host` 是内置可选模块，可以完全关闭。
+- 关闭后，桌面端不会监听任何本机 API / MCP 端口。
+- 第三方桌面 server 插件依赖两部分同时存在：`embedded-host` 和打包好的 `mlt-plugin-runner`。
 
 ## 赞助
 

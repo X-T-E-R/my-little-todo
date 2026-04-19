@@ -8,6 +8,36 @@
 
 **Tech Stack:** Tauri 2, Rust (`mlt-server`, sidecar binary, Tauri commands), React + Zustand, SQLite, Vitest, cargo test.
 
+## Progress Snapshot (2026-04-20)
+
+### Already Landed
+
+- Built-in `embedded-host` module registration, settings entry, and runtime-gated MCP / plugin server consumers are in place.
+- Tauri sidecar lifecycle commands (`status/start/stop/restart`) are wired and the packaged desktop build can auto-start the embedded host.
+- Desktop core SQLite has been moved toward the shared multi-user schema with a stable pseudo-user for local mode.
+- The settings page now shows current endpoint vs saved endpoint, detects config drift while running, and prompts for embedded-host restart when saved changes are not yet applied.
+- Desktop settings are now honest about current capability: loopback only, no auth only, no fake LAN / embedded-auth toggles exposed as if they were working.
+- Tauri desktop now also bundles and launches `mlt-plugin-runner`; desktop server plugins can register against the embedded host instead of staying permanently unavailable.
+
+### Remaining High-Priority Work
+
+1. Manual Tauri click-through validation:
+   - Enable / disable `embedded-host`
+   - Change host / port in settings
+   - Verify restart prompt and runtime status transitions in the desktop UI
+   - Confirm MCP settings reflect live desktop host state after each transition
+2. Optional future capabilities after the base path is stable:
+   - LAN exposure
+   - Embedded auth / signup policy
+   - If those become real runtime capabilities, add restart-app or restart-host prompts only where they are actually required
+3. Server-host parity:
+   - Reuse the same bundled `mlt-plugin-runner` lifecycle model on the server host
+   - Keep desktop and server extension registry behavior aligned
+4. Docs closeout:
+   - README / README-CN / plugin docs / desktop build docs
+   - Explicitly document that the desktop embedded host can be fully disabled
+   - Explain that server plugins on desktop depend on both embedded host and bundled plugin runner
+
 ---
 
 ### Task 1: Define The Embedded Host Module And Shared Runtime Contract

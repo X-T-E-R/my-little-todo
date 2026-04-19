@@ -36,18 +36,16 @@ export const DEFAULT_EMBEDDED_HOST_CONFIG: EmbeddedHostConfig = {
 export function normalizeEmbeddedHostConfig(
   input: Partial<EmbeddedHostConfig>,
 ): EmbeddedHostConfig {
+  const host = input.host?.trim() || DEFAULT_EMBEDDED_HOST_CONFIG.host;
   return {
     enabled: input.enabled ?? DEFAULT_EMBEDDED_HOST_CONFIG.enabled,
-    host: input.host?.trim() || DEFAULT_EMBEDDED_HOST_CONFIG.host,
+    host: isLoopbackHost(host) ? host : DEFAULT_EMBEDDED_HOST_CONFIG.host,
     port:
       typeof input.port === 'number' && Number.isInteger(input.port) && input.port > 0
         ? input.port
         : DEFAULT_EMBEDDED_HOST_CONFIG.port,
-    authProvider: input.authProvider === 'embedded' ? 'embedded' : 'none',
-    signupPolicy:
-      input.signupPolicy === 'admin_only' || input.signupPolicy === 'open'
-        ? input.signupPolicy
-        : 'invite_only',
+    authProvider: 'none',
+    signupPolicy: 'invite_only',
   };
 }
 
@@ -56,8 +54,8 @@ export function isLoopbackHost(host: string): boolean {
 }
 
 export function validateEmbeddedHostConfig(config: EmbeddedHostConfig): void {
-  if (!isLoopbackHost(config.host) && config.authProvider === 'none') {
-    throw new Error('LAN mode requires embedded auth.');
+  if (!isLoopbackHost(config.host)) {
+    throw new Error('Desktop embedded host currently supports 127.0.0.1 or localhost only.');
   }
 }
 
@@ -65,3 +63,16 @@ export function embeddedHostBaseUrl(config: EmbeddedHostConfig): string {
   return `http://${config.host}:${config.port}`;
 }
 
+export function sameEmbeddedHostConfig(
+  left: EmbeddedHostConfig | null | undefined,
+  right: EmbeddedHostConfig | null | undefined,
+): boolean {
+  if (!left || !right) return false;
+  return (
+    left.enabled === right.enabled &&
+    left.host === right.host &&
+    left.port === right.port &&
+    left.authProvider === right.authProvider &&
+    left.signupPolicy === right.signupPolicy
+  );
+}

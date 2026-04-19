@@ -115,6 +115,17 @@ async function hydratePluginsAndModules(hydrateModules: () => Promise<void>) {
   }
 }
 
+async function shouldBypassNativeOnboarding() {
+  if (!isNativeClient()) return false;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const flags = await invoke<{ skipOnboarding?: boolean }>('native_runtime_flags');
+    return flags?.skipOnboarding === true;
+  } catch {
+    return false;
+  }
+}
+
 function useAppInitialization({
   authChecked,
   authMode,
@@ -145,6 +156,7 @@ function useAppInitialization({
   useEffect(() => {
     if (!authChecked) return;
     if (authMode && !token) return;
+    let cancelled = false;
 
     loadStream();
     loadTasks();
@@ -156,18 +168,32 @@ function useAppInitialization({
     void ensureFocusSessionHydrated();
     void hydratePluginsAndModules(hydrateModules);
     startReminderService();
-    getSetting('onboarding-completed')
-      .then((value) => {
+    void (async () => {
+      if (await shouldBypassNativeOnboarding()) {
+        localStorage.setItem('mlt-onboarding-completed', 'true');
+        if (!cancelled) setShowOnboarding(false);
+        return;
+      }
+      try {
+        const value = await getSetting('onboarding-completed');
         if (value === 'true') {
           localStorage.setItem('mlt-onboarding-completed', 'true');
         }
-        setShowOnboarding(
-          value !== 'true' && localStorage.getItem('mlt-onboarding-completed') !== 'true',
-        );
-      })
-      .catch(() => {
-        setShowOnboarding(localStorage.getItem('mlt-onboarding-completed') !== 'true');
-      });
+        if (!cancelled) {
+          setShowOnboarding(
+            value !== 'true' && localStorage.getItem('mlt-onboarding-completed') !== 'true',
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setShowOnboarding(localStorage.getItem('mlt-onboarding-completed') !== 'true');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     authChecked,
     authMode,

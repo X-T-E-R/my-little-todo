@@ -34,9 +34,20 @@ const embeddedHostStore = vi.hoisted(() => ({
 
 vi.mock('../features/embedded-host/embeddedHostStore', () => embeddedHostStore);
 
+const pluginRunnerBridge = vi.hoisted(() => ({
+  startDesktopPluginRunner: vi.fn(async () => ({
+    baseUrl: 'http://127.0.0.1:4111',
+    token: 'bridge-token-1',
+    stop: vi.fn(async () => {}),
+  })),
+}));
+
+vi.mock('./pluginRunnerBridge', () => pluginRunnerBridge);
+
 import {
   reconcilePluginServerRuntime,
   setPluginServerLauncherForTests,
+  stopPluginServerRuntime,
 } from './pluginServerRuntime';
 
 describe('pluginServerRuntime', () => {
@@ -57,11 +68,47 @@ describe('pluginServerRuntime', () => {
     },
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await stopPluginServerRuntime('demo-server');
     updates.length = 0;
     httpClient.request.mockClear();
     embeddedHostStore.getDesktopEmbeddedHostBaseUrl.mockReturnValue('http://127.0.0.1:23981');
+    pluginRunnerBridge.startDesktopPluginRunner.mockClear();
     setPluginServerLauncherForTests(null);
+  });
+
+  it('uses the bundled Tauri plugin runner launcher by default', async () => {
+    await reconcilePluginServerRuntime(
+      {
+        id: 'demo-server',
+        manifest,
+        installedAt: '2026-04-14T00:00:00.000Z',
+        enabled: true,
+        source: 'file',
+        stability: 'beta',
+        serverApproved: true,
+        serverStatus: 'inactive',
+      },
+      async (pluginId, patch) => {
+        updates.push({ pluginId, patch });
+      },
+    );
+
+    expect(pluginRunnerBridge.startDesktopPluginRunner).toHaveBeenCalledWith({
+      pluginId: 'demo-server',
+      entryPoint: 'server.js',
+    });
+    expect(httpClient.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'POST',
+        url: 'http://127.0.0.1:23981/api/plugins/extensions/register',
+        bodyText: expect.stringContaining('"runnerToken":"bridge-token-1"'),
+      }),
+    );
+    expect(updates.at(-1)).toEqual({
+      pluginId: 'demo-server',
+      patch: { serverStatus: 'running', serverLastError: undefined },
+    });
   });
 
   it('transitions approved plugins from starting to running and registers extension routes', async () => {

@@ -14,6 +14,23 @@ Output will be in `packages/web/src-tauri/target/release/bundle/`.
 
 **Storage**: Local SQLite via `@tauri-apps/plugin-sql`. No server needed. Data stored in the app's data directory.
 
+Desktop builds now prepare two sidecars:
+
+- `mlt-server` for the optional desktop embedded host
+- `mlt-plugin-runner` for third-party desktop server plugins
+
+The Tauri build script compiles `packages/plugin-runner` and also compiles a standalone `mlt-plugin-runner` executable. If you need to build that runner manually:
+
+```bash
+pnpm --filter @my-little-todo/plugin-runner build:binary -- --target <target-triple> --output <absolute-output-path>
+```
+
+Example on Windows:
+
+```bash
+pnpm --filter @my-little-todo/plugin-runner build:binary -- --target x86_64-pc-windows-msvc --output packages/web/src-tauri/binaries/mlt-plugin-runner-x86_64-pc-windows-msvc.exe
+```
+
 ## Android App (Capacitor)
 
 Prerequisites: **JDK 17** on `PATH` or `JAVA_HOME` set (Android Studio bundles one — e.g. on Windows: `C:\Program Files\Android\Android Studio\jbr`).
@@ -92,3 +109,14 @@ cp -r packages/admin/dist/* static/admin/
 ```
 
 See [deployment/binary.md](../deployment/binary.md) for running the server.
+
+## Desktop Plugin Runner Smoke Check
+
+Before cutting a desktop build that should support third-party server plugins, it is worth running:
+
+```bash
+pnpm --filter @my-little-todo/plugin-runner test
+cargo check -p my-little-todo
+```
+
+That verifies the shared runner contract, the compiled runner executable, and the Tauri host wiring.

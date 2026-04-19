@@ -9,6 +9,10 @@ fn main() {
     println!("cargo:rerun-if-changed=tauri.conf.json");
     println!("cargo:rerun-if-changed=../../../crates/server");
     println!("cargo:rerun-if-changed=../../../crates/server-bin");
+    println!("cargo:rerun-if-changed=../../../packages/plugin-runner/src");
+    println!("cargo:rerun-if-changed=../../../packages/plugin-runner/package.json");
+    println!("cargo:rerun-if-changed=../../../packages/plugin-runner/tsconfig.json");
+    println!("cargo:rerun-if-changed=../../../packages/plugin-runner/scripts/compile-runner.mjs");
     println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-env-changed=TARGET");
     println!("cargo:rerun-if-env-changed=HOST");
@@ -16,6 +20,9 @@ fn main() {
 
     if let Err(error) = prepare_embedded_host_sidecar() {
         panic!("failed to prepare embedded host sidecar: {}", error);
+    }
+    if let Err(error) = prepare_plugin_runner_artifacts() {
+        panic!("failed to prepare plugin runner artifacts: {}", error);
     }
 
     tauri_build::build()
@@ -75,6 +82,119 @@ fn prepare_embedded_host_sidecar() -> Result<(), String> {
         .ok_or_else(|| "built sidecar binary was not found".to_string())?;
     fs::copy(&source, &destination).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn prepare_plugin_runner_artifacts() -> Result<(), String> {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").map_err(|e| e.to_string())?);
+    let workspace_root = manifest_dir
+        .join("..")
+        .join("..")
+        .join("..")
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    let profile = env::var("PROFILE").map_err(|e| e.to_string())?;
+    let target = env::var("TARGET").map_err(|e| e.to_string())?;
+    let binaries_dir = manifest_dir.join("binaries");
+    let temp_dir = manifest_dir.join("target").join("plugin-runner-sidecar");
+    fs::create_dir_all(&binaries_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+    let destination = binaries_dir.join(format!(
+        "mlt-plugin-runner-{}{}",
+        target,
+        executable_suffix()
+    ));
+    let temp_output = temp_dir.join(format!(
+        "mlt-plugin-runner-{}{}",
+        target,
+        executable_suffix()
+    ));
+
+    run_pnpm(
+        &workspace_root,
+        &[
+            "--filter",
+            "@my-little-todo/plugin-runner",
+            "run",
+            "build",
+        ],
+    )?;
+    run_node(
+        &workspace_root,
+        &[
+            "packages/plugin-runner/scripts/compile-runner.mjs",
+            "--target",
+            &target,
+            "--output",
+            temp_output
+                .to_str()
+                .ok_or_else(|| "plugin runner output path is not valid UTF-8".to_string())?,
+        ],
+    )?;
+    match fs::copy(&temp_output, &destination) {
+        Ok(_) => {}
+        Err(error) if profile != "release" && destination.exists() => {
+            println!(
+                "cargo:warning=failed to refresh debug plugin runner sidecar ({}); keeping existing binary at {}",
+                error,
+                destination.display()
+            );
+        }
+        Err(error) => {
+            return Err(format!(
+                "failed to copy plugin runner sidecar into binaries dir: {}",
+                error
+            ));
+        }
+    }
+    if profile != "release" {
+        println!(
+            "cargo:warning=prepared debug plugin runner sidecar at {}",
+            destination.display()
+        );
+    }
+    Ok(())
+}
+
+fn run_pnpm(workspace_root: &Path, args: &[&str]) -> Result<(), String> {
+    let pnpm = env::var("PNPM").unwrap_or_else(|_| default_pnpm_command().to_string());
+    let status = Command::new(pnpm)
+        .args(args)
+        .current_dir(workspace_root)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err(format!("pnpm {} exited with status {}", args.join(" "), status));
+    }
+    Ok(())
+}
+
+fn run_node(workspace_root: &Path, args: &[&str]) -> Result<(), String> {
+    let node = env::var("NODE").unwrap_or_else(|_| default_node_command().to_string());
+    let status = Command::new(node)
+        .args(args)
+        .current_dir(workspace_root)
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err(format!("node {} exited with status {}", args.join(" "), status));
+    }
+    Ok(())
+}
+
+fn default_pnpm_command() -> &'static str {
+    if cfg!(windows) {
+        "pnpm.cmd"
+    } else {
+        "pnpm"
+    }
+}
+
+fn default_node_command() -> &'static str {
+    if cfg!(windows) {
+        "node.exe"
+    } else {
+        "node"
+    }
 }
 
 fn resolve_sidecar_binary(target_dir: &Path, profile: &str, target: &str) -> Option<PathBuf> {
