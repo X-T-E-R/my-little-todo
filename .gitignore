@@ -7,6 +7,7 @@ dist-pwa/
 # Rust / Cargo
 target/
 packages/web/src-tauri/target/
+packages/web/src-tauri/binaries/
 
 # IDE
 .vscode/
@@ -33,6 +34,11 @@ data/
 import-legacy-data.json
 .playwright-cli/
 output/
+coverage/
+.cache/
+*.log
+pnpm-debug.log*
+*.tmp
 .worktrees/
 
 # Internal docs (not for public release)
