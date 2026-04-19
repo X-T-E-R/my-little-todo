@@ -5,7 +5,7 @@ export {
   countViewSwitchesInWindow,
 } from './coachActivityStore';
 export { useExecCoachStore } from './execCoachStore';
-export type { EnergyLevel } from './execCoachStore';
+export type { EnergyLevel, WorkMode, WorkStateHistoryEntry } from './execCoachStore';
 export {
   ensureFocusSessionHydrated,
   useFocusSessionStore,

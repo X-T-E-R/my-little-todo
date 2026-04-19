@@ -13,13 +13,20 @@ function normalizeMarkdown(markdown: string): string {
   return markdown.replace(/\r\n/g, '\n').trim();
 }
 
+function isInlineSemanticRefBlock(block: string): boolean {
+  return /^(?:\[\[(?:task|intent|spark|next|block):[^\]]+\]\]\s*)+$/i.test(block.trim());
+}
+
 function isStructuredRuntimeBlock(block: string): boolean {
   const trimmed = block.trim();
   if (!trimmed) return true;
   if (/^(- \[[ xX]\] .+\n?)+$/m.test(trimmed)) return true;
+  if (isInlineSemanticRefBlock(trimmed)) return true;
   if (/^> \[!waiting:/i.test(trimmed)) return true;
   if (/^> \[!interrupt:/i.test(trimmed)) return true;
+  if (/^> \[!block(?::[^\]]+)?\]/i.test(trimmed)) return true;
   if (/^#{3,6}\s+(waiting|interrupt|等待|中断)\s*[·•|-]\s*[a-z]+\s*[:：]\s*.+$/im.test(trimmed)) return true;
+  if (/^#{3,6}\s+(block|卡点)\s*[·•|-]?\s*.+$/im.test(trimmed)) return true;
   if (/^##\s+Checkpoint\b/i.test(trimmed)) return true;
   return false;
 }
@@ -61,7 +68,14 @@ export function extractRawCaptureCandidates(markdown: string): WorkThreadRawCapt
     .filter((block, index) => {
       if (isStructuredRuntimeBlock(block)) return false;
       if (isHeadingOnlyBlock(block)) return false;
-      if (index > 0 && isStructuredRuntimeBlock(blocks[index - 1] ?? '')) return false;
+      const previousBlock = blocks[index - 1] ?? '';
+      if (
+        index > 0 &&
+        isStructuredRuntimeBlock(previousBlock) &&
+        !isInlineSemanticRefBlock(previousBlock)
+      ) {
+        return false;
+      }
       return true;
     })
     .map((block, blockIndex) => ({

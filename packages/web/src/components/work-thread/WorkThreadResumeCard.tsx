@@ -121,7 +121,7 @@ export function WorkThreadResumeCard({
             {t('thread_waiting_summary_label')}
           </div>
           <p className="mt-2 text-sm leading-6" style={{ color: 'var(--color-text-secondary)' }}>
-            {thread.resumeCard.waitingSummary || t('thread_waiting_summary_empty')}
+            {thread.resumeCard.blockSummary || thread.resumeCard.waitingSummary || t('thread_waiting_summary_empty')}
           </p>
         </div>
       </div>

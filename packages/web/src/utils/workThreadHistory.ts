@@ -34,6 +34,15 @@ function extractTitleSuffix(title: string, prefix: string): string | null {
   return title.startsWith(prefix) ? title.slice(prefix.length).trim() : null;
 }
 
+function extractBlockTitle(title: string): string | null {
+  return (
+    extractTitleSuffix(title, 'Added waiting condition:') ??
+    extractTitleSuffix(title, 'Captured interrupt:') ??
+    extractTitleSuffix(title, 'Added block:') ??
+    extractTitleSuffix(title, 'Captured block:')
+  );
+}
+
 function translateStatus(status: string, t?: HistoryTranslator): string {
   const fallbackMap: Record<string, string> = {
     running: 'Running',
@@ -76,11 +85,14 @@ export function getWorkThreadEventMetaLabel(
   if (event.type === 'checkpoint_saved') {
     return tx(t, 'thread_history_meta_checkpoint', 'checkpoint');
   }
-  if (event.type === 'waiting_updated') {
-    return tx(t, 'thread_history_meta_waiting', 'waiting');
+  if (event.type === 'intent_added' || event.type === 'intent_updated' || event.type === 'intent_archived') {
+    return tx(t, 'thread_history_meta_intent', 'intent');
   }
-  if (event.type === 'interrupt_captured') {
-    return tx(t, 'thread_history_meta_interrupt', 'interrupt');
+  if (event.type === 'intent_promoted') {
+    return tx(t, 'thread_history_meta_intent_promoted', 'intent promoted');
+  }
+  if (event.type === 'waiting_updated' || event.type === 'interrupt_captured') {
+    return tx(t, 'thread_history_meta_block', 'block');
   }
   if (event.type === 'next_action_added') {
     return tx(t, 'thread_history_meta_next_step', 'next step');
@@ -125,20 +137,12 @@ export function getWorkThreadEventDisplayTitle(
     return tx(t, 'thread_history_event_dispatched', 'Dispatched thread');
   }
 
-  if (event.type === 'waiting_updated') {
-    const title = extractTitleSuffix(event.title, 'Added waiting condition:');
+  if (event.type === 'waiting_updated' || event.type === 'interrupt_captured') {
+    const title = extractBlockTitle(event.title);
     if (title) {
-      return tx(t, 'thread_history_event_waiting_added', `Waiting: ${title}`, { title });
+      return tx(t, 'thread_history_event_block_updated', `Block: ${title}`, { title });
     }
-    return tx(t, 'thread_history_event_waiting_updated', 'Updated waiting condition');
-  }
-
-  if (event.type === 'interrupt_captured') {
-    const title = extractTitleSuffix(event.title, 'Captured interrupt:');
-    if (title) {
-      return tx(t, 'thread_history_event_interrupt_captured', `Interrupt: ${title}`, { title });
-    }
-    return tx(t, 'thread_history_event_interrupt_updated', 'Updated interrupt');
+    return tx(t, 'thread_history_event_block_generic', 'Updated block');
   }
 
   if (event.type === 'next_action_added') {
@@ -177,6 +181,10 @@ export function getWorkThreadEventDisplayTitle(
 
   if (event.type === 'resume_card_updated') {
     return tx(t, 'thread_history_event_resume_card', 'Updated resume card');
+  }
+
+  if (event.type === 'intent_added' || event.type === 'intent_updated' || event.type === 'intent_archived' || event.type === 'intent_promoted') {
+    return event.title || tx(t, 'thread_history_event_intent', 'Updated intent');
   }
 
   if (event.type === 'decision_recorded') {
@@ -241,6 +249,8 @@ export function buildWorkThreadRestoreHistory(
     }
 
     if (
+      event.type === 'intent_added' ||
+      event.type === 'intent_promoted' ||
       event.type === 'next_action_added' ||
       event.type === 'task_created' ||
       event.type === 'task_linked' ||

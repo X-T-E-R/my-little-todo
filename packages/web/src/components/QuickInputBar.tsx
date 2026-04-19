@@ -3,6 +3,7 @@ import { Calendar, Hash, Send, Tag, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRoleStore, useStreamStore, useTaskStore, useWorkThreadStore } from '../stores';
+import { getWorkThreadFocusLabel, getWorkThreadFocusParent } from '../utils/workThreadFocus';
 
 interface QuickInputBarProps {
   open: boolean;
@@ -11,7 +12,7 @@ interface QuickInputBarProps {
 
 const DDL_TYPES = ['soft', 'commitment', 'hard'] as const;
 type DdlType = (typeof DDL_TYPES)[number];
-type QuickInputTarget = 'task' | 'thread';
+type QuickInputTarget = 'task' | 'intent' | 'next-action';
 
 export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
   const { t } = useTranslation('stream');
@@ -26,11 +27,16 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
   const roles = useRoleStore((s) => s.roles);
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const currentThread = useWorkThreadStore((s) => s.currentThread);
+  const workspaceFocus = useWorkThreadStore((s) => s.workspaceFocus);
+  const setWorkspaceFocus = useWorkThreadStore((s) => s.setWorkspaceFocus);
+  const requestWorkspaceAutoFocus = useWorkThreadStore((s) => s.requestWorkspaceAutoFocus);
   const addTaskToThread = useWorkThreadStore((s) => s.addTaskToThread);
+  const addIntent = useWorkThreadStore((s) => s.addIntent);
+  const addNextAction = useWorkThreadStore((s) => s.addNextAction);
 
   useEffect(() => {
     if (open) {
-      setTarget(currentThread ? 'thread' : 'task');
+      setTarget(currentThread ? 'intent' : 'task');
       setTimeout(() => inputRef.current?.focus(), 100);
     } else {
       setTitle('');
@@ -52,15 +58,31 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
       .filter(Boolean);
 
     try {
-      const entry = await addEntry(trimmed, true, {
-        ddl: parsedDdl,
-        ddlType: ddlDate ? ddlType : undefined,
-        tags: parsedTags.length > 0 ? parsedTags : undefined,
-      });
-      if (target === 'thread' && currentThread && entry.extractedTaskId) {
-        const task = useTaskStore.getState().tasks.find((item) => item.id === entry.extractedTaskId);
-        if (task) {
-          await addTaskToThread(task, 'current');
+      if (target === 'intent' && currentThread) {
+        const created = await addIntent(trimmed, { insertIntoDoc: true });
+        if (created) {
+          setWorkspaceFocus({ kind: 'intent', id: created.id });
+          requestWorkspaceAutoFocus(created.id);
+        }
+      } else if (target === 'next-action' && currentThread) {
+        const created = await addNextAction(trimmed, 'user', {
+          ...getWorkThreadFocusParent(workspaceFocus),
+          insertIntoDoc: true,
+        });
+        if (created) {
+          requestWorkspaceAutoFocus(created.id);
+        }
+      } else {
+        const entry = await addEntry(trimmed, true, {
+          ddl: parsedDdl,
+          ddlType: ddlDate ? ddlType : undefined,
+          tags: parsedTags.length > 0 ? parsedTags : undefined,
+        });
+        if (currentThread && entry.extractedTaskId) {
+          const task = useTaskStore.getState().tasks.find((item) => item.id === entry.extractedTaskId);
+          if (task) {
+            await addTaskToThread(task, 'current');
+          }
         }
       }
     } catch {
@@ -73,7 +95,22 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
     setTags('');
     setShowMeta(false);
     onClose();
-  }, [title, ddlDate, ddlType, tags, addEntry, addTaskToThread, currentThread, onClose, target]);
+  }, [
+    title,
+    ddlDate,
+    ddlType,
+    tags,
+    addEntry,
+    addIntent,
+    addNextAction,
+    addTaskToThread,
+    currentThread,
+    onClose,
+    requestWorkspaceAutoFocus,
+    setWorkspaceFocus,
+    target,
+    workspaceFocus,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -111,33 +148,54 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
             )}
 
             {currentThread && (
-              <div
-                className="flex shrink-0 items-center rounded-full border p-0.5"
-                style={{ borderColor: 'var(--color-border)' }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setTarget('thread')}
-                  className={`rounded-full px-2 py-1 text-[11px] font-medium transition-colors ${
-                    target === 'thread'
-                      ? 'bg-[var(--color-accent)] text-white'
-                      : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
-                  }`}
-                  title={currentThread.title}
+              <div className="flex min-w-0 items-center gap-2">
+                <div
+                  className="flex shrink-0 items-center rounded-full border p-0.5"
+                  style={{ borderColor: 'var(--color-border)' }}
                 >
-                  {t('Thread')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTarget('task')}
-                  className={`rounded-full px-2 py-1 text-[11px] font-medium transition-colors ${
-                    target === 'task'
-                      ? 'bg-[var(--color-accent)] text-white'
-                      : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
-                  }`}
+                  <button
+                    type="button"
+                    onClick={() => setTarget('intent')}
+                    className={`rounded-full px-2 py-1 text-[11px] font-medium transition-colors ${
+                      target === 'intent'
+                        ? 'bg-[var(--color-accent)] text-white'
+                        : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
+                    }`}
+                    title={currentThread.title}
+                  >
+                    {t('quick_input_target_intent')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTarget('next-action')}
+                    className={`rounded-full px-2 py-1 text-[11px] font-medium transition-colors ${
+                      target === 'next-action'
+                        ? 'bg-[var(--color-accent)] text-white'
+                        : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
+                    }`}
+                    title={currentThread.title}
+                  >
+                    {t('quick_input_target_next')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTarget('task')}
+                    className={`rounded-full px-2 py-1 text-[11px] font-medium transition-colors ${
+                      target === 'task'
+                        ? 'bg-[var(--color-accent)] text-white'
+                        : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
+                    }`}
+                  >
+                    {t('Task')}
+                  </button>
+                </div>
+                <span
+                  className="min-w-0 truncate text-[11px]"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                  title={getWorkThreadFocusLabel(currentThread, workspaceFocus)}
                 >
-                  {t('Task')}
-                </button>
+                  {`当前焦点：${getWorkThreadFocusLabel(currentThread, workspaceFocus)}`}
+                </span>
               </div>
             )}
 
@@ -147,8 +205,10 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
-                currentThread && target === 'thread'
-                  ? t('Quick create task in current thread...', { ns: 'stream' })
+                currentThread && target === 'intent'
+                  ? t('quick_input_placeholder_intent')
+                  : currentThread && target === 'next-action'
+                    ? t('quick_input_placeholder_next')
                   : t('Quick create task...', { ns: 'stream' })
               }
               className="min-w-0 flex-1 bg-transparent text-sm text-[var(--color-text)] placeholder:text-[var(--color-text-tertiary)] outline-none"
@@ -157,6 +217,7 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
             <button
               type="button"
               onClick={() => setShowMeta((v) => !v)}
+              disabled={target !== 'task'}
               className={`rounded p-1.5 transition-colors ${showMeta ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'}`}
               title={t('More options', { ns: 'stream' })}
             >
@@ -182,7 +243,7 @@ export function QuickInputBar({ open, onClose }: QuickInputBarProps) {
           </div>
 
           <AnimatePresence>
-            {showMeta && (
+            {showMeta && target === 'task' && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}

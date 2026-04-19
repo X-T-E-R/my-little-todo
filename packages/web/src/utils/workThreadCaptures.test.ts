@@ -35,6 +35,24 @@ Waiting for a fresh key
       },
     ]);
   });
+
+  it('ignores inline semantic refs so they do not become raw capture events', () => {
+    expect(
+      extractRawCaptureCandidates(`[[intent:intent-1|梳理网关路线]]
+
+[[next:next-1|先跑通第三方 API]]
+
+[[block:block-1|等 Codex 结果]]
+
+普通补充说明`),
+    ).toEqual([
+      {
+        text: '普通补充说明',
+        kind: 'note',
+        blockIndex: 0,
+      },
+    ]);
+  });
 });
 
 describe('collectNewRawCaptureCandidates', () => {

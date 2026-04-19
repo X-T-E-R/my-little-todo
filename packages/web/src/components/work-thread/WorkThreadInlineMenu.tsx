@@ -4,40 +4,28 @@ import { useTranslation } from 'react-i18next';
 export function getWorkThreadSlashCommands(t: (key: string) => string): MarkdownSlashCommand[] {
   return [
     {
+      id: 'intent',
+      title: t('thread_slash_intent_title'),
+      description: t('thread_slash_intent_description'),
+      keywords: ['intent', 'plan', 'direction'],
+    },
+    {
+      id: 'spark',
+      title: t('thread_slash_spark_title'),
+      description: t('thread_slash_spark_description'),
+      keywords: ['spark', 'idea', 'branch'],
+    },
+    {
       id: 'next-action',
       title: t('thread_slash_next_action_title'),
       description: t('thread_slash_next_action_description'),
       keywords: ['todo', 'step', 'action'],
     },
     {
-      id: 'waiting',
-      title: t('thread_slash_waiting_title'),
-      description: t('thread_slash_waiting_description'),
-      keywords: ['blocked', 'dependency', 'wait'],
-    },
-    {
-      id: 'interrupt',
-      title: t('thread_slash_interrupt_title'),
-      description: t('thread_slash_interrupt_description'),
-      keywords: ['distraction', 'interrupt'],
-    },
-    {
-      id: 'note-context',
-      title: t('thread_slash_note_title'),
-      description: t('thread_slash_note_description'),
-      keywords: ['context', 'note'],
-    },
-    {
-      id: 'link-context',
-      title: t('thread_slash_link_title'),
-      description: t('thread_slash_link_description'),
-      keywords: ['url', 'reference', 'link'],
-    },
-    {
-      id: 'checkpoint',
-      title: t('thread_slash_checkpoint_title'),
-      description: t('thread_slash_checkpoint_description'),
-      keywords: ['resume', 'save'],
+      id: 'block',
+      title: t('thread_slash_block_title'),
+      description: t('thread_slash_block_description'),
+      keywords: ['block', 'stuck', 'blocked'],
     },
   ];
 }

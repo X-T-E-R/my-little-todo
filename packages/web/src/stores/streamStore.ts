@@ -36,6 +36,7 @@ interface StreamState {
       roleId?: string;
       entryType?: StreamEntryType;
       attachments?: Attachment[];
+      threadMeta?: StreamEntry['threadMeta'];
     },
   ) => Promise<StreamEntry>;
   updateEntry: (entry: StreamEntry) => Promise<void>;
@@ -130,6 +131,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       roleId?: string;
       entryType?: StreamEntryType;
       attachments?: Attachment[];
+      threadMeta?: StreamEntry['threadMeta'];
     },
   ) => {
     const { useRoleStore } = await import('./roleStore');
@@ -145,11 +147,18 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       entryType,
       roleId,
       attachments: meta?.attachments ?? [],
+      threadMeta: meta?.threadMeta,
     };
     set((state) => ({ entries: [...state.entries, optimistic] }));
 
     try {
-      const entry = await addStreamEntry(content, roleId, entryType, meta?.attachments ?? []);
+      const entry = await addStreamEntry(
+        content,
+        roleId,
+        entryType,
+        meta?.attachments ?? [],
+        meta?.threadMeta,
+      );
       set((state) => ({
         entries: state.entries.map((e) => (e.id === tempId ? entry : e)),
       }));

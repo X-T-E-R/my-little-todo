@@ -4,5 +4,6 @@ export * from './taskProgress.js';
 export * from './taskRoles.js';
 export * from './deriveTitle.js';
 export * from './projectTasks.js';
+export * from './workThreadBlocks.js';
 export * from './workThreadRuntime.js';
 export * from './workThreadMarkdown.js';

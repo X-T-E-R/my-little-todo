@@ -29,7 +29,7 @@ vi.mock('../stores/authStore', () => ({
 }));
 
 const embeddedHostStore = vi.hoisted(() => ({
-  getDesktopEmbeddedHostBaseUrl: vi.fn(() => 'http://127.0.0.1:23981'),
+  getDesktopEmbeddedHostBaseUrl: vi.fn<() => string | null>(() => 'http://127.0.0.1:23981'),
 }));
 
 vi.mock('../features/embedded-host/embeddedHostStore', () => embeddedHostStore);

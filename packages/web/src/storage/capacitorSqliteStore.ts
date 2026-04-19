@@ -17,6 +17,7 @@ import type {
 } from '@my-little-todo/core';
 import type { AttachmentConfig, UploadResult } from './blobApi';
 import type { DataStore, LocalChangeRecord } from './dataStore';
+import { LOCAL_DESKTOP_USER_ID } from './localUser';
 import { CREATE_INDEXES_SQL, CREATE_TABLES_SQL, SCHEMA_VERSION } from './sqliteSchema';
 import {
   deriveTaskFacetFromEntry,
@@ -196,13 +197,19 @@ async function ensureSchema(db: CapDB): Promise<void> {
         status TEXT NOT NULL DEFAULT 'ready',
         lane TEXT NOT NULL DEFAULT 'general',
         role_id TEXT,
+        root_markdown TEXT NOT NULL DEFAULT '',
+        exploration_markdown TEXT NOT NULL DEFAULT '',
         doc_markdown TEXT NOT NULL DEFAULT '',
         context_items TEXT NOT NULL DEFAULT '[]',
+        intents TEXT NOT NULL DEFAULT '[]',
+        spark_containers TEXT NOT NULL DEFAULT '[]',
         next_actions TEXT NOT NULL DEFAULT '[]',
         resume_card TEXT NOT NULL DEFAULT '{}',
         working_set TEXT NOT NULL DEFAULT '[]',
         waiting_for TEXT NOT NULL DEFAULT '[]',
         interrupts TEXT NOT NULL DEFAULT '[]',
+        exploration_blocks TEXT NOT NULL DEFAULT '[]',
+        inline_anchors TEXT NOT NULL DEFAULT '[]',
         scheduler_meta TEXT NOT NULL DEFAULT '{}',
         sync_meta TEXT NOT NULL DEFAULT '{"mode":"internal"}',
         suggestions TEXT,
@@ -283,6 +290,163 @@ async function ensureSchema(db: CapDB): Promise<void> {
       );
       await db.execute(
         `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (13, ${Date.now()})`,
+      );
+    }
+    const rowsV13 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
+    const verBefore14 =
+      rowsV13.values?.[0]?.version != null ? Number(rowsV13.values[0].version) : 0;
+    if (verBefore14 < 14) {
+      const alterColumns = [
+        'ALTER TABLE stream_entries ADD COLUMN thread_meta TEXT',
+        "ALTER TABLE work_threads ADD COLUMN exploration_blocks TEXT NOT NULL DEFAULT '[]'",
+      ];
+      for (const sql of alterColumns) {
+        try {
+          await db.execute(sql);
+        } catch {
+          /* column may already exist */
+        }
+      }
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (14, ${Date.now()})`,
+      );
+    }
+    const rowsV14 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
+    const verBefore15 =
+      rowsV14.values?.[0]?.version != null ? Number(rowsV14.values[0].version) : 0;
+    if (verBefore15 < 15) {
+      const alterColumns = [
+        "ALTER TABLE work_threads ADD COLUMN intents TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE work_threads ADD COLUMN inline_anchors TEXT NOT NULL DEFAULT '[]'",
+      ];
+      for (const sql of alterColumns) {
+        try {
+          await db.execute(sql);
+        } catch {
+          /* column may already exist */
+        }
+      }
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (15, ${Date.now()})`,
+      );
+    }
+    const rowsV15 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
+    const verBefore16 =
+      rowsV15.values?.[0]?.version != null ? Number(rowsV15.values[0].version) : 0;
+    if (verBefore16 < 16) {
+      const alterColumns = [
+        "ALTER TABLE work_threads ADD COLUMN root_markdown TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE work_threads ADD COLUMN exploration_markdown TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE work_threads ADD COLUMN spark_containers TEXT NOT NULL DEFAULT '[]'",
+      ];
+      for (const sql of alterColumns) {
+        try {
+          await db.execute(sql);
+        } catch {
+          /* column may already exist */
+        }
+      }
+      await db.execute(
+        "UPDATE work_threads SET root_markdown = doc_markdown WHERE trim(COALESCE(root_markdown, '')) = ''",
+      );
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (16, ${Date.now()})`,
+      );
+    }
+    const rowsV16 = await db.query(
+      'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+    );
+    const verBefore17 =
+      rowsV16.values?.[0]?.version != null ? Number(rowsV16.values[0].version) : 0;
+    if (verBefore17 < 17) {
+      const alterColumns = [
+        `ALTER TABLE tasks ADD COLUMN user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
+        `ALTER TABLE stream_entries ADD COLUMN user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
+        `ALTER TABLE settings ADD COLUMN user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
+        `ALTER TABLE blobs ADD COLUMN owner TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
+      ];
+      for (const sql of alterColumns) {
+        try {
+          await db.execute(sql);
+        } catch {
+          /* column may already exist */
+        }
+      }
+
+      await db.execute(
+        'UPDATE tasks SET user_id = ? WHERE trim(COALESCE(user_id, \'\')) = \'\'',
+        [LOCAL_DESKTOP_USER_ID],
+      );
+      await db.execute(
+        'UPDATE stream_entries SET user_id = ? WHERE trim(COALESCE(user_id, \'\')) = \'\'',
+        [LOCAL_DESKTOP_USER_ID],
+      );
+      await db.execute(
+        'UPDATE settings SET user_id = ? WHERE trim(COALESCE(user_id, \'\')) = \'\'',
+        [LOCAL_DESKTOP_USER_ID],
+      );
+      await db.execute(
+        'UPDATE blobs SET owner = ? WHERE trim(COALESCE(owner, \'\')) = \'\'',
+        [LOCAL_DESKTOP_USER_ID],
+      );
+
+      await db.execute(`CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        is_admin INTEGER NOT NULL DEFAULT 0,
+        is_enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+      try {
+        await db.execute(
+          'ALTER TABLE users ADD COLUMN is_enabled INTEGER NOT NULL DEFAULT 1',
+        );
+      } catch {
+        /* column may already exist */
+      }
+      await db.execute(`CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        expires_at TEXT
+      )`);
+      await db.execute(`CREATE TABLE IF NOT EXISTS invites (
+        code TEXT PRIMARY KEY,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        expires_at TEXT,
+        consumed_at TEXT,
+        consumed_by TEXT
+      )`);
+
+      const compatibilityIndexes = [
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id, id)',
+        'CREATE INDEX IF NOT EXISTS idx_tasks_user_version ON tasks(user_id, version)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_stream_user_id ON stream_entries(user_id, id)',
+        'CREATE INDEX IF NOT EXISTS idx_stream_user_date ON stream_entries(user_id, date_key)',
+        'CREATE INDEX IF NOT EXISTS idx_stream_user_version ON stream_entries(user_id, version)',
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_user_key ON settings(user_id, key)',
+        'CREATE INDEX IF NOT EXISTS idx_settings_user ON settings(user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_blobs_owner ON blobs(owner)',
+        'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)',
+      ];
+      for (const sql of compatibilityIndexes) {
+        try {
+          await db.execute(sql);
+        } catch {
+          /* index may already exist */
+        }
+      }
+
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (17, ${Date.now()})`,
       );
     }
   }
@@ -369,6 +533,7 @@ function rowToStreamDbRow(r: Record<string, unknown>): StreamEntryDbRow {
     extracted_task_id: r.extracted_task_id != null ? String(r.extracted_task_id) : null,
     tags: String(r.tags ?? '[]'),
     attachments: String(r.attachments ?? '[]'),
+    thread_meta: r.thread_meta != null ? String(r.thread_meta) : null,
     version: Number(r.version ?? 0),
     deleted_at: r.deleted_at != null ? Number(r.deleted_at) : null,
     updated_at:
@@ -417,16 +582,20 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
     const ts = now();
     const v = await bumpVersion(db);
     await db.execute(
-      'UPDATE tasks SET deleted_at = ?, updated_at = ?, version = ? WHERE id = ? AND deleted_at IS NULL',
-      [ts, ts, v, id],
+      'UPDATE tasks SET deleted_at = ?, updated_at = ?, version = ? WHERE user_id = ? AND id = ? AND deleted_at IS NULL',
+      [ts, ts, v, LOCAL_DESKTOP_USER_ID, id],
     );
   };
 
   return {
     async getAllTasks(): Promise<Task[]> {
       const [taskRows, streamRows] = await Promise.all([
-        db.query('SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC'),
-        db.query('SELECT * FROM stream_entries WHERE deleted_at IS NULL'),
+        db.query('SELECT * FROM tasks WHERE user_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC', [
+          LOCAL_DESKTOP_USER_ID,
+        ]),
+        db.query('SELECT * FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL', [
+          LOCAL_DESKTOP_USER_ID,
+        ]),
       ]);
       if (!taskRows.values) return [];
       const taskDbRows = taskRows.values.map((r) => rowToTaskDbRow(r));
@@ -440,14 +609,17 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
     },
 
     async getTask(id: string): Promise<Task | null> {
-      const rows = await db.query('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL', [id]);
+      const rows = await db.query('SELECT * FROM tasks WHERE user_id = ? AND id = ? AND deleted_at IS NULL', [
+        LOCAL_DESKTOP_USER_ID,
+        id,
+      ]);
       if (!rows.values?.length) return null;
       const taskRow = rowToTaskDbRow(rows.values[0]);
       const streamIds = [...new Set([taskRow.id, resolvedStreamEntryId(taskRow)])];
       const placeholders = streamIds.map(() => '?').join(', ');
       const streamRows = await db.query(
-        `SELECT * FROM stream_entries WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
-        streamIds,
+        `SELECT * FROM stream_entries WHERE user_id = ? AND id IN (${placeholders}) AND deleted_at IS NULL`,
+        [LOCAL_DESKTOP_USER_ID, ...streamIds],
       );
       const streamRowsById = new Map(
         (streamRows.values ?? []).map((r) => {
@@ -460,8 +632,8 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
 
     async putTask(task: Task): Promise<void> {
       const existingStreamRows = await db.query(
-        'SELECT * FROM stream_entries WHERE id = ? AND deleted_at IS NULL',
-        [task.id],
+        'SELECT * FROM stream_entries WHERE user_id = ? AND id = ? AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, task.id],
       );
       const existingStream = existingStreamRows.values?.[0]
         ? streamEntryFromDbRow(rowToStreamDbRow(existingStreamRows.values[0]))
@@ -479,15 +651,16 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const streamRow = streamEntryToDbRow(canonicalEntry, streamVersion, null);
       await db.execute(
         `INSERT INTO stream_entries (
-          id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
-          tags, attachments, version, deleted_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET
+          user_id, id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
+          tags, attachments, thread_meta, version, deleted_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(user_id, id) DO UPDATE SET
           content=excluded.content, entry_type=excluded.entry_type, timestamp=excluded.timestamp,
           date_key=excluded.date_key, role_id=excluded.role_id, extracted_task_id=excluded.extracted_task_id,
-          tags=excluded.tags, attachments=excluded.attachments, version=excluded.version, deleted_at=excluded.deleted_at,
+          tags=excluded.tags, attachments=excluded.attachments, thread_meta=excluded.thread_meta, version=excluded.version, deleted_at=excluded.deleted_at,
           updated_at=excluded.updated_at`,
         [
+          LOCAL_DESKTOP_USER_ID,
           streamRow.id,
           streamRow.content,
           streamRow.entry_type,
@@ -497,6 +670,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           null,
           streamRow.tags,
           streamRow.attachments,
+          streamRow.thread_meta ?? null,
           streamRow.version,
           streamRow.deleted_at,
           streamRow.updated_at ?? streamRow.timestamp,
@@ -508,13 +682,13 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const row = taskToDbRow(t, v, null);
       await db.execute(
         `INSERT INTO tasks (
-          id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
+          user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
           ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
           task_type,
           tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
           version, deleted_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(user_id, id) DO UPDATE SET
           title=excluded.title, title_customized=excluded.title_customized, description=excluded.description, status=excluded.status, body=excluded.body,
           created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
           ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
@@ -526,6 +700,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           status_history=excluded.status_history, progress_logs=excluded.progress_logs,
           version=excluded.version, deleted_at=excluded.deleted_at`,
         [
+          LOCAL_DESKTOP_USER_ID,
           row.id,
           row.title,
           row.title_customized,
@@ -566,8 +741,8 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        'UPDATE stream_entries SET deleted_at = ?, version = ? WHERE id = ? AND deleted_at IS NULL',
-        [ts, v, id],
+        'UPDATE stream_entries SET deleted_at = ?, version = ? WHERE user_id = ? AND id = ? AND deleted_at IS NULL',
+        [ts, v, LOCAL_DESKTOP_USER_ID, id],
       );
     },
 
@@ -576,10 +751,12 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
     async getStreamDay(dateKey: string): Promise<StreamEntry[]> {
       const [rows, taskRows] = await Promise.all([
         db.query(
-          'SELECT * FROM stream_entries WHERE date_key = ? AND deleted_at IS NULL ORDER BY timestamp ASC',
-          [dateKey],
+          'SELECT * FROM stream_entries WHERE user_id = ? AND date_key = ? AND deleted_at IS NULL ORDER BY timestamp ASC',
+          [LOCAL_DESKTOP_USER_ID, dateKey],
         ),
-        db.query('SELECT * FROM tasks WHERE deleted_at IS NULL'),
+        db.query('SELECT * FROM tasks WHERE user_id = ? AND deleted_at IS NULL', [
+          LOCAL_DESKTOP_USER_ID,
+        ]),
       ]);
       if (!rows.values) return [];
       return streamEntriesWithTaskLinks(
@@ -594,10 +771,12 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const minKey = formatDateKey(min);
       const [rows, taskRows] = await Promise.all([
         db.query(
-          'SELECT * FROM stream_entries WHERE deleted_at IS NULL AND date_key >= ? ORDER BY timestamp DESC',
-          [minKey],
+          'SELECT * FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL AND date_key >= ? ORDER BY timestamp DESC',
+          [LOCAL_DESKTOP_USER_ID, minKey],
         ),
-        db.query('SELECT * FROM tasks WHERE deleted_at IS NULL'),
+        db.query('SELECT * FROM tasks WHERE user_id = ? AND deleted_at IS NULL', [
+          LOCAL_DESKTOP_USER_ID,
+        ]),
       ]);
       if (!rows.values) return [];
       return streamEntriesWithTaskLinks(
@@ -608,7 +787,8 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
 
     async listStreamDateKeys(): Promise<string[]> {
       const rows = await db.query(
-        'SELECT DISTINCT date_key FROM stream_entries WHERE deleted_at IS NULL ORDER BY date_key DESC',
+        'SELECT DISTINCT date_key FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL ORDER BY date_key DESC',
+        [LOCAL_DESKTOP_USER_ID],
       );
       if (!rows.values) return [];
       return rows.values.map((r) => String(r.date_key));
@@ -620,10 +800,12 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const lim = Math.min(Math.max(1, limit), 500);
       const [rows, taskRows] = await Promise.all([
         db.query(
-          'SELECT * FROM stream_entries WHERE deleted_at IS NULL AND instr(lower(content), lower(?)) > 0 ORDER BY timestamp DESC LIMIT ?',
-          [needle, lim],
+          'SELECT * FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL AND instr(lower(content), lower(?)) > 0 ORDER BY timestamp DESC LIMIT ?',
+          [LOCAL_DESKTOP_USER_ID, needle, lim],
         ),
-        db.query('SELECT * FROM tasks WHERE deleted_at IS NULL'),
+        db.query('SELECT * FROM tasks WHERE user_id = ? AND deleted_at IS NULL', [
+          LOCAL_DESKTOP_USER_ID,
+        ]),
       ]);
       if (!rows.values) return [];
       return streamEntriesWithTaskLinks(
@@ -637,15 +819,16 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const row = streamEntryToDbRow(entry, v, null);
       await db.execute(
         `INSERT INTO stream_entries (
-          id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
-          tags, attachments, version, deleted_at, updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET
+          user_id, id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
+          tags, attachments, thread_meta, version, deleted_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(user_id, id) DO UPDATE SET
           content=excluded.content, entry_type=excluded.entry_type, timestamp=excluded.timestamp,
           date_key=excluded.date_key, role_id=excluded.role_id, extracted_task_id=excluded.extracted_task_id,
-          tags=excluded.tags, attachments=excluded.attachments, version=excluded.version, deleted_at=excluded.deleted_at,
+          tags=excluded.tags, attachments=excluded.attachments, thread_meta=excluded.thread_meta, version=excluded.version, deleted_at=excluded.deleted_at,
           updated_at=excluded.updated_at`,
         [
+          LOCAL_DESKTOP_USER_ID,
           row.id,
           row.content,
           row.entry_type,
@@ -655,14 +838,16 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           null,
           row.tags,
           row.attachments,
+          row.thread_meta ?? null,
           row.version,
           row.deleted_at,
           row.updated_at ?? row.timestamp,
         ],
       );
-      const linkedTaskRows = await db.query('SELECT * FROM tasks WHERE id = ? AND deleted_at IS NULL', [
-        entry.id,
-      ]);
+      const linkedTaskRows = await db.query(
+        'SELECT * FROM tasks WHERE user_id = ? AND id = ? AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, entry.id],
+      );
       const linkedTaskRaw = linkedTaskRows.values?.[0];
       if (linkedTaskRaw) {
         const linkedTask = taskFromDbRow(rowToTaskDbRow(linkedTaskRaw));
@@ -670,8 +855,14 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           const roleIds = normalizeTaskRoleIds(linkedTask, entry.roleId);
           const nextVersion = await bumpVersion(db);
           await db.execute(
-            'UPDATE tasks SET role_ids = ?, role_id = NULL, updated_at = ?, version = ? WHERE id = ? AND deleted_at IS NULL',
-            [roleIds.length > 0 ? JSON.stringify(roleIds) : null, Date.now(), nextVersion, entry.id],
+            'UPDATE tasks SET role_ids = ?, role_id = NULL, updated_at = ?, version = ? WHERE user_id = ? AND id = ? AND deleted_at IS NULL',
+            [
+              roleIds.length > 0 ? JSON.stringify(roleIds) : null,
+              Date.now(),
+              nextVersion,
+              LOCAL_DESKTOP_USER_ID,
+              entry.id,
+            ],
           );
         }
       }
@@ -682,15 +873,15 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        'UPDATE stream_entries SET deleted_at = ?, version = ? WHERE id = ? AND deleted_at IS NULL',
-        [ts, v, id],
+        'UPDATE stream_entries SET deleted_at = ?, version = ? WHERE user_id = ? AND id = ? AND deleted_at IS NULL',
+        [ts, v, LOCAL_DESKTOP_USER_ID, id],
       );
     },
 
     async getSetting(key: string): Promise<string | null> {
       const rows = await db.query(
-        'SELECT value FROM settings WHERE key = ? AND deleted_at IS NULL',
-        [key],
+        'SELECT value FROM settings WHERE user_id = ? AND key = ? AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, key],
       );
       return rows.values?.length ? (rows.values[0].value as string) : null;
     },
@@ -699,10 +890,10 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        `INSERT INTO settings (key, value, updated_at, version, deleted_at)
-         VALUES (?, ?, ?, ?, NULL)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, version = excluded.version, deleted_at = NULL`,
-        [key, value, ts, v],
+        `INSERT INTO settings (user_id, key, value, updated_at, version, deleted_at)
+         VALUES (?, ?, ?, ?, ?, NULL)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, version = excluded.version, deleted_at = NULL`,
+        [LOCAL_DESKTOP_USER_ID, key, value, ts, v],
       );
     },
 
@@ -710,13 +901,15 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        'UPDATE settings SET deleted_at = ?, updated_at = ?, version = ? WHERE key = ? AND deleted_at IS NULL',
-        [ts, ts, v, key],
+        'UPDATE settings SET deleted_at = ?, updated_at = ?, version = ? WHERE user_id = ? AND key = ? AND deleted_at IS NULL',
+        [ts, ts, v, LOCAL_DESKTOP_USER_ID, key],
       );
     },
 
     async getAllSettings(): Promise<Record<string, string>> {
-      const rows = await db.query('SELECT key, value FROM settings WHERE deleted_at IS NULL');
+      const rows = await db.query('SELECT key, value FROM settings WHERE user_id = ? AND deleted_at IS NULL', [
+        LOCAL_DESKTOP_USER_ID,
+      ]);
       const result: Record<string, string> = {};
       if (rows.values) {
         for (const row of rows.values) {
@@ -732,10 +925,11 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        `INSERT INTO blobs (id, filename, mime_type, size, data, created_at, deleted_at, version)
-         VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
+        `INSERT INTO blobs (id, owner, filename, mime_type, size, data, created_at, deleted_at, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
         [
           id,
+          LOCAL_DESKTOP_USER_ID,
           file.name,
           file.type || 'application/octet-stream',
           file.size,
@@ -759,8 +953,8 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
 
     async getBlobData(id: string) {
       const rows = await db.query(
-        'SELECT data, mime_type, filename FROM blobs WHERE id = ? AND deleted_at IS NULL LIMIT 1',
-        [id],
+        'SELECT data, mime_type, filename FROM blobs WHERE owner = ? AND id = ? AND deleted_at IS NULL LIMIT 1',
+        [LOCAL_DESKTOP_USER_ID, id],
       );
       const row = rows.values?.[0];
       if (!row) return null;
@@ -775,8 +969,8 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        'UPDATE blobs SET deleted_at = ?, version = ? WHERE id = ? AND deleted_at IS NULL',
-        [ts, v, id],
+        'UPDATE blobs SET deleted_at = ?, version = ? WHERE owner = ? AND id = ? AND deleted_at IS NULL',
+        [ts, v, LOCAL_DESKTOP_USER_ID, id],
       );
     },
 
@@ -848,22 +1042,28 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const row = serializeWorkThread(thread);
       await db.execute(
         `INSERT INTO work_threads (
-          id, title, mission, status, lane, role_id, doc_markdown, context_items, next_actions,
-          resume_card, working_set, waiting_for, interrupts, scheduler_meta, sync_meta, suggestions, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          id, title, mission, status, lane, role_id, root_markdown, exploration_markdown, doc_markdown, context_items, intents, spark_containers, next_actions,
+          resume_card, working_set, waiting_for, interrupts, exploration_blocks, inline_anchors, scheduler_meta, sync_meta, suggestions, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title=excluded.title,
           mission=excluded.mission,
           status=excluded.status,
           lane=excluded.lane,
           role_id=excluded.role_id,
+          root_markdown=excluded.root_markdown,
+          exploration_markdown=excluded.exploration_markdown,
           doc_markdown=excluded.doc_markdown,
           context_items=excluded.context_items,
+          intents=excluded.intents,
+          spark_containers=excluded.spark_containers,
           next_actions=excluded.next_actions,
           resume_card=excluded.resume_card,
           working_set=excluded.working_set,
           waiting_for=excluded.waiting_for,
           interrupts=excluded.interrupts,
+          exploration_blocks=excluded.exploration_blocks,
+          inline_anchors=excluded.inline_anchors,
           scheduler_meta=excluded.scheduler_meta,
           sync_meta=excluded.sync_meta,
           suggestions=excluded.suggestions,
@@ -875,13 +1075,19 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           row.status,
           row.lane,
           row.role_id,
+          row.root_markdown,
+          row.exploration_markdown,
           row.doc_markdown,
           row.context_items,
+          row.intents,
+          row.spark_containers,
           row.next_actions,
           row.resume_card,
           row.working_set,
           row.waiting_for,
           row.interrupts,
+          row.exploration_blocks,
+          row.inline_anchors,
           row.scheduler_meta,
           row.sync_meta,
           row.suggestions,
@@ -947,7 +1153,10 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
     async getChangesSince(sinceVersion: number): Promise<LocalChangeRecord[]> {
       const out: LocalChangeRecord[] = [];
 
-      const taskRows = await db.query('SELECT * FROM tasks WHERE version > ?', [sinceVersion]);
+      const taskRows = await db.query('SELECT * FROM tasks WHERE user_id = ? AND version > ?', [
+        LOCAL_DESKTOP_USER_ID,
+        sinceVersion,
+      ]);
       if (taskRows.values) {
         for (const r of taskRows.values) {
           const tr = rowToTaskDbRow(r);
@@ -962,9 +1171,10 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
         }
       }
 
-      const streamRows = await db.query('SELECT * FROM stream_entries WHERE version > ?', [
-        sinceVersion,
-      ]);
+      const streamRows = await db.query(
+        'SELECT * FROM stream_entries WHERE user_id = ? AND version > ?',
+        [LOCAL_DESKTOP_USER_ID, sinceVersion],
+      );
       if (streamRows.values) {
         for (const r of streamRows.values) {
           const sr = rowToStreamDbRow(r);
@@ -980,8 +1190,8 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       }
 
       const settingRows = await db.query(
-        "SELECT key, value, updated_at, version, deleted_at FROM settings WHERE version > ? AND key NOT LIKE '__sync_%'",
-        [sinceVersion],
+        "SELECT key, value, updated_at, version, deleted_at FROM settings WHERE user_id = ? AND version > ? AND key NOT LIKE '__sync_%'",
+        [LOCAL_DESKTOP_USER_ID, sinceVersion],
       );
       if (settingRows.values) {
         for (const r of settingRows.values) {
@@ -1010,8 +1220,8 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       }
 
       const blobRows = await db.query(
-        'SELECT id, filename, mime_type, size, created_at, version, deleted_at FROM blobs WHERE version > ?',
-        [sinceVersion],
+        'SELECT id, filename, mime_type, size, created_at, version, deleted_at FROM blobs WHERE owner = ? AND version > ?',
+        [LOCAL_DESKTOP_USER_ID, sinceVersion],
       );
       if (blobRows.values) {
         for (const r of blobRows.values) {

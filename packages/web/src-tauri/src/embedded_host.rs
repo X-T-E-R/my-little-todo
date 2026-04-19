@@ -203,6 +203,11 @@ fn resolve_sidecar_path() -> Result<PathBuf, String> {
         })
 }
 
+fn sqlite_database_url(path: &std::path::Path) -> String {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    format!("sqlite:{}?mode=rwc", normalized)
+}
+
 fn resolve_database_url(app: &AppHandle) -> Result<String, String> {
     let app_data_dir = app
         .path()
@@ -211,7 +216,7 @@ fn resolve_database_url(app: &AppHandle) -> Result<String, String> {
     std::fs::create_dir_all(&app_data_dir)
         .map_err(|error| format!("Failed to create app data dir: {}", error))?;
     let db_path = app_data_dir.join(LOCAL_SQLITE_FILE);
-    Ok(format!("sqlite:{}?mode=rwc", db_path.to_string_lossy()))
+    Ok(sqlite_database_url(&db_path))
 }
 
 async fn wait_for_health(base_url: &str, child: &mut Child) -> Result<(), String> {
@@ -364,5 +369,39 @@ pub async fn embedded_host_restart(
             manager.set_state(HOST_STATUS_FAILED, None, Some(error.clone()));
             Err(error)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{sqlite_database_url, validate_config, EmbeddedHostConfig};
+    use std::path::PathBuf;
+
+    fn default_config() -> EmbeddedHostConfig {
+        EmbeddedHostConfig {
+            enabled: true,
+            host: "127.0.0.1".into(),
+            port: 23981,
+            auth_provider: "none".into(),
+            signup_policy: "invite_only".into(),
+        }
+    }
+
+    #[test]
+    fn loopback_none_auth_is_valid() {
+        assert!(validate_config(&default_config()).is_ok());
+    }
+
+    #[test]
+    fn lan_requires_embedded_auth() {
+        let mut config = default_config();
+        config.host = "0.0.0.0".into();
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn sqlite_url_normalizes_windows_separators() {
+        let url = sqlite_database_url(&PathBuf::from(r"C:\tmp\mlt\data.db"));
+        assert_eq!(url, "sqlite:C:/tmp/mlt/data.db?mode=rwc");
     }
 }

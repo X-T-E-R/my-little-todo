@@ -11,6 +11,18 @@ export interface Attachment {
 
 export type StreamEntryType = 'spark' | 'task' | 'log';
 
+export type StreamSparkState = 'open' | 'promoted' | 'tasked' | 'archived';
+
+export interface StreamThreadMeta {
+  sourceThreadId?: string;
+  sparkState?: StreamSparkState;
+  promotedThreadId?: string;
+  linkedTaskId?: string;
+  originIntentId?: string;
+  parentIntentId?: string;
+  parentSparkId?: string;
+}
+
 export interface StreamEntry {
   id: string;
   content: string;
@@ -21,4 +33,5 @@ export interface StreamEntry {
   roleId?: string;
   /** 'spark' = default inspiration note, 'task' = promoted to task */
   entryType: StreamEntryType;
+  threadMeta?: StreamThreadMeta;
 }

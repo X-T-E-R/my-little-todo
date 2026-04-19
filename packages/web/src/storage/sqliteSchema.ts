@@ -3,7 +3,9 @@
  * Tasks and stream entries are first-class tables (not virtual files).
  */
 
-export const SCHEMA_VERSION = 13;
+import { LOCAL_DESKTOP_USER_ID } from './localUser';
+
+export const SCHEMA_VERSION = 17;
 
 export const CREATE_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -17,6 +19,7 @@ export const CREATE_TABLES_SQL = [
   )`,
 
   `CREATE TABLE IF NOT EXISTS tasks (
+    user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}',
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT '',
     title_customized INTEGER NOT NULL DEFAULT 0,
@@ -51,6 +54,7 @@ export const CREATE_TABLES_SQL = [
   )`,
 
   `CREATE TABLE IF NOT EXISTS stream_entries (
+    user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}',
     id TEXT PRIMARY KEY,
     content TEXT NOT NULL,
     entry_type TEXT NOT NULL DEFAULT 'spark',
@@ -60,12 +64,14 @@ export const CREATE_TABLES_SQL = [
     extracted_task_id TEXT,
     tags TEXT NOT NULL DEFAULT '[]',
     attachments TEXT NOT NULL DEFAULT '[]',
+    thread_meta TEXT,
     version INTEGER NOT NULL DEFAULT 0,
     deleted_at INTEGER,
     updated_at INTEGER
   )`,
 
   `CREATE TABLE IF NOT EXISTS settings (
+    user_id    TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}',
     key        TEXT PRIMARY KEY,
     value      TEXT NOT NULL,
     updated_at INTEGER NOT NULL,
@@ -75,6 +81,7 @@ export const CREATE_TABLES_SQL = [
 
   `CREATE TABLE IF NOT EXISTS blobs (
     id         TEXT PRIMARY KEY,
+    owner      TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}',
     filename   TEXT NOT NULL,
     mime_type  TEXT NOT NULL,
     size       INTEGER NOT NULL,
@@ -82,6 +89,32 @@ export const CREATE_TABLES_SQL = [
     created_at INTEGER NOT NULL,
     deleted_at INTEGER,
     version    INTEGER NOT NULL DEFAULT 0
+  )`,
+
+  /** Shared host auth/session tables for desktop embedded host compatibility. */
+  `CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    is_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS invites (
+    code TEXT PRIMARY KEY,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT,
+    consumed_at TEXT,
+    consumed_by TEXT
   )`,
 
   /** Local-only: 理一理 (Think Session) markdown sessions. */
@@ -102,13 +135,19 @@ export const CREATE_TABLES_SQL = [
     status TEXT NOT NULL DEFAULT 'ready',
     lane TEXT NOT NULL DEFAULT 'general',
     role_id TEXT,
+    root_markdown TEXT NOT NULL DEFAULT '',
+    exploration_markdown TEXT NOT NULL DEFAULT '',
     doc_markdown TEXT NOT NULL DEFAULT '',
     context_items TEXT NOT NULL DEFAULT '[]',
+    intents TEXT NOT NULL DEFAULT '[]',
+    spark_containers TEXT NOT NULL DEFAULT '[]',
     next_actions TEXT NOT NULL DEFAULT '[]',
     resume_card TEXT NOT NULL DEFAULT '{}',
     working_set TEXT NOT NULL DEFAULT '[]',
     waiting_for TEXT NOT NULL DEFAULT '[]',
     interrupts TEXT NOT NULL DEFAULT '[]',
+    exploration_blocks TEXT NOT NULL DEFAULT '[]',
+    inline_anchors TEXT NOT NULL DEFAULT '[]',
     scheduler_meta TEXT NOT NULL DEFAULT '{}',
     sync_meta TEXT NOT NULL DEFAULT '{"mode":"internal"}',
     suggestions TEXT,
@@ -149,12 +188,21 @@ export const CREATE_INDEXES_SQL = [
   'CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id) WHERE deleted_at IS NULL',
   'CREATE INDEX IF NOT EXISTS idx_tasks_ddl ON tasks(ddl) WHERE deleted_at IS NULL AND ddl IS NOT NULL',
   'CREATE INDEX IF NOT EXISTS idx_tasks_version ON tasks(version)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id, id)',
+  'CREATE INDEX IF NOT EXISTS idx_tasks_user_version ON tasks(user_id, version)',
   'CREATE INDEX IF NOT EXISTS idx_stream_date ON stream_entries(date_key) WHERE deleted_at IS NULL',
   'CREATE INDEX IF NOT EXISTS idx_stream_version ON stream_entries(version)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_stream_user_id ON stream_entries(user_id, id)',
+  'CREATE INDEX IF NOT EXISTS idx_stream_user_date ON stream_entries(user_id, date_key)',
+  'CREATE INDEX IF NOT EXISTS idx_stream_user_version ON stream_entries(user_id, version)',
   'CREATE INDEX IF NOT EXISTS idx_settings_updated ON settings(updated_at)',
   'CREATE INDEX IF NOT EXISTS idx_settings_version ON settings(version)',
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_user_key ON settings(user_id, key)',
+  'CREATE INDEX IF NOT EXISTS idx_settings_user ON settings(user_id)',
   'CREATE INDEX IF NOT EXISTS idx_blobs_deleted ON blobs(deleted_at)',
+  'CREATE INDEX IF NOT EXISTS idx_blobs_owner ON blobs(owner)',
   'CREATE INDEX IF NOT EXISTS idx_think_sessions_updated ON think_sessions(updated_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_work_threads_updated ON work_threads(updated_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_work_thread_events_thread ON work_thread_events(thread_id, created_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)',
 ];

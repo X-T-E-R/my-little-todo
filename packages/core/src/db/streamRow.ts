@@ -1,4 +1,4 @@
-import type { Attachment, StreamEntry, StreamEntryType } from '../models/stream.js';
+import type { Attachment, StreamEntry, StreamEntryType, StreamThreadMeta } from '../models/stream.js';
 import { formatDateKey } from '../utils/date.js';
 
 export interface StreamEntryDbRow {
@@ -11,6 +11,7 @@ export interface StreamEntryDbRow {
   extracted_task_id: string | null;
   tags: string;
   attachments: string;
+  thread_meta?: string | null;
   version: number;
   deleted_at: number | null;
   /** Wall-clock update time for LWW sync; defaults to `timestamp` when absent. */
@@ -28,6 +29,7 @@ function parseJson<T>(s: string, fallback: T): T {
 export function streamEntryFromDbRow(row: StreamEntryDbRow): StreamEntry {
   const tags = parseJson<string[]>(row.tags, []);
   const attachments = parseJson<Attachment[]>(row.attachments, []);
+  const threadMeta = parseJson<StreamThreadMeta | undefined>(row.thread_meta ?? '', undefined);
   return {
     id: row.id,
     content: row.content,
@@ -37,6 +39,7 @@ export function streamEntryFromDbRow(row: StreamEntryDbRow): StreamEntry {
     extractedTaskId: row.extracted_task_id ?? undefined,
     roleId: row.role_id ?? undefined,
     entryType: row.entry_type as StreamEntryType,
+    threadMeta,
   };
 }
 
@@ -57,6 +60,7 @@ export function streamEntryToDbRow(
     extracted_task_id: entry.extractedTaskId ?? null,
     tags: JSON.stringify(entry.tags),
     attachments: JSON.stringify(entry.attachments),
+    thread_meta: entry.threadMeta ? JSON.stringify(entry.threadMeta) : null,
     version,
     deleted_at: deletedAt,
     updated_at: Date.now(),

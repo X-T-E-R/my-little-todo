@@ -149,6 +149,7 @@ function EntryCard({
   onToggleSelect,
   onChangeType,
   onMarkComplete,
+  onOpenSourceThread,
   isProjectHighlighted,
 }: {
   entry: StreamEntry;
@@ -167,6 +168,7 @@ function EntryCard({
   onToggleSelect: (entryId: string) => void;
   onChangeType: (entry: StreamEntry, type: StreamEntryType) => void;
   onMarkComplete?: (entry: StreamEntry) => void;
+  onOpenSourceThread?: (threadId: string) => void;
   isProjectHighlighted?: boolean;
 }) {
   const { t } = useTranslation('stream');
@@ -413,6 +415,32 @@ function EntryCard({
 
             {/* Subtask preview */}
             {linkedTask && <SubtaskPreview linkedTask={linkedTask} />}
+            {entry.threadMeta?.sourceThreadId ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span
+                  className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+                  style={{
+                    background: 'var(--color-accent-soft)',
+                    color: 'var(--color-accent)',
+                  }}
+                >
+                  {t('thread_origin_badge')}
+                </span>
+                {onOpenSourceThread ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onOpenSourceThread(entry.threadMeta?.sourceThreadId ?? '');
+                    }}
+                    className="text-[10px] font-medium"
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    {t('thread_origin_open')}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
           </>
         )}
 
@@ -719,6 +747,7 @@ export function StreamView() {
   const streamPanelMode = useThinkSessionStore((s) => s.streamMode);
   const setStreamPanelMode = useThinkSessionStore((s) => s.setStreamMode);
   const addStreamToThread = useWorkThreadStore((s) => s.addStreamToThread);
+  const openThread = useWorkThreadStore((s) => s.openThread);
 
   useEffect(() => {
     if (!advancedFilterEnabled) resetFilter();
@@ -848,6 +877,15 @@ export function StreamView() {
   const openThreadWorkspace = useCallback(() => {
     setStreamPanelMode('work-thread');
   }, [setStreamPanelMode]);
+
+  const openSourceThread = useCallback(
+    (threadId: string) => {
+      if (!threadId) return;
+      setStreamPanelMode('work-thread');
+      void openThread(threadId);
+    },
+    [openThread, setStreamPanelMode],
+  );
 
   const toggleDateGroup = useCallback((key: string) => {
     setCollapsedDates((prev) => {
@@ -1127,6 +1165,7 @@ export function StreamView() {
         onContextMenu={handleContextMenu}
         onToggleSelect={handleToggleSelect}
         onChangeType={(selectedEntry, type) => handleChangeType(selectedEntry.id, type)}
+        onOpenSourceThread={openSourceThread}
         onMarkComplete={
           canMarkComplete
             ? (selectedEntry) => {

@@ -26,6 +26,7 @@ export async function addStreamEntry(
   roleId?: string,
   entryType: StreamEntryType = 'spark',
   attachments: Attachment[] = [],
+  threadMeta?: StreamEntry['threadMeta'],
 ): Promise<StreamEntry> {
   const now = new Date();
   const dateKey = formatDateKey(now);
@@ -41,6 +42,7 @@ export async function addStreamEntry(
     attachments,
     roleId: roleId || undefined,
     entryType,
+    threadMeta,
   };
 
   await getDataStore().putStreamEntry(entry);

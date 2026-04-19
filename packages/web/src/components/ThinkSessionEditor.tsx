@@ -4,6 +4,7 @@ import {
   loadThinkSessionSettings,
 } from '../features/think-session/ThinkSessionSettings';
 import {
+  type MarkdownWorkThreadFocusContext,
   type MarkdownSlashCommand,
   type MarkdownSlashCommandSelection,
   RichMarkdownEditor,
@@ -22,6 +23,12 @@ export const ThinkSessionEditor = forwardRef<
     onSlashCommand?: (payload: MarkdownSlashCommandSelection) => void;
     nativeSlashUi?: 'auto' | 'off';
     editorClassName?: string;
+    onSparkRefOpen?: (entryId: string) => void;
+    intentRefs?: boolean;
+    nextRefs?: boolean;
+    blockRefs?: boolean;
+    threadCallouts?: boolean;
+    onWorkThreadFocusChange?: (focus: MarkdownWorkThreadFocusContext) => void;
   }
 >(function ThinkSessionEditor(
   {
@@ -32,6 +39,12 @@ export const ThinkSessionEditor = forwardRef<
     onSlashCommand,
     nativeSlashUi = 'auto',
     editorClassName = '',
+    onSparkRefOpen,
+    intentRefs = false,
+    nextRefs = false,
+    blockRefs = false,
+    threadCallouts = false,
+    onWorkThreadFocusChange,
   },
   ref,
 ) {
@@ -61,11 +74,18 @@ export const ThinkSessionEditor = forwardRef<
       toolbar
       blockEdit
       taskRefs
+      sparkRefs
+      intentRefs={intentRefs}
+      nextRefs={nextRefs}
+      blockRefs={blockRefs}
+      threadCallouts={threadCallouts}
       taskRefAutocomplete
       taskRefMode={taskRefMode}
       slashCommands={slashCommands}
       onSlashCommand={onSlashCommand}
       nativeSlashUi={nativeSlashUi}
+      onSparkRefOpen={onSparkRefOpen}
+      onWorkThreadFocusChange={onWorkThreadFocusChange}
       className={`min-h-0 flex-1 think-session-editor ${
         editorDensity === 'focused' ? 'think-session-editor--focused' : ''
       } ${editorClassName}`.trim()}

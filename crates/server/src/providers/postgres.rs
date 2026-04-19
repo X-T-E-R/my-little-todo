@@ -100,12 +100,12 @@ async fn upsert_stream_entry_json_tx(
     sqlx::query(
         r#"INSERT INTO stream_entries (
                 user_id, id, content, entry_type, "timestamp", date_key, role_id, extracted_task_id,
-                tags, attachments, version, deleted_at, updated_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                tags, attachments, thread_meta, version, deleted_at, updated_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
             ON CONFLICT(user_id, id) DO UPDATE SET
                 content=EXCLUDED.content, entry_type=EXCLUDED.entry_type, "timestamp"=EXCLUDED."timestamp",
                 date_key=EXCLUDED.date_key, role_id=EXCLUDED.role_id, extracted_task_id=EXCLUDED.extracted_task_id,
-                tags=EXCLUDED.tags, attachments=EXCLUDED.attachments, version=EXCLUDED.version, deleted_at=EXCLUDED.deleted_at,
+                tags=EXCLUDED.tags, attachments=EXCLUDED.attachments, thread_meta=EXCLUDED.thread_meta, version=EXCLUDED.version, deleted_at=EXCLUDED.deleted_at,
                 updated_at=EXCLUDED.updated_at"#,
     )
     .bind(user_id)
@@ -118,6 +118,7 @@ async fn upsert_stream_entry_json_tx(
     .bind(v["extracted_task_id"].as_str())
     .bind(v["tags"].as_str().unwrap_or("[]"))
     .bind(v["attachments"].as_str().unwrap_or("[]"))
+    .bind(v["thread_meta"].as_str())
     .bind(next_ver)
     .bind(None::<String>)
     .bind(updated_at)
@@ -225,8 +226,8 @@ pub struct PostgresProvider {
     pool: PgPool,
 }
 
-/// Schema migrations: 1=initial, 2=blobs, 3=sync columns+version_seq, 4=tasks+stream_entries, 5=stream updated_at, 6=align, 7=tasks.role_ids
-const CURRENT_SCHEMA_VERSION: i64 = 11;
+/// Schema migrations: 1=initial, 2=blobs, 3=sync columns+version_seq, 4=tasks+stream_entries, 5=stream updated_at, 6=align, 7=tasks.role_ids, 12=stream thread_meta
+const CURRENT_SCHEMA_VERSION: i64 = 12;
 
 impl PostgresProvider {
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
@@ -423,6 +424,7 @@ impl PostgresProvider {
                     extracted_task_id TEXT,
                     tags TEXT NOT NULL DEFAULT '[]',
                     attachments TEXT NOT NULL DEFAULT '[]',
+                    thread_meta TEXT,
                     version BIGINT NOT NULL DEFAULT 0,
                     deleted_at TEXT,
                     PRIMARY KEY (user_id, id)
@@ -594,6 +596,15 @@ impl PostgresProvider {
                 .await?;
         }
 
+        if current_version < 12 {
+            sqlx::query("ALTER TABLE stream_entries ADD COLUMN IF NOT EXISTS thread_meta TEXT")
+                .execute(&pool)
+                .await?;
+            sqlx::query("INSERT INTO schema_version (version) VALUES (12) ON CONFLICT DO NOTHING")
+                .execute(&pool)
+                .await?;
+        }
+
         let _ = CURRENT_SCHEMA_VERSION;
         Ok(Self { pool })
     }
@@ -733,7 +744,7 @@ impl DatabaseProvider for PostgresProvider {
             r#"SELECT json_build_object(
                 'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', "timestamp",
                 'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
-                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta, 'version', version, 'deleted_at', deleted_at,
                 'updated_at', COALESCE(updated_at, "timestamp")
             )::text FROM stream_entries WHERE user_id = $1 AND date_key = $2 AND deleted_at IS NULL ORDER BY "timestamp" ASC"#,
         )
@@ -754,7 +765,7 @@ impl DatabaseProvider for PostgresProvider {
             r#"SELECT json_build_object(
                 'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', "timestamp",
                 'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
-                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta, 'version', version, 'deleted_at', deleted_at,
                 'updated_at', COALESCE(updated_at, "timestamp")
             )::text FROM stream_entries WHERE user_id = $1 AND deleted_at IS NULL
             AND date_key::date >= (CURRENT_DATE - $2::integer) ORDER BY "timestamp" DESC"#,
@@ -781,7 +792,7 @@ impl DatabaseProvider for PostgresProvider {
             r#"SELECT json_build_object(
                 'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', "timestamp",
                 'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
-                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta, 'version', version, 'deleted_at', deleted_at,
                 'updated_at', COALESCE(updated_at, "timestamp")
             )::text FROM stream_entries WHERE user_id = $1 AND deleted_at IS NULL
             ORDER BY date_key DESC, "timestamp" DESC"#,
@@ -807,7 +818,7 @@ impl DatabaseProvider for PostgresProvider {
             r#"SELECT json_build_object(
                 'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', "timestamp",
                 'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
-                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta, 'version', version, 'deleted_at', deleted_at,
                 'updated_at', COALESCE(updated_at, "timestamp")
             )::text FROM stream_entries WHERE user_id = $1 AND deleted_at IS NULL
             AND position(lower($2) in lower(content)) > 0
@@ -836,12 +847,12 @@ impl DatabaseProvider for PostgresProvider {
         sqlx::query(
             r#"INSERT INTO stream_entries (
                 user_id, id, content, entry_type, "timestamp", date_key, role_id, extracted_task_id,
-                tags, attachments, version, deleted_at, updated_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                tags, attachments, thread_meta, version, deleted_at, updated_at
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
             ON CONFLICT(user_id, id) DO UPDATE SET
                 content=EXCLUDED.content, entry_type=EXCLUDED.entry_type, "timestamp"=EXCLUDED."timestamp",
                 date_key=EXCLUDED.date_key, role_id=EXCLUDED.role_id, extracted_task_id=EXCLUDED.extracted_task_id,
-                tags=EXCLUDED.tags, attachments=EXCLUDED.attachments, version=EXCLUDED.version, deleted_at=EXCLUDED.deleted_at,
+                tags=EXCLUDED.tags, attachments=EXCLUDED.attachments, thread_meta=EXCLUDED.thread_meta, version=EXCLUDED.version, deleted_at=EXCLUDED.deleted_at,
                 updated_at=EXCLUDED.updated_at"#,
         )
         .bind(user_id)
@@ -854,6 +865,7 @@ impl DatabaseProvider for PostgresProvider {
         .bind(v["extracted_task_id"].as_str())
         .bind(v["tags"].as_str().unwrap_or("[]"))
         .bind(v["attachments"].as_str().unwrap_or("[]"))
+        .bind(v["thread_meta"].as_str())
         .bind(next_ver)
         .bind(None::<String>)
         .bind(updated_at)
@@ -1337,7 +1349,7 @@ impl DatabaseProvider for PostgresProvider {
                 json_build_object(
                     'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', "timestamp",
                     'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
-                    'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                    'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta, 'version', version, 'deleted_at', deleted_at,
                     'updated_at', COALESCE(updated_at, "timestamp")
                 )::text,
                 version,

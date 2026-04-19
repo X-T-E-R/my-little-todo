@@ -100,12 +100,12 @@ async fn upsert_stream_entry_json_tx(
     sqlx::query(
         r#"INSERT INTO stream_entries (
                 user_id, id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
-                tags, attachments, version, deleted_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                tags, attachments, thread_meta, version, deleted_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id, id) DO UPDATE SET
                 content=excluded.content, entry_type=excluded.entry_type, timestamp=excluded.timestamp,
                 date_key=excluded.date_key, role_id=excluded.role_id, extracted_task_id=excluded.extracted_task_id,
-                tags=excluded.tags, attachments=excluded.attachments, version=excluded.version, deleted_at=excluded.deleted_at,
+                tags=excluded.tags, attachments=excluded.attachments, thread_meta=excluded.thread_meta, version=excluded.version, deleted_at=excluded.deleted_at,
                 updated_at=excluded.updated_at"#,
     )
     .bind(user_id)
@@ -118,6 +118,7 @@ async fn upsert_stream_entry_json_tx(
     .bind(v["extracted_task_id"].as_str())
     .bind(v["tags"].as_str().unwrap_or("[]"))
     .bind(v["attachments"].as_str().unwrap_or("[]"))
+    .bind(v["thread_meta"].as_str())
     .bind(next_ver)
     .bind(None::<String>)
     .bind(updated_at)
@@ -526,12 +527,13 @@ impl SqliteProvider {
                     timestamp INTEGER NOT NULL,
                     date_key TEXT NOT NULL,
                     role_id TEXT,
-                    extracted_task_id TEXT,
-                    tags TEXT NOT NULL DEFAULT '[]',
-                    attachments TEXT NOT NULL DEFAULT '[]',
-                    version INTEGER NOT NULL DEFAULT 0,
-                    deleted_at TEXT,
-                    PRIMARY KEY (user_id, id)
+                extracted_task_id TEXT,
+                tags TEXT NOT NULL DEFAULT '[]',
+                attachments TEXT NOT NULL DEFAULT '[]',
+                thread_meta TEXT,
+                version INTEGER NOT NULL DEFAULT 0,
+                deleted_at TEXT,
+                PRIMARY KEY (user_id, id)
                 )",
             )
             .execute(&pool)
@@ -713,6 +715,26 @@ impl SqliteProvider {
                 .await?;
         }
 
+        if current_version < 12 {
+            let has_thread_meta: bool = sqlx::query_as::<_, (i64,)>(
+                "SELECT COUNT(*) FROM pragma_table_info('stream_entries') WHERE name = 'thread_meta'",
+            )
+            .fetch_one(&pool)
+            .await
+            .map(|r| r.0 > 0)
+            .unwrap_or(false);
+
+            if !has_thread_meta {
+                sqlx::query("ALTER TABLE stream_entries ADD COLUMN thread_meta TEXT")
+                    .execute(&pool)
+                    .await?;
+            }
+
+            sqlx::query("INSERT OR IGNORE INTO schema_version (version) VALUES (12)")
+                .execute(&pool)
+                .await?;
+        }
+
         Ok(Self { pool })
     }
 }
@@ -857,7 +879,7 @@ impl DatabaseProvider for SqliteProvider {
             r#"SELECT json_object(
                 'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
                 'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
-                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta, 'version', version, 'deleted_at', deleted_at,
                 'updated_at', COALESCE(updated_at, timestamp)
             ) FROM stream_entries WHERE user_id = ? AND date_key = ? AND deleted_at IS NULL ORDER BY timestamp ASC"#,
         )
@@ -878,7 +900,7 @@ impl DatabaseProvider for SqliteProvider {
             r#"SELECT json_object(
                 'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
                 'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
-                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta, 'version', version, 'deleted_at', deleted_at,
                 'updated_at', COALESCE(updated_at, timestamp)
             ) FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL
             AND date_key >= date('now', ?) ORDER BY timestamp DESC"#,
@@ -905,7 +927,7 @@ impl DatabaseProvider for SqliteProvider {
             r#"SELECT json_object(
                 'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
                 'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
-                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta, 'version', version, 'deleted_at', deleted_at,
                 'updated_at', COALESCE(updated_at, timestamp)
             ) FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL
             ORDER BY date_key DESC, timestamp DESC"#,
@@ -931,7 +953,7 @@ impl DatabaseProvider for SqliteProvider {
             r#"SELECT json_object(
                 'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
                 'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
-                'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta, 'version', version, 'deleted_at', deleted_at,
                 'updated_at', COALESCE(updated_at, timestamp)
             ) FROM stream_entries WHERE user_id = ? AND deleted_at IS NULL
             AND instr(lower(content), lower(?)) > 0
@@ -959,12 +981,12 @@ impl DatabaseProvider for SqliteProvider {
         sqlx::query(
             r#"INSERT INTO stream_entries (
                 user_id, id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
-                tags, attachments, version, deleted_at, updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                tags, attachments, thread_meta, version, deleted_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id, id) DO UPDATE SET
                 content=excluded.content, entry_type=excluded.entry_type, timestamp=excluded.timestamp,
                 date_key=excluded.date_key, role_id=excluded.role_id, extracted_task_id=excluded.extracted_task_id,
-                tags=excluded.tags, attachments=excluded.attachments, version=excluded.version, deleted_at=excluded.deleted_at,
+                tags=excluded.tags, attachments=excluded.attachments, thread_meta=excluded.thread_meta, version=excluded.version, deleted_at=excluded.deleted_at,
                 updated_at=excluded.updated_at"#,
         )
         .bind(user_id)
@@ -977,6 +999,7 @@ impl DatabaseProvider for SqliteProvider {
         .bind(v["extracted_task_id"].as_str())
         .bind(v["tags"].as_str().unwrap_or("[]"))
         .bind(v["attachments"].as_str().unwrap_or("[]"))
+        .bind(v["thread_meta"].as_str())
         .bind(next_ver)
         .bind(None::<String>)
         .bind(updated_at)
@@ -1469,7 +1492,7 @@ impl DatabaseProvider for SqliteProvider {
                 json_object(
                     'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', timestamp,
                     'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
-                    'tags', tags, 'attachments', attachments, 'version', version, 'deleted_at', deleted_at,
+                    'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta, 'version', version, 'deleted_at', deleted_at,
                     'updated_at', COALESCE(updated_at, timestamp)
                 ),
                 version,

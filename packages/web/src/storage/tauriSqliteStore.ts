@@ -21,6 +21,7 @@ import type {
 import { getSyncEngine } from '../sync/syncEngine';
 import type { AttachmentConfig, UploadResult } from './blobApi';
 import type { DataStore, LocalChangeRecord } from './dataStore';
+import { LOCAL_DESKTOP_USER_ID, withLocalDesktopUser } from './localUser';
 import { CREATE_INDEXES_SQL, CREATE_TABLES_SQL, SCHEMA_VERSION } from './sqliteSchema';
 import {
   deriveTaskFacetFromEntry,
@@ -50,6 +51,10 @@ function coerceBlobBytes(value: unknown): Uint8Array {
   if (value instanceof Uint8Array) return value;
   if (Array.isArray(value)) return new Uint8Array(value.map((item) => Number(item) || 0));
   return new Uint8Array();
+}
+
+function dollarPlaceholders(count: number, startIndex = 1): string {
+  return Array.from({ length: count }, (_value, index) => `$${index + startIndex}`).join(', ');
 }
 
 async function getDb(): Promise<Database> {
@@ -234,13 +239,19 @@ async function ensureSchema(db: Database): Promise<void> {
         status TEXT NOT NULL DEFAULT 'ready',
         lane TEXT NOT NULL DEFAULT 'general',
         role_id TEXT,
+        root_markdown TEXT NOT NULL DEFAULT '',
+        exploration_markdown TEXT NOT NULL DEFAULT '',
         doc_markdown TEXT NOT NULL DEFAULT '',
         context_items TEXT NOT NULL DEFAULT '[]',
+        intents TEXT NOT NULL DEFAULT '[]',
+        spark_containers TEXT NOT NULL DEFAULT '[]',
         next_actions TEXT NOT NULL DEFAULT '[]',
         resume_card TEXT NOT NULL DEFAULT '{}',
         working_set TEXT NOT NULL DEFAULT '[]',
         waiting_for TEXT NOT NULL DEFAULT '[]',
         interrupts TEXT NOT NULL DEFAULT '[]',
+        exploration_blocks TEXT NOT NULL DEFAULT '[]',
+        inline_anchors TEXT NOT NULL DEFAULT '[]',
         scheduler_meta TEXT NOT NULL DEFAULT '{}',
         sync_meta TEXT NOT NULL DEFAULT '{"mode":"internal"}',
         suggestions TEXT,
@@ -328,6 +339,169 @@ async function ensureSchema(db: Database): Promise<void> {
         [13, Date.now()],
       );
     }
+    const verAfter13 =
+      (
+        await db.select<{ version: number }[]>(
+          'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+        )
+      )[0]?.version ?? 0;
+    if (verAfter13 < 14) {
+      const alterColumns = [
+        'ALTER TABLE stream_entries ADD COLUMN thread_meta TEXT',
+        "ALTER TABLE work_threads ADD COLUMN exploration_blocks TEXT NOT NULL DEFAULT '[]'",
+      ];
+      for (const sql of alterColumns) {
+        try {
+          await db.execute(sql);
+        } catch {
+          /* column may already exist */
+        }
+      }
+      await db.execute(
+        'INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES ($1, $2)',
+        [14, Date.now()],
+      );
+    }
+    const verAfter14 =
+      (
+        await db.select<{ version: number }[]>(
+          'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+        )
+      )[0]?.version ?? 0;
+      if (verAfter14 < 15) {
+        const alterColumns = [
+          "ALTER TABLE work_threads ADD COLUMN intents TEXT NOT NULL DEFAULT '[]'",
+          "ALTER TABLE work_threads ADD COLUMN inline_anchors TEXT NOT NULL DEFAULT '[]'",
+        ];
+      for (const sql of alterColumns) {
+        try {
+          await db.execute(sql);
+        } catch {
+          /* column may already exist */
+        }
+      }
+        await db.execute(
+          'INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES ($1, $2)',
+          [15, Date.now()],
+        );
+      }
+      const verAfter15 =
+        (
+          await db.select<{ version: number }[]>(
+            'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+          )
+        )[0]?.version ?? 0;
+      if (verAfter15 < 16) {
+        const alterColumns = [
+          "ALTER TABLE work_threads ADD COLUMN root_markdown TEXT NOT NULL DEFAULT ''",
+          "ALTER TABLE work_threads ADD COLUMN exploration_markdown TEXT NOT NULL DEFAULT ''",
+          "ALTER TABLE work_threads ADD COLUMN spark_containers TEXT NOT NULL DEFAULT '[]'",
+        ];
+        for (const sql of alterColumns) {
+          try {
+            await db.execute(sql);
+          } catch {
+            /* column may already exist */
+          }
+        }
+        await db.execute(
+          "UPDATE work_threads SET root_markdown = doc_markdown WHERE trim(COALESCE(root_markdown, '')) = ''",
+        );
+        await db.execute(
+          'INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES ($1, $2)',
+          [16, Date.now()],
+        );
+      }
+      const verAfter16 =
+        (
+          await db.select<{ version: number }[]>(
+            'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+          )
+        )[0]?.version ?? 0;
+      if (verAfter16 < 17) {
+        const alterColumns = [
+          `ALTER TABLE tasks ADD COLUMN user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
+          `ALTER TABLE stream_entries ADD COLUMN user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
+          `ALTER TABLE settings ADD COLUMN user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
+          `ALTER TABLE blobs ADD COLUMN owner TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`,
+        ];
+        for (const sql of alterColumns) {
+          try {
+            await db.execute(sql);
+          } catch {
+            /* column may already exist */
+          }
+        }
+
+        await db.execute("UPDATE tasks SET user_id = $1 WHERE trim(COALESCE(user_id, '')) = ''", [
+          LOCAL_DESKTOP_USER_ID,
+        ]);
+        await db.execute(
+          "UPDATE stream_entries SET user_id = $1 WHERE trim(COALESCE(user_id, '')) = ''",
+          [LOCAL_DESKTOP_USER_ID],
+        );
+        await db.execute(
+          "UPDATE settings SET user_id = $1 WHERE trim(COALESCE(user_id, '')) = ''",
+          [LOCAL_DESKTOP_USER_ID],
+        );
+        await db.execute("UPDATE blobs SET owner = $1 WHERE trim(COALESCE(owner, '')) = ''", [
+          LOCAL_DESKTOP_USER_ID,
+        ]);
+
+        await db.execute(`CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY,
+          username TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          is_admin INTEGER NOT NULL DEFAULT 0,
+          is_enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )`);
+        try {
+          await db.execute(
+            'ALTER TABLE users ADD COLUMN is_enabled INTEGER NOT NULL DEFAULT 1',
+          );
+        } catch {
+          /* column may already exist */
+        }
+        await db.execute(`CREATE TABLE IF NOT EXISTS sessions (
+          token TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          expires_at TEXT
+        )`);
+        await db.execute(`CREATE TABLE IF NOT EXISTS invites (
+          code TEXT PRIMARY KEY,
+          created_by TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          expires_at TEXT,
+          consumed_at TEXT,
+          consumed_by TEXT
+        )`);
+
+        const compatibilityIndexes = [
+          'CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id, id)',
+          'CREATE INDEX IF NOT EXISTS idx_tasks_user_version ON tasks(user_id, version)',
+          'CREATE UNIQUE INDEX IF NOT EXISTS idx_stream_user_id ON stream_entries(user_id, id)',
+          'CREATE INDEX IF NOT EXISTS idx_stream_user_date ON stream_entries(user_id, date_key)',
+          'CREATE INDEX IF NOT EXISTS idx_stream_user_version ON stream_entries(user_id, version)',
+          'CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_user_key ON settings(user_id, key)',
+          'CREATE INDEX IF NOT EXISTS idx_settings_user ON settings(user_id)',
+          'CREATE INDEX IF NOT EXISTS idx_blobs_owner ON blobs(owner)',
+          'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)',
+        ];
+        for (const sql of compatibilityIndexes) {
+          try {
+            await db.execute(sql);
+          } catch {
+            /* index may already exist */
+          }
+        }
+
+        await db.execute(
+          'INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES ($1, $2)',
+          [17, Date.now()],
+        );
+      }
   }
 }
 
@@ -430,6 +604,7 @@ function rowToStreamDbRow(r: Record<string, unknown>): StreamEntryDbRow {
     extracted_task_id: r.extracted_task_id != null ? String(r.extracted_task_id) : null,
     tags: String(r.tags ?? '[]'),
     attachments: String(r.attachments ?? '[]'),
+    thread_meta: r.thread_meta != null ? String(r.thread_meta) : null,
     version: Number(r.version ?? 0),
     deleted_at: r.deleted_at != null ? Number(r.deleted_at) : null,
     updated_at:
@@ -478,8 +653,8 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
     const ts = now();
     const v = await bumpVersion(db);
     await db.execute(
-      'UPDATE tasks SET deleted_at = $1, updated_at = $1, version = $2 WHERE id = $3 AND deleted_at IS NULL',
-      [ts, ts, v, id],
+      'UPDATE tasks SET deleted_at = $3, updated_at = $3, version = $4 WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL',
+      [LOCAL_DESKTOP_USER_ID, id, ts, v],
     );
     notifySync();
   };
@@ -488,9 +663,13 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
     async getAllTasks(): Promise<Task[]> {
       const [taskRows, streamRows] = await Promise.all([
         db.select<Record<string, unknown>[]>(
-          'SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY updated_at DESC',
+          'SELECT * FROM tasks WHERE user_id = $1 AND deleted_at IS NULL ORDER BY updated_at DESC',
+          [LOCAL_DESKTOP_USER_ID],
         ),
-        db.select<Record<string, unknown>[]>('SELECT * FROM stream_entries WHERE deleted_at IS NULL'),
+        db.select<Record<string, unknown>[]>(
+          'SELECT * FROM stream_entries WHERE user_id = $1 AND deleted_at IS NULL',
+          [LOCAL_DESKTOP_USER_ID],
+        ),
       ]);
       const taskDbRows = taskRows.map((r) => rowToTaskDbRow(r));
       const streamRowsById = new Map(
@@ -504,17 +683,17 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
 
     async getTask(id: string): Promise<Task | null> {
       const rows = await db.select<Record<string, unknown>[]>(
-        'SELECT * FROM tasks WHERE id = $1 AND deleted_at IS NULL',
-        [id],
+        'SELECT * FROM tasks WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, id],
       );
       const taskRowRaw = rows[0];
       if (!taskRowRaw) return null;
       const taskRow = rowToTaskDbRow(taskRowRaw);
       const streamIds = [...new Set([taskRow.id, resolvedStreamEntryId(taskRow)])];
-      const placeholders = streamIds.map((_value, index) => `$${index + 1}`).join(', ');
+      const placeholders = dollarPlaceholders(streamIds.length, 2);
       const streamRows = await db.select<Record<string, unknown>[]>(
-        `SELECT * FROM stream_entries WHERE id IN (${placeholders}) AND deleted_at IS NULL`,
-        streamIds,
+        `SELECT * FROM stream_entries WHERE user_id = $1 AND id IN (${placeholders}) AND deleted_at IS NULL`,
+        withLocalDesktopUser(...streamIds),
       );
       const streamRowsById = new Map(
         streamRows.map((r) => {
@@ -527,8 +706,8 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
 
     async putTask(task: Task): Promise<void> {
       const existingStreamRows = await db.select<Record<string, unknown>[]>(
-        'SELECT * FROM stream_entries WHERE id = $1 AND deleted_at IS NULL',
-        [task.id],
+        'SELECT * FROM stream_entries WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, task.id],
       );
       const existingStream = existingStreamRows[0]
         ? streamEntryFromDbRow(rowToStreamDbRow(existingStreamRows[0]))
@@ -546,15 +725,16 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const streamRow = streamEntryToDbRow(canonicalEntry, streamVersion, null);
       await db.execute(
         `INSERT INTO stream_entries (
-          id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
-          tags, attachments, version, deleted_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-        ON CONFLICT(id) DO UPDATE SET
+          user_id, id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
+          tags, attachments, thread_meta, version, deleted_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        ON CONFLICT(user_id, id) DO UPDATE SET
           content=excluded.content, entry_type=excluded.entry_type, timestamp=excluded.timestamp,
           date_key=excluded.date_key, role_id=excluded.role_id, extracted_task_id=excluded.extracted_task_id,
-          tags=excluded.tags, attachments=excluded.attachments, version=excluded.version, deleted_at=excluded.deleted_at,
+          tags=excluded.tags, attachments=excluded.attachments, thread_meta=excluded.thread_meta, version=excluded.version, deleted_at=excluded.deleted_at,
           updated_at=excluded.updated_at`,
         [
+          LOCAL_DESKTOP_USER_ID,
           streamRow.id,
           streamRow.content,
           streamRow.entry_type,
@@ -564,6 +744,7 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
           null,
           streamRow.tags,
           streamRow.attachments,
+          streamRow.thread_meta ?? null,
           streamRow.version,
           streamRow.deleted_at,
           streamRow.updated_at ?? streamRow.timestamp,
@@ -575,13 +756,13 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const row = taskToDbRow(t, v, null);
       await db.execute(
         `INSERT INTO tasks (
-          id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
+          user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
           ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
           task_type,
           tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
           version, deleted_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
-        ON CONFLICT(id) DO UPDATE SET
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
+        ON CONFLICT(user_id, id) DO UPDATE SET
           title=excluded.title, title_customized=excluded.title_customized, description=excluded.description, status=excluded.status, body=excluded.body,
           created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
           ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
@@ -593,6 +774,7 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
           status_history=excluded.status_history, progress_logs=excluded.progress_logs,
           version=excluded.version, deleted_at=excluded.deleted_at`,
         [
+          LOCAL_DESKTOP_USER_ID,
           row.id,
           row.title,
           row.title_customized,
@@ -634,8 +816,8 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        'UPDATE stream_entries SET deleted_at = $1, version = $2 WHERE id = $3 AND deleted_at IS NULL',
-        [ts, v, id],
+        'UPDATE stream_entries SET deleted_at = $3, version = $4 WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, id, ts, v],
       );
       notifySync();
     },
@@ -645,10 +827,13 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
     async getStreamDay(dateKey: string): Promise<StreamEntry[]> {
       const [rows, taskRows] = await Promise.all([
         db.select<Record<string, unknown>[]>(
-          'SELECT * FROM stream_entries WHERE date_key = $1 AND deleted_at IS NULL ORDER BY timestamp ASC',
-          [dateKey],
+          'SELECT * FROM stream_entries WHERE user_id = $1 AND date_key = $2 AND deleted_at IS NULL ORDER BY timestamp ASC',
+          [LOCAL_DESKTOP_USER_ID, dateKey],
         ),
-        db.select<Record<string, unknown>[]>('SELECT * FROM tasks WHERE deleted_at IS NULL'),
+        db.select<Record<string, unknown>[]>(
+          'SELECT * FROM tasks WHERE user_id = $1 AND deleted_at IS NULL',
+          [LOCAL_DESKTOP_USER_ID],
+        ),
       ]);
       return streamEntriesWithTaskLinks(rows, taskRows.map((r) => rowToTaskDbRow(r)));
     },
@@ -659,17 +844,21 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const minKey = formatDateKey(min);
       const [rows, taskRows] = await Promise.all([
         db.select<Record<string, unknown>[]>(
-          'SELECT * FROM stream_entries WHERE deleted_at IS NULL AND date_key >= $1 ORDER BY timestamp DESC',
-          [minKey],
+          'SELECT * FROM stream_entries WHERE user_id = $1 AND deleted_at IS NULL AND date_key >= $2 ORDER BY timestamp DESC',
+          [LOCAL_DESKTOP_USER_ID, minKey],
         ),
-        db.select<Record<string, unknown>[]>('SELECT * FROM tasks WHERE deleted_at IS NULL'),
+        db.select<Record<string, unknown>[]>(
+          'SELECT * FROM tasks WHERE user_id = $1 AND deleted_at IS NULL',
+          [LOCAL_DESKTOP_USER_ID],
+        ),
       ]);
       return streamEntriesWithTaskLinks(rows, taskRows.map((r) => rowToTaskDbRow(r)));
     },
 
     async listStreamDateKeys(): Promise<string[]> {
       const rows = await db.select<{ date_key: string }[]>(
-        'SELECT DISTINCT date_key FROM stream_entries WHERE deleted_at IS NULL ORDER BY date_key DESC',
+        'SELECT DISTINCT date_key FROM stream_entries WHERE user_id = $1 AND deleted_at IS NULL ORDER BY date_key DESC',
+        [LOCAL_DESKTOP_USER_ID],
       );
       return rows.map((r) => r.date_key);
     },
@@ -680,10 +869,13 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const lim = Math.min(Math.max(1, limit), 500);
       const [rows, taskRows] = await Promise.all([
         db.select<Record<string, unknown>[]>(
-          'SELECT * FROM stream_entries WHERE deleted_at IS NULL AND instr(lower(content), lower($1)) > 0 ORDER BY timestamp DESC LIMIT $2',
-          [needle, lim],
+          'SELECT * FROM stream_entries WHERE user_id = $1 AND deleted_at IS NULL AND instr(lower(content), lower($2)) > 0 ORDER BY timestamp DESC LIMIT $3',
+          [LOCAL_DESKTOP_USER_ID, needle, lim],
         ),
-        db.select<Record<string, unknown>[]>('SELECT * FROM tasks WHERE deleted_at IS NULL'),
+        db.select<Record<string, unknown>[]>(
+          'SELECT * FROM tasks WHERE user_id = $1 AND deleted_at IS NULL',
+          [LOCAL_DESKTOP_USER_ID],
+        ),
       ]);
       return streamEntriesWithTaskLinks(rows, taskRows.map((r) => rowToTaskDbRow(r)));
     },
@@ -693,15 +885,16 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const row = streamEntryToDbRow(entry, v, null);
       await db.execute(
         `INSERT INTO stream_entries (
-          id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
-          tags, attachments, version, deleted_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-        ON CONFLICT(id) DO UPDATE SET
+          user_id, id, content, entry_type, timestamp, date_key, role_id, extracted_task_id,
+          tags, attachments, thread_meta, version, deleted_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        ON CONFLICT(user_id, id) DO UPDATE SET
           content=excluded.content, entry_type=excluded.entry_type, timestamp=excluded.timestamp,
           date_key=excluded.date_key, role_id=excluded.role_id, extracted_task_id=excluded.extracted_task_id,
-          tags=excluded.tags, attachments=excluded.attachments, version=excluded.version, deleted_at=excluded.deleted_at,
+          tags=excluded.tags, attachments=excluded.attachments, thread_meta=excluded.thread_meta, version=excluded.version, deleted_at=excluded.deleted_at,
           updated_at=excluded.updated_at`,
         [
+          LOCAL_DESKTOP_USER_ID,
           row.id,
           row.content,
           row.entry_type,
@@ -711,14 +904,15 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
           null,
           row.tags,
           row.attachments,
+          row.thread_meta ?? null,
           row.version,
           row.deleted_at,
           row.updated_at ?? row.timestamp,
         ],
       );
       const linkedTaskRows = await db.select<Record<string, unknown>[]>(
-        'SELECT * FROM tasks WHERE id = $1 AND deleted_at IS NULL',
-        [entry.id],
+        'SELECT * FROM tasks WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, entry.id],
       );
       const linkedTaskRaw = linkedTaskRows[0];
       if (linkedTaskRaw) {
@@ -727,8 +921,14 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
           const roleIds = normalizeTaskRoleIds(linkedTask, entry.roleId);
           const nextVersion = await bumpVersion(db);
           await db.execute(
-            'UPDATE tasks SET role_ids = $1, role_id = NULL, updated_at = $2, version = $3 WHERE id = $4 AND deleted_at IS NULL',
-            [roleIds.length > 0 ? JSON.stringify(roleIds) : null, Date.now(), nextVersion, entry.id],
+            'UPDATE tasks SET role_ids = $3, role_id = NULL, updated_at = $4, version = $5 WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL',
+            [
+              LOCAL_DESKTOP_USER_ID,
+              entry.id,
+              roleIds.length > 0 ? JSON.stringify(roleIds) : null,
+              Date.now(),
+              nextVersion,
+            ],
           );
         }
       }
@@ -740,16 +940,16 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        'UPDATE stream_entries SET deleted_at = $1, version = $2 WHERE id = $3 AND deleted_at IS NULL',
-        [ts, v, id],
+        'UPDATE stream_entries SET deleted_at = $3, version = $4 WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, id, ts, v],
       );
       notifySync();
     },
 
     async getSetting(key: string): Promise<string | null> {
       const rows = await db.select<{ value: string }[]>(
-        'SELECT value FROM settings WHERE key = $1 AND deleted_at IS NULL',
-        [key],
+        'SELECT value FROM settings WHERE user_id = $1 AND key = $2 AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, key],
       );
       return rows.length > 0 ? rows[0].value : null;
     },
@@ -758,10 +958,10 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        `INSERT INTO settings (key, value, updated_at, version, deleted_at)
-         VALUES ($1, $2, $3, $4, NULL)
-         ON CONFLICT(key) DO UPDATE SET value = $2, updated_at = $3, version = $4, deleted_at = NULL`,
-        [key, value, ts, v],
+        `INSERT INTO settings (user_id, key, value, updated_at, version, deleted_at)
+         VALUES ($1, $2, $3, $4, $5, NULL)
+         ON CONFLICT(user_id, key) DO UPDATE SET value = $3, updated_at = $4, version = $5, deleted_at = NULL`,
+        [LOCAL_DESKTOP_USER_ID, key, value, ts, v],
       );
       if (!key.startsWith('__sync_') && !key.startsWith('sync-')) notifySync();
     },
@@ -770,15 +970,16 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        'UPDATE settings SET deleted_at = $1, updated_at = $1, version = $2 WHERE key = $3 AND deleted_at IS NULL',
-        [ts, v, key],
+        'UPDATE settings SET deleted_at = $3, updated_at = $3, version = $4 WHERE user_id = $1 AND key = $2 AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, key, ts, v],
       );
       if (!key.startsWith('__sync_') && !key.startsWith('sync-')) notifySync();
     },
 
     async getAllSettings(): Promise<Record<string, string>> {
       const rows = await db.select<{ key: string; value: string }[]>(
-        'SELECT key, value FROM settings WHERE deleted_at IS NULL',
+        'SELECT key, value FROM settings WHERE user_id = $1 AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID],
       );
       const result: Record<string, string> = {};
       for (const row of rows) {
@@ -793,10 +994,11 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        `INSERT INTO blobs (id, filename, mime_type, size, data, created_at, deleted_at, version)
-         VALUES ($1, $2, $3, $4, $5, $6, NULL, $7)`,
+        `INSERT INTO blobs (id, owner, filename, mime_type, size, data, created_at, deleted_at, version)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8)`,
         [
           id,
+          LOCAL_DESKTOP_USER_ID,
           file.name,
           file.type || 'application/octet-stream',
           file.size,
@@ -821,8 +1023,8 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
 
     async getBlobData(id: string) {
       const rows = await db.select<Record<string, unknown>[]>(
-        'SELECT data, mime_type, filename FROM blobs WHERE id = $1 AND deleted_at IS NULL LIMIT 1',
-        [id],
+        'SELECT data, mime_type, filename FROM blobs WHERE owner = $1 AND id = $2 AND deleted_at IS NULL LIMIT 1',
+        [LOCAL_DESKTOP_USER_ID, id],
       );
       const row = rows[0];
       if (!row) return null;
@@ -837,8 +1039,8 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const ts = now();
       const v = await bumpVersion(db);
       await db.execute(
-        'UPDATE blobs SET deleted_at = $1, version = $2 WHERE id = $3 AND deleted_at IS NULL',
-        [ts, v, id],
+        'UPDATE blobs SET deleted_at = $3, version = $4 WHERE owner = $1 AND id = $2 AND deleted_at IS NULL',
+        [LOCAL_DESKTOP_USER_ID, id, ts, v],
       );
       notifySync();
     },
@@ -944,22 +1146,28 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const row = serializeWorkThread(thread);
       await db.execute(
         `INSERT INTO work_threads (
-          id, title, mission, status, lane, role_id, doc_markdown, context_items, next_actions,
-          resume_card, working_set, waiting_for, interrupts, scheduler_meta, sync_meta, suggestions, created_at, updated_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+          id, title, mission, status, lane, role_id, root_markdown, exploration_markdown, doc_markdown, context_items, intents, spark_containers, next_actions,
+          resume_card, working_set, waiting_for, interrupts, exploration_blocks, inline_anchors, scheduler_meta, sync_meta, suggestions, created_at, updated_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
         ON CONFLICT(id) DO UPDATE SET
           title=excluded.title,
           mission=excluded.mission,
           status=excluded.status,
           lane=excluded.lane,
           role_id=excluded.role_id,
+          root_markdown=excluded.root_markdown,
+          exploration_markdown=excluded.exploration_markdown,
           doc_markdown=excluded.doc_markdown,
           context_items=excluded.context_items,
+          intents=excluded.intents,
+          spark_containers=excluded.spark_containers,
           next_actions=excluded.next_actions,
           resume_card=excluded.resume_card,
           working_set=excluded.working_set,
           waiting_for=excluded.waiting_for,
           interrupts=excluded.interrupts,
+          exploration_blocks=excluded.exploration_blocks,
+          inline_anchors=excluded.inline_anchors,
           scheduler_meta=excluded.scheduler_meta,
           sync_meta=excluded.sync_meta,
           suggestions=excluded.suggestions,
@@ -971,13 +1179,19 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
           row.status,
           row.lane,
           row.role_id,
+          row.root_markdown,
+          row.exploration_markdown,
           row.doc_markdown,
           row.context_items,
+          row.intents,
+          row.spark_containers,
           row.next_actions,
           row.resume_card,
           row.working_set,
           row.waiting_for,
           row.interrupts,
+          row.exploration_blocks,
+          row.inline_anchors,
           row.scheduler_meta,
           row.sync_meta,
           row.suggestions,
@@ -1047,8 +1261,8 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       const out: LocalChangeRecord[] = [];
 
       const taskRows = await db.select<Record<string, unknown>[]>(
-        'SELECT * FROM tasks WHERE version > $1',
-        [sinceVersion],
+        'SELECT * FROM tasks WHERE user_id = $1 AND version > $2',
+        [LOCAL_DESKTOP_USER_ID, sinceVersion],
       );
       for (const r of taskRows) {
         const tr = rowToTaskDbRow(r);
@@ -1063,8 +1277,8 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       }
 
       const streamRows = await db.select<Record<string, unknown>[]>(
-        'SELECT * FROM stream_entries WHERE version > $1',
-        [sinceVersion],
+        'SELECT * FROM stream_entries WHERE user_id = $1 AND version > $2',
+        [LOCAL_DESKTOP_USER_ID, sinceVersion],
       );
       for (const r of streamRows) {
         const sr = rowToStreamDbRow(r);
@@ -1079,8 +1293,8 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       }
 
       const settingRows = await db.select<Record<string, unknown>[]>(
-        "SELECT key, value, updated_at, version, deleted_at FROM settings WHERE version > $1 AND key NOT LIKE '__sync_%'",
-        [sinceVersion],
+        "SELECT key, value, updated_at, version, deleted_at FROM settings WHERE user_id = $1 AND version > $2 AND key NOT LIKE '__sync_%'",
+        [LOCAL_DESKTOP_USER_ID, sinceVersion],
       );
       for (const r of settingRows) {
         const key = String(r.key);
@@ -1107,8 +1321,8 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       }
 
       const blobRows = await db.select<Record<string, unknown>[]>(
-        'SELECT id, filename, mime_type, size, created_at, version, deleted_at FROM blobs WHERE version > $1',
-        [sinceVersion],
+        'SELECT id, filename, mime_type, size, created_at, version, deleted_at FROM blobs WHERE owner = $1 AND version > $2',
+        [LOCAL_DESKTOP_USER_ID, sinceVersion],
       );
       for (const r of blobRows) {
         const id = String(r.id);

@@ -37,14 +37,16 @@ export function buildResumeCard(
   summary: string,
   nextStep: string,
   guardrails: string[] = [],
-  waitingSummary?: string,
+  blockSummary?: string,
   updatedAt = Date.now(),
 ): WorkThreadResumeCard {
+  const normalizedBlockSummary = normalizeString(blockSummary) || undefined;
   return {
     summary: normalizeString(summary),
     nextStep: normalizeString(nextStep),
     guardrails: guardrails.map((item) => item.trim()).filter(Boolean),
-    waitingSummary: normalizeString(waitingSummary) || undefined,
+    blockSummary: normalizedBlockSummary,
+    waitingSummary: normalizedBlockSummary,
     updatedAt,
   };
 }
@@ -66,13 +68,13 @@ export function deriveWorkingSet(
 export function buildAutoResumeCard(
   docMarkdown: string,
   nextActions: WorkThread['nextActions'],
-  waitingSummary?: string,
+  blockSummary?: string,
   updatedAt = Date.now(),
 ): WorkThreadResumeCard {
   const compact = docMarkdown.replace(/\s+/g, ' ').trim();
   const summary = compact.slice(0, 220);
   const nextStep = nextActions.find((item) => !item.done)?.text ?? '';
-  return buildResumeCard(summary, nextStep, [], waitingSummary, updatedAt);
+  return buildResumeCard(summary, nextStep, [], blockSummary, updatedAt);
 }
 
 export function createWorkThread(opts: CreateWorkThreadOptions = {}): WorkThread {
@@ -87,13 +89,19 @@ export function createWorkThread(opts: CreateWorkThreadOptions = {}): WorkThread
     status: opts.status ?? 'ready',
     lane: opts.lane ?? 'general',
     roleId: opts.roleId,
+    rootMarkdown: docMarkdown,
+    explorationMarkdown: '',
     docMarkdown,
     contextItems: [],
+    intents: [],
+    sparkContainers: [],
     nextActions: [],
     resumeCard: buildAutoResumeCard(docMarkdown, [], undefined, now),
     workingSet: [],
     waitingFor: [],
     interrupts: [],
+    explorationBlocks: [],
+    inlineAnchors: [],
     schedulerMeta: {},
     syncMeta: { mode: 'internal' },
     suggestions: [],
@@ -115,18 +123,54 @@ export function ensureWorkThreadRuntime(thread: WorkThread): WorkThread {
     mission: normalizeString(thread.mission) || normalizeString(thread.title),
     lane: thread.lane ?? 'general',
     status: thread.status ?? 'ready',
+    rootMarkdown: thread.rootMarkdown ?? thread.docMarkdown ?? '',
+    explorationMarkdown: thread.explorationMarkdown ?? '',
     docMarkdown: thread.docMarkdown ?? '',
     contextItems: thread.contextItems ?? [],
-    nextActions: thread.nextActions ?? [],
+    intents: (thread.intents ?? []).map((intent) => ({
+      ...intent,
+      bodyMarkdown: intent.bodyMarkdown ?? intent.detail ?? '',
+      collapsed: intent.collapsed ?? false,
+      parentThreadId: intent.parentThreadId ?? thread.id,
+    })),
+    sparkContainers: (thread.sparkContainers ?? []).map((spark) => ({
+      ...spark,
+      bodyMarkdown: spark.bodyMarkdown ?? '',
+      collapsed: spark.collapsed ?? false,
+      parentThreadId: spark.parentThreadId ?? thread.id,
+    })),
+    nextActions: (thread.nextActions ?? []).map((action) => ({
+      ...action,
+      parentThreadId: action.parentThreadId ?? thread.id,
+    })),
     resumeCard:
-      thread.resumeCard ??
-      buildAutoResumeCard(thread.docMarkdown ?? '', thread.nextActions ?? [], undefined, thread.updatedAt),
+      thread.resumeCard
+        ? {
+            ...thread.resumeCard,
+            blockSummary:
+              normalizeString(thread.resumeCard.blockSummary) ||
+              normalizeString(thread.resumeCard.waitingSummary) ||
+              undefined,
+            waitingSummary:
+              normalizeString(thread.resumeCard.waitingSummary) ||
+              normalizeString(thread.resumeCard.blockSummary) ||
+              undefined,
+          }
+        : buildAutoResumeCard(thread.docMarkdown ?? '', thread.nextActions ?? [], undefined, thread.updatedAt),
     workingSet:
       thread.workingSet && thread.workingSet.length > 0
         ? thread.workingSet
         : deriveWorkingSet(thread.contextItems ?? []),
-    waitingFor: thread.waitingFor ?? [],
-    interrupts: thread.interrupts ?? [],
+    waitingFor: (thread.waitingFor ?? []).map((item) => ({
+      ...item,
+      parentThreadId: item.parentThreadId ?? thread.id,
+    })),
+    interrupts: (thread.interrupts ?? []).map((item) => ({
+      ...item,
+      parentThreadId: item.parentThreadId ?? thread.id,
+    })),
+    explorationBlocks: thread.explorationBlocks ?? [],
+    inlineAnchors: thread.inlineAnchors ?? [],
     schedulerMeta: thread.schedulerMeta ?? {},
     syncMeta,
     suggestions: thread.suggestions ?? [],

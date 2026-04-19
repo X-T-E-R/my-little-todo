@@ -7,7 +7,7 @@ import type { Node as ProseMirrorNode } from '@milkdown/prose/model';
 import { TextSelection } from '@milkdown/prose/state';
 import type { EditorView } from '@milkdown/prose/view';
 import { Milkdown, MilkdownProvider, useEditor, useInstance } from '@milkdown/react';
-import { markdownToSlice } from '@milkdown/utils';
+import { getMarkdown, markdownToSlice } from '@milkdown/utils';
 import { type Task, displayTaskTitle, taskRoleIds } from '@my-little-todo/core';
 import {
   forwardRef,
@@ -20,8 +20,22 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRoleStore, useStreamStore, useTaskStore } from '../stores';
+import { blockRefHighlightPlugin } from '../utils/blockRefPlugin';
+import { findBlockRefDeleteRange } from '../utils/blockRefs';
+import { intentRefHighlightPlugin } from '../utils/intentRefPlugin';
+import { findIntentRefDeleteRange } from '../utils/intentRefs';
+import { nextRefHighlightPlugin } from '../utils/nextRefPlugin';
+import { findNextRefDeleteRange } from '../utils/nextRefs';
+import { sparkRefHighlightPlugin } from '../utils/sparkRefPlugin';
 import { taskRefHighlightPlugin } from '../utils/taskRefPlugin';
 import { isMilkdownSlashMenuClassName } from '../utils/richMarkdownNativeSlash';
+import { findSparkRefDeleteRange, resolveSparkRefToId } from '../utils/sparkRefs';
+import {
+  extractWorkThreadCalloutDescriptors,
+  isFocusableWorkThreadCalloutKind,
+  type WorkThreadEditorFocusContext,
+} from '../utils/workThreadDocSyntax';
+import { workThreadCalloutHighlightPlugin } from '../utils/workThreadCalloutPlugin';
 import {
   findTaskRefDeleteRange,
   formatTaskRefMarkdown,
@@ -33,6 +47,19 @@ export type MarkdownTaskRefMode = 'inline-chip' | 'mini-card' | 'highlight-only'
 
 export type RichMarkdownEditorHandle = {
   insertText: (text: string) => void;
+  insertMarkdown: (
+    markdown: string,
+    selection?: {
+      text?: string;
+      fallback?: 'start' | 'end';
+    },
+  ) => void;
+  getMarkdown: () => string;
+  getSelectionMarkdown: (options?: { expandToBlockIfCollapsed?: boolean }) => {
+    markdown: string;
+    from: number;
+    to: number;
+  } | null;
   replaceTextRange: (
     from: number,
     to: number,
@@ -72,6 +99,8 @@ export type MarkdownSlashCommandSelection = {
   };
 };
 
+export type MarkdownWorkThreadFocusContext = WorkThreadEditorFocusContext;
+
 type RichMarkdownEditorProps = {
   editorId: string;
   initialMarkdown: string;
@@ -81,6 +110,11 @@ type RichMarkdownEditorProps = {
   toolbar?: boolean;
   blockEdit?: boolean;
   taskRefs?: boolean;
+  sparkRefs?: boolean;
+  intentRefs?: boolean;
+  nextRefs?: boolean;
+  blockRefs?: boolean;
+  threadCallouts?: boolean;
   taskRefMode?: MarkdownTaskRefMode;
   className?: string;
   autoFocus?: boolean;
@@ -90,6 +124,8 @@ type RichMarkdownEditorProps = {
   slashCommands?: MarkdownSlashCommand[];
   onSlashCommand?: (payload: MarkdownSlashCommandSelection) => void;
   nativeSlashUi?: 'auto' | 'off';
+  onSparkRefOpen?: (entryId: string) => void;
+  onWorkThreadFocusChange?: (focus: MarkdownWorkThreadFocusContext) => void;
 };
 
 type AutocompleteCandidate = {
@@ -257,6 +293,124 @@ function deleteTaskRefAtCursor(view: EditorView, direction: 'backward' | 'forwar
   return true;
 }
 
+function deleteSparkRefAtCursor(view: EditorView, direction: 'backward' | 'forward'): boolean {
+  const { from, to } = view.state.selection;
+  if (from !== to) return false;
+  const windowStart = Math.max(1, from - 240);
+  const windowEnd = Math.min(view.state.doc.content.size, from + 240);
+  const textWindow = view.state.doc.textBetween(windowStart, windowEnd, '\n', '\0');
+  const relativeCursor = from - windowStart;
+  const range = findSparkRefDeleteRange(textWindow, relativeCursor, direction);
+  if (!range) return false;
+  view.dispatch(view.state.tr.delete(windowStart + range.from, windowStart + range.to));
+  view.focus();
+  return true;
+}
+
+function deleteIntentRefAtCursor(view: EditorView, direction: 'backward' | 'forward'): boolean {
+  const { from, to } = view.state.selection;
+  if (from !== to) return false;
+  const windowStart = Math.max(1, from - 240);
+  const windowEnd = Math.min(view.state.doc.content.size, from + 240);
+  const textWindow = view.state.doc.textBetween(windowStart, windowEnd, '\n', '\0');
+  const relativeCursor = from - windowStart;
+  const range = findIntentRefDeleteRange(textWindow, relativeCursor, direction);
+  if (!range) return false;
+  view.dispatch(view.state.tr.delete(windowStart + range.from, windowStart + range.to));
+  view.focus();
+  return true;
+}
+
+function deleteNextRefAtCursor(view: EditorView, direction: 'backward' | 'forward'): boolean {
+  const { from, to } = view.state.selection;
+  if (from !== to) return false;
+  const windowStart = Math.max(1, from - 240);
+  const windowEnd = Math.min(view.state.doc.content.size, from + 240);
+  const textWindow = view.state.doc.textBetween(windowStart, windowEnd, '\n', '\0');
+  const relativeCursor = from - windowStart;
+  const range = findNextRefDeleteRange(textWindow, relativeCursor, direction);
+  if (!range) return false;
+  view.dispatch(view.state.tr.delete(windowStart + range.from, windowStart + range.to));
+  view.focus();
+  return true;
+}
+
+function deleteBlockRefAtCursor(view: EditorView, direction: 'backward' | 'forward'): boolean {
+  const { from, to } = view.state.selection;
+  if (from !== to) return false;
+  const windowStart = Math.max(1, from - 240);
+  const windowEnd = Math.min(view.state.doc.content.size, from + 240);
+  const textWindow = view.state.doc.textBetween(windowStart, windowEnd, '\n', '\0');
+  const relativeCursor = from - windowStart;
+  const range = findBlockRefDeleteRange(textWindow, relativeCursor, direction);
+  if (!range) return false;
+  view.dispatch(view.state.tr.delete(windowStart + range.from, windowStart + range.to));
+  view.focus();
+  return true;
+}
+
+function getMarkdownSelectionRange(
+  view: EditorView,
+  expandToBlockIfCollapsed = false,
+): { from: number; to: number } | null {
+  const { selection } = view.state;
+  if (selection.from !== selection.to) {
+    return { from: selection.from, to: selection.to };
+  }
+  if (!expandToBlockIfCollapsed) return null;
+  const $from = selection.$from;
+  for (let depth = $from.depth; depth >= 0; depth -= 1) {
+    const node = $from.node(depth);
+    if (!node.isBlock) continue;
+    if (depth === 0) {
+      return {
+        from: 0,
+        to: view.state.doc.content.size,
+      };
+    }
+    return {
+      from: $from.before(depth),
+      to: $from.after(depth),
+    };
+  }
+  return null;
+}
+
+function getWorkThreadEditorFocus(view: EditorView): MarkdownWorkThreadFocusContext {
+  const { from } = view.state.selection;
+  const active = extractWorkThreadCalloutDescriptors(view.state.doc)
+    .filter(
+      (descriptor) =>
+        isFocusableWorkThreadCalloutKind(descriptor.kind) &&
+        from >= descriptor.pos &&
+        from <= descriptor.end,
+    )
+    .sort((left, right) => right.depth - left.depth)[0];
+  if (!active) return { kind: 'root' };
+  if (active.kind === 'explore') {
+    return {
+      kind: 'exploration',
+      title: active.title || '探索区',
+      containerPath: active.path,
+    };
+  }
+  if (active.kind === 'intent') {
+    return {
+      kind: 'intent',
+      title: active.title,
+      containerPath: active.path,
+    };
+  }
+  if (active.kind === 'spark') {
+    return {
+      kind: 'spark',
+      title: active.title,
+      containerPath: active.path,
+    };
+  }
+  return { kind: 'root' };
+}
+
 function getSlashCommandContext(view: EditorView): {
   query: string;
   replaceFrom: number;
@@ -300,6 +454,10 @@ function filterSlashCommands(
   );
 }
 
+function normalizeMarkdownEditorContent(markdown: string): string {
+  return markdown.replace(/\r\n/g, '\n').trimEnd();
+}
+
 const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdownEditorProps>(
   function RichMarkdownEditorInner(
     {
@@ -311,6 +469,11 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       toolbar = false,
       blockEdit = false,
       taskRefs = false,
+      sparkRefs = false,
+      intentRefs = false,
+      nextRefs = false,
+      blockRefs = false,
+      threadCallouts = false,
       taskRefMode = 'inline-chip',
       className = '',
       autoFocus = false,
@@ -320,6 +483,8 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       slashCommands = [],
       onSlashCommand,
       nativeSlashUi = 'auto',
+      onSparkRefOpen,
+      onWorkThreadFocusChange,
     },
     ref,
   ) {
@@ -332,6 +497,10 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
     pasteCaptureRef.current = onPasteCapture;
     const slashCommandRef = useRef(onSlashCommand);
     slashCommandRef.current = onSlashCommand;
+    const sparkRefOpenRef = useRef(onSparkRefOpen);
+    sparkRefOpenRef.current = onSparkRefOpen;
+    const workThreadFocusChangeRef = useRef(onWorkThreadFocusChange);
+    workThreadFocusChangeRef.current = onWorkThreadFocusChange;
 
     const [, getEditor] = useInstance();
     const wrapperRef = useRef<HTMLDivElement>(null);
@@ -434,6 +603,13 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       [getEditor],
     );
 
+    const emitWorkThreadFocus = useCallback(() => {
+      if (!workThreadFocusChangeRef.current) return;
+      withEditorView((view) => {
+        workThreadFocusChangeRef.current?.(getWorkThreadEditorFocus(view));
+      });
+    }, [withEditorView]);
+
     const replaceTextRange = useCallback(
       (
         from: number,
@@ -509,6 +685,21 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       [getEditor],
     );
 
+    const insertMarkdown = useCallback(
+      (
+        markdown: string,
+        selection?: {
+          text?: string;
+          fallback?: 'start' | 'end';
+        },
+      ) => {
+        withEditorView((view) => {
+          replaceMarkdownRange(view.state.selection.from, view.state.selection.to, markdown, selection);
+        });
+      },
+      [replaceMarkdownRange, withEditorView],
+    );
+
     const insertCandidateById = useCallback(
       (taskId: string) => {
         const task = tasksRef.current.find((item) => item.id === taskId);
@@ -563,6 +754,21 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
 
         if (taskRefs) {
           crepe.editor.use(taskRefHighlightPlugin);
+        }
+        if (sparkRefs) {
+          crepe.editor.use(sparkRefHighlightPlugin);
+        }
+        if (intentRefs) {
+          crepe.editor.use(intentRefHighlightPlugin);
+        }
+        if (nextRefs) {
+          crepe.editor.use(nextRefHighlightPlugin);
+        }
+        if (blockRefs) {
+          crepe.editor.use(blockRefHighlightPlugin);
+        }
+        if (threadCallouts) {
+          crepe.editor.use(workThreadCalloutHighlightPlugin);
         }
 
         const syncAutocomplete = () => {
@@ -641,12 +847,20 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
             if (taskRefAutocomplete) {
               window.requestAnimationFrame(() => syncAutocompleteRef.current?.());
             }
+            if (workThreadFocusChangeRef.current) {
+              window.requestAnimationFrame(() => emitWorkThreadFocus());
+            }
           });
         });
 
         const scheduleSyncAutocomplete = () => {
           if (!taskRefAutocomplete) return;
           window.requestAnimationFrame(() => syncAutocompleteRef.current?.());
+        };
+
+        const scheduleWorkThreadFocus = () => {
+          if (!workThreadFocusChangeRef.current) return;
+          window.requestAnimationFrame(() => emitWorkThreadFocus());
         };
 
         const handleKeydown = (event: KeyboardEvent) => {
@@ -745,9 +959,16 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
           }
 
           if (event.key === 'Backspace' || event.key === 'Delete') {
-            const deleted = withEditorView((view) =>
-              deleteTaskRefAtCursor(view, event.key === 'Backspace' ? 'backward' : 'forward'),
-            );
+            const deleted = withEditorView((view) => {
+              const direction = event.key === 'Backspace' ? 'backward' : 'forward';
+              return (
+                deleteTaskRefAtCursor(view, direction) ||
+                deleteSparkRefAtCursor(view, direction) ||
+                deleteIntentRefAtCursor(view, direction) ||
+                deleteNextRefAtCursor(view, direction) ||
+                deleteBlockRefAtCursor(view, direction)
+              );
+            });
             if (deleted) {
               event.preventDefault();
               closeAutocomplete();
@@ -768,28 +989,65 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
 
         const handleClick = (event: MouseEvent) => {
           const target = event.target as HTMLElement | null;
+          const calloutToggle = target?.closest<HTMLElement>('.milkdown-callout-toggle');
+          if (calloutToggle) {
+            const markerFrom = Number(calloutToggle.dataset.calloutMarkerFrom ?? '');
+            const markerTo = Number(calloutToggle.dataset.calloutMarkerTo ?? '');
+            const collapsed = calloutToggle.dataset.calloutCollapsed === 'true';
+            if (Number.isFinite(markerFrom) && Number.isFinite(markerTo)) {
+              replaceTextRange(markerFrom, markerTo, collapsed ? '+' : '-');
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            scheduleWorkThreadFocus();
+            scheduleSyncAutocomplete();
+            return;
+          }
           const refNode = target?.closest<HTMLElement>('.milkdown-task-ref');
           const shortId = refNode?.dataset.taskRefShortId;
-          if (!shortId) return;
-          const taskId = resolveTaskRefToId(shortId, useTaskStore.getState().tasks);
-          if (!taskId) return;
+          if (shortId) {
+            const taskId = resolveTaskRefToId(shortId, useTaskStore.getState().tasks);
+            if (!taskId) return;
+            event.preventDefault();
+            event.stopPropagation();
+            useTaskStore.getState().selectTask(taskId);
+            return;
+          }
+          const sparkNode = target?.closest<HTMLElement>('.milkdown-spark-ref');
+          const sparkId = sparkNode?.dataset.sparkRefId;
+          if (!sparkId) return;
+          const entryId = resolveSparkRefToId(sparkId, useStreamStore.getState().entries);
+          if (!entryId) return;
           event.preventDefault();
           event.stopPropagation();
-          useTaskStore.getState().selectTask(taskId);
+          sparkRefOpenRef.current?.(entryId);
+          return;
         };
 
-        const handleMouseup = () => scheduleSyncAutocomplete();
-        const handleFocusin = () => scheduleSyncAutocomplete();
+        const handleMouseup = () => {
+          scheduleSyncAutocomplete();
+          scheduleWorkThreadFocus();
+        };
+        const handleKeyup = () => {
+          scheduleSyncAutocomplete();
+          scheduleWorkThreadFocus();
+        };
+        const handleFocusin = () => {
+          scheduleSyncAutocomplete();
+          scheduleWorkThreadFocus();
+        };
         const handleFocusout = () => {
           window.setTimeout(() => {
             const activeElement = document.activeElement;
             if (activeElement && wrapperRef.current?.contains(activeElement)) return;
             closeAutocomplete();
             closeSlashMenu();
+            workThreadFocusChangeRef.current?.({ kind: 'root' });
           }, 0);
         };
 
         root.addEventListener('keydown', handleKeydown);
+        root.addEventListener('keyup', handleKeyup);
         root.addEventListener('paste', handlePaste);
         root.addEventListener('click', handleClick);
         root.addEventListener('mouseup', handleMouseup);
@@ -810,12 +1068,19 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
         blockEdit,
         closeAutocomplete,
         editorId,
+        emitWorkThreadFocus,
         getEditor,
         taskRefAutocomplete,
         taskRefs,
+        sparkRefs,
+        intentRefs,
+        nextRefs,
+        blockRefs,
+        threadCallouts,
         toolbar,
         topBar,
         closeSlashMenu,
+        replaceTextRange,
         slashCommands,
       ],
     );
@@ -835,6 +1100,50 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       [getEditor],
     );
 
+    const getCurrentMarkdown = useCallback(() => {
+      const editor = getEditor();
+      if (!editor) return '';
+      return editor.action((ctx) => getMarkdown()(ctx)) ?? '';
+    }, [getEditor]);
+
+    useEffect(() => {
+      const editor = getEditor();
+      if (!editor) return;
+      const currentMarkdown = editor.action((ctx) => getMarkdown()(ctx)) ?? '';
+      if (
+        normalizeMarkdownEditorContent(currentMarkdown) ===
+        normalizeMarkdownEditorContent(initialMarkdown)
+      ) {
+        return;
+      }
+      editor.action((ctx) => {
+        const view = getEditorView(ctx);
+        const slice = markdownToSlice(initialMarkdown || '')(ctx);
+        const tr = view.state.tr.replace(0, view.state.doc.content.size, slice);
+        view.dispatch(tr);
+      });
+    }, [getEditor, initialMarkdown]);
+
+    const getSelectionMarkdown = useCallback(
+      (options?: { expandToBlockIfCollapsed?: boolean }) => {
+        const editor = getEditor();
+        if (!editor) return null;
+        return (
+          editor.action((ctx) => {
+            const view = getEditorView(ctx);
+            const range = getMarkdownSelectionRange(view, options?.expandToBlockIfCollapsed);
+            if (!range) return null;
+            return {
+              markdown: getMarkdown(range)(ctx),
+              from: range.from,
+              to: range.to,
+            };
+          }) ?? null
+        );
+      },
+      [getEditor],
+    );
+
     const focus = useCallback(() => {
       const editor = getEditor();
       if (!editor) return;
@@ -848,11 +1157,14 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       ref,
       () => ({
         insertText,
+        insertMarkdown,
+        getMarkdown: getCurrentMarkdown,
+        getSelectionMarkdown,
         replaceTextRange,
         replaceMarkdownRange,
         focus,
       }),
-      [focus, insertText, replaceMarkdownRange, replaceTextRange],
+      [focus, getCurrentMarkdown, getSelectionMarkdown, insertMarkdown, insertText, replaceMarkdownRange, replaceTextRange],
     );
 
     const visibleCandidates = autocomplete.open
@@ -865,6 +1177,12 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
         className={`${variantClassMap[variant]} ${
           taskRefs ? `task-ref-mode-${taskRefMode}` : ''
         } ${taskRefAutocomplete ? 'task-ref-autocomplete-enabled' : ''} ${
+          sparkRefs ? 'spark-ref-enabled' : ''
+        } ${nextRefs ? 'next-ref-enabled' : ''} ${
+          blockRefs ? 'block-ref-enabled' : ''
+        } ${intentRefs ? 'intent-ref-enabled' : ''} ${
+          threadCallouts ? 'thread-callout-enabled' : ''
+        } ${
           nativeSlashUi === 'off' ? 'native-slash-ui-off' : ''
         } ${className}`.trim()}
         data-native-slash-ui={nativeSlashUi}

@@ -4,6 +4,7 @@ import {
   buildWorkThreadRestoreHistory,
   buildWorkThreadTimelineItems,
   getWorkThreadEventMetaLabel,
+  getWorkThreadEventDisplayTitle,
   summarizeWorkThreadEventDetail,
 } from './workThreadHistory';
 
@@ -42,6 +43,16 @@ describe('getWorkThreadEventMetaLabel', () => {
     });
 
     expect(getWorkThreadEventMetaLabel(event)).toBe('capture · brain-dump');
+  });
+
+  it('maps waiting and interrupt events to the unified block label', () => {
+    const event = createEvent({
+      type: 'waiting_updated',
+      title: 'Added block: API key',
+    });
+
+    expect(getWorkThreadEventMetaLabel(event)).toBe('block');
+    expect(getWorkThreadEventDisplayTitle(event)).toBe('Block: API key');
   });
 });
 

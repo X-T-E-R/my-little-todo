@@ -71,6 +71,8 @@
   "Close panel": "Close panel",
   "Add to thread": "Add to thread",
   "New thread from this": "New thread from this",
+  "thread_origin_badge": "From thread",
+  "thread_origin_open": "Open thread",
   "{{count}} characters": "{{count}} chars",
   "Draft saved": "Draft saved",
   "Attach": "Attach",
@@ -79,5 +81,10 @@
   "Collapse": "Collapse",
   "Expand composer": "Expand composer",
   "Quick create task...": "Quick create task...",
-  "Quick create task in current thread...": "Create task and link it to current thread..."
+  "Quick create task in current thread...": "Create task and link it to current thread...",
+  "quick_input_target_intent": "Intent",
+  "quick_input_target_next": "Next step",
+  "quick_input_placeholder_intent": "Quickly capture the current intent...",
+  "quick_input_placeholder_next": "Quickly capture the next concrete step...",
+  "More options": "More options"
 }

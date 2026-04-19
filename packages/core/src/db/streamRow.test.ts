@@ -40,4 +40,25 @@ describe('streamEntryToDbRow / streamEntryFromDbRow roundtrip', () => {
     expect(back.roleId).toBe('role-a');
     expect(back.extractedTaskId).toBe('t-99');
   });
+
+  it('preserves thread spark metadata', () => {
+    const e = minimalEntry({
+      threadMeta: {
+        sourceThreadId: 'thread-42',
+        sparkState: 'tasked',
+        promotedThreadId: 'thread-88',
+        linkedTaskId: 'task-9',
+        originIntentId: 'intent-7',
+      },
+    });
+    const row = streamEntryToDbRow(e, 9, null);
+    const back = streamEntryFromDbRow(row as StreamEntryDbRow);
+    expect(back.threadMeta).toEqual({
+      sourceThreadId: 'thread-42',
+      sparkState: 'tasked',
+      promotedThreadId: 'thread-88',
+      linkedTaskId: 'task-9',
+      originIntentId: 'intent-7',
+    });
+  });
 });

@@ -853,7 +853,221 @@ button:focus-visible,
     160ms ease;
 }
 
+.markdown-editor .milkdown .ProseMirror .milkdown-spark-ref,
+.markdown-editor .milkdown .ProseMirror .milkdown-intent-ref,
+.markdown-editor .milkdown .ProseMirror .milkdown-next-ref,
+.markdown-editor .milkdown .ProseMirror .milkdown-block-ref {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: baseline;
+  box-decoration-break: clone;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow
+    160ms ease;
+}
+
 .markdown-editor .milkdown .ProseMirror .milkdown-task-ref-source {
+  display: none;
+}
+
+.markdown-editor .milkdown .ProseMirror .milkdown-spark-ref-source,
+.markdown-editor .milkdown .ProseMirror .milkdown-intent-ref-source,
+.markdown-editor .milkdown .ProseMirror .milkdown-next-ref-source,
+.markdown-editor .milkdown .ProseMirror .milkdown-block-ref-source {
+  display: none;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout {
+  position: relative;
+  margin: 1rem 0;
+  padding: 1rem 1rem 1rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
+  border-left-width: 5px;
+  border-radius: 22px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-surface) 97%, white),
+    color-mix(in srgb, var(--color-surface) 99%, var(--color-bg))
+  );
+  color: var(--color-text);
+  box-shadow:
+    0 16px 36px color-mix(in srgb, var(--color-text) 6%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 72%, transparent);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    background-color 180ms ease;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--active {
+  box-shadow:
+    0 20px 44px color-mix(in srgb, var(--color-accent) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, white 72%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 24%, var(--color-border));
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout-header {
+  position: relative;
+  min-height: 2.6rem;
+  margin: 0 0 0.85rem;
+  padding: 0 2.75rem 0 0;
+  color: transparent;
+  caret-color: var(--color-accent);
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout-header::before {
+  content: attr(data-callout-badge);
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.26rem 0.68rem;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout-header::after {
+  content: attr(data-callout-title);
+  display: block;
+  margin-top: 0.48rem;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-text);
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--editing-header .milkdown-callout-header {
+  color: var(--color-text);
+  user-select: text;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--editing-header .milkdown-callout-header::after {
+  display: none;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout-toggle {
+  position: absolute;
+  top: 0.95rem;
+  right: 0.95rem;
+  border: 0;
+  border-radius: 999px;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color-bg) 76%, white);
+  color: var(--color-text-secondary);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--color-text) 8%, transparent);
+  cursor: pointer;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout-toggle:hover {
+  background: color-mix(in srgb, var(--color-accent-soft) 84%, white);
+  color: var(--color-accent);
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--intent {
+  border-left-color: color-mix(in srgb, var(--color-accent) 78%, #0f766e);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent-soft) 68%, white),
+    color-mix(in srgb, var(--color-accent-soft) 48%, var(--color-surface))
+  );
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--intent .milkdown-callout-header::before {
+  background: color-mix(in srgb, var(--color-accent) 14%, white);
+  color: var(--color-accent);
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--spark {
+  border-left-color: color-mix(in srgb, #f59e0b 72%, #ea580c);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #fef3c7 78%, white),
+    color-mix(in srgb, var(--color-warning-soft) 66%, var(--color-surface))
+  );
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--spark .milkdown-callout-header::before {
+  background: color-mix(in srgb, #f59e0b 14%, white);
+  color: #b45309;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--block,
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--waiting,
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--interrupt {
+  border-left-color: color-mix(in srgb, #fb923c 72%, #dc2626);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #ffedd5 90%, white),
+    color-mix(in srgb, #ffedd5 72%, var(--color-surface))
+  );
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--block .milkdown-callout-header::before,
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--waiting .milkdown-callout-header::before,
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--interrupt .milkdown-callout-header::before {
+  background: color-mix(in srgb, #fdba74 20%, white);
+  color: #9a3412;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--explore {
+  border-left-color: color-mix(in srgb, #64748b 68%, #0f172a);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #e2e8f0 78%, white),
+    color-mix(in srgb, #e2e8f0 62%, var(--color-surface))
+  );
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--explore .milkdown-callout-header::before {
+  background: color-mix(in srgb, #cbd5e1 28%, white);
+  color: #334155;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--collapsed > :not(.milkdown-callout-header):not(.milkdown-callout-toggle) {
+  display: none;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror ul:has(li input[type="checkbox"]) {
+  padding-left: 0;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror li:has(input[type="checkbox"]) {
+  margin: 0.55rem 0;
+  border: 1px solid color-mix(in srgb, #16a34a 20%, var(--color-border));
+  border-radius: 16px;
+  padding: 0.6rem 0.8rem;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #dcfce7 90%, white),
+    color-mix(in srgb, #dcfce7 68%, var(--color-surface))
+  );
+  list-style: none;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror li:has(input[type="checkbox"]) p {
+  margin: 0;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror li:has(input[type="checkbox"]) input[type="checkbox"] {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--color-accent);
+}
+
+.work-thread-document-editor {
+  min-height: 100%;
+}
+
+.work-thread-document-editor .crepe-placeholder::before {
   display: none;
 }
 
@@ -880,6 +1094,43 @@ button:focus-visible,
   );
   color: var(--color-text);
   box-shadow: 0 6px 16px color-mix(in srgb, var(--color-accent) 8%, transparent);
+}
+
+.spark-ref-enabled .milkdown .ProseMirror .milkdown-spark-ref {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-warning-soft) 42%, var(--color-border));
+  padding: 1px 7px;
+  font-size: 0.92em;
+  background: color-mix(in srgb, var(--color-warning-soft) 82%, var(--color-surface));
+  color: color-mix(in srgb, var(--color-text) 86%, var(--color-accent));
+  cursor: pointer;
+}
+
+.intent-ref-enabled .milkdown .ProseMirror .milkdown-intent-ref {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 18%, var(--color-border));
+  padding: 1px 7px;
+  font-size: 0.92em;
+  background: color-mix(in srgb, var(--color-accent-soft) 94%, var(--color-surface));
+  color: var(--color-accent);
+}
+
+.next-ref-enabled .milkdown .ProseMirror .milkdown-next-ref {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #16a34a 18%, var(--color-border));
+  padding: 1px 7px;
+  font-size: 0.92em;
+  background: color-mix(in srgb, #dcfce7 78%, var(--color-surface));
+  color: color-mix(in srgb, #166534 82%, var(--color-text));
+}
+
+.block-ref-enabled .milkdown .ProseMirror .milkdown-block-ref {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-warning-soft) 46%, var(--color-border));
+  padding: 1px 7px;
+  font-size: 0.92em;
+  background: color-mix(in srgb, var(--color-warning-soft) 76%, var(--color-surface));
+  color: color-mix(in srgb, #9a3412 76%, var(--color-text));
 }
 
 .task-ref-mode-highlight-only .milkdown .ProseMirror .milkdown-task-ref {

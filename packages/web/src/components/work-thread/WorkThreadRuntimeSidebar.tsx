@@ -1,6 +1,14 @@
-import type { WorkThread, WorkThreadEvent, WorkThreadStatus } from '@my-little-todo/core';
-import { Clock3, ListTodo, PauseCircle, Play, Save } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import type {
+  WorkThreadBlockView,
+  StreamEntry,
+  WorkThread,
+  WorkThreadEvent,
+  WorkThreadIntentState,
+  WorkThreadStatus,
+} from '@my-little-todo/core';
+import { buildWorkThreadBlockViews } from '@my-little-todo/core';
+import { Clock3, ListTodo, Play, Save } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   buildWorkThreadRestoreHistory,
@@ -128,48 +136,55 @@ function HistorySection({
 export function WorkThreadRuntimeSidebar({
   thread,
   events,
+  relatedSparks,
   onResume,
   onCheckpoint,
   onStatusChange,
-  onUpdateMission,
-  onUpdateResumeCard,
   onToggleWaiting,
   onToggleNextAction,
   onCreateTaskFromNextAction,
+  onSetIntentState,
+  onPromoteIntent,
+  onCaptureIntentAsSpark,
+  onCreateThreadFromIntent,
   onResolveInterrupt,
+  onOpenSparkInStream,
+  onCreateThreadFromSpark,
+  onCreateTaskFromSpark,
+  onArchiveSpark,
 }: {
   thread: WorkThread;
   events: WorkThreadEvent[];
+  relatedSparks: StreamEntry[];
   onResume: () => void;
   onCheckpoint: () => void;
   onStatusChange: (status: WorkThreadStatus) => void;
-  onUpdateMission: (mission: string) => void;
-  onUpdateResumeCard: (patch: {
-    summary: string;
-    nextStep: string;
-    waitingSummary?: string;
-  }) => void;
   onToggleWaiting: (id: string) => void;
   onToggleNextAction: (id: string) => void;
   onCreateTaskFromNextAction: (id: string) => void;
+  onSetIntentState: (id: string, state: WorkThreadIntentState) => void;
+  onPromoteIntent: (id: string) => void;
+  onCaptureIntentAsSpark: (id: string) => void;
+  onCreateThreadFromIntent: (id: string) => void;
   onResolveInterrupt: (id: string) => void;
+  onOpenSparkInStream: (entryId: string) => void;
+  onCreateThreadFromSpark: (entryId: string) => void;
+  onCreateTaskFromSpark: (entryId: string) => void;
+  onArchiveSpark: (entryId: string) => void;
 }) {
   const { t } = useTranslation('think');
-  const [mission, setMission] = useState(thread.mission);
-  const [summary, setSummary] = useState(thread.resumeCard.summary);
-  const [nextStep, setNextStep] = useState(thread.resumeCard.nextStep);
-  const [waitingSummary, setWaitingSummary] = useState(thread.resumeCard.waitingSummary ?? '');
   const [historyMode, setHistoryMode] = useState<WorkThreadHistoryMode>('restore');
-
-  useEffect(() => {
-    setMission(thread.mission);
-    setSummary(thread.resumeCard.summary);
-    setNextStep(thread.resumeCard.nextStep);
-    setWaitingSummary(thread.resumeCard.waitingSummary ?? '');
-  }, [thread]);
 
   const restoreHistory = buildWorkThreadRestoreHistory(events, 4, t);
   const timelineItems = buildWorkThreadTimelineItems(events, 12, t);
+  const blocks = useMemo(() => buildWorkThreadBlockViews(thread), [thread]);
+  const toggleBlock = (block: WorkThreadBlockView) => {
+    if (block.sourceKind === 'interrupt') {
+      onResolveInterrupt(block.id);
+      return;
+    }
+    onToggleWaiting(block.id);
+  };
 
   return (
     <div className="flex flex-col">
@@ -213,51 +228,127 @@ export function WorkThreadRuntimeSidebar({
       </Card>
 
       <Card title={t('thread_resume_card_title')}>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <div className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+              Mission
+            </div>
+            <div className="rounded-xl border px-3 py-2 text-sm" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+              {thread.mission || '—'}
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+              {t('thread_resume_summary_placeholder')}
+            </div>
+            <div className="rounded-xl border px-3 py-2 text-sm leading-6" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+              {thread.resumeCard.summary || '—'}
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <div className="rounded-xl border px-3 py-2 text-sm" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                {t('thread_resume_next_step_placeholder')}
+              </div>
+              <div className="mt-1" style={{ color: 'var(--color-text)' }}>
+                {thread.resumeCard.nextStep || '—'}
+              </div>
+            </div>
+            <div className="rounded-xl border px-3 py-2 text-sm" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
+                {t('thread_resume_waiting_placeholder')}
+              </div>
+              <div className="mt-1" style={{ color: 'var(--color-text)' }}>
+                {thread.resumeCard.blockSummary ?? thread.resumeCard.waitingSummary ?? '—'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card title={t('thread_intents_title')}>
         <div className="space-y-2">
-          <textarea
-            value={mission}
-            onChange={(event) => setMission(event.target.value)}
-            onBlur={() => onUpdateMission(mission)}
-            rows={2}
-            className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
-            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          />
-          <textarea
-            value={summary}
-            onChange={(event) => setSummary(event.target.value)}
-            rows={3}
-            placeholder={t('thread_resume_summary_placeholder')}
-            className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
-            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          />
-          <input
-            value={nextStep}
-            onChange={(event) => setNextStep(event.target.value)}
-            placeholder={t('thread_resume_next_step_placeholder')}
-            className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
-            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          />
-          <input
-            value={waitingSummary}
-            onChange={(event) => setWaitingSummary(event.target.value)}
-            placeholder={t('thread_resume_waiting_placeholder')}
-            className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
-            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          />
-          <button
-            type="button"
-            onClick={() =>
-              onUpdateResumeCard({
-                summary,
-                nextStep,
-                waitingSummary: waitingSummary || undefined,
-              })
-            }
-            className="rounded-xl px-3 py-2 text-xs font-semibold text-white"
-            style={{ background: 'var(--color-accent)' }}
-          >
-            {t('thread_resume_save')}
-          </button>
+          {thread.intents.length === 0 ? (
+            <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+              {t('thread_intents_empty')}
+            </div>
+          ) : (
+            thread.intents.slice(0, 8).map((intent) => (
+              <div
+                key={intent.id}
+                className="rounded-xl border px-3 py-2"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm" style={{ color: 'var(--color-text)' }}>
+                      {intent.text}
+                    </div>
+                    {intent.detail ? (
+                      <div className="mt-1 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                        {intent.detail}
+                      </div>
+                    ) : null}
+                  </div>
+                  <span
+                    className="shrink-0 rounded-full px-2 py-0.5 text-[10px]"
+                    style={{
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-text-tertiary)',
+                      border: '1px solid var(--color-border)',
+                    }}
+                  >
+                    {t(`thread_intent_state_${intent.state}`)}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                  {intent.state !== 'done' ? (
+                    <button
+                      type="button"
+                      onClick={() => onPromoteIntent(intent.id)}
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      {t('thread_intent_to_next')}
+                    </button>
+                  ) : null}
+                  {!intent.linkedSparkId ? (
+                    <button
+                      type="button"
+                      onClick={() => onCaptureIntentAsSpark(intent.id)}
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      {t('thread_intent_to_spark')}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => onCreateThreadFromIntent(intent.id)}
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    {t('thread_intent_new_thread')}
+                  </button>
+                  {intent.state !== 'parked' ? (
+                    <button
+                      type="button"
+                      onClick={() => onSetIntentState(intent.id, 'parked')}
+                      style={{ color: 'var(--color-text-secondary)' }}
+                    >
+                      {t('thread_intent_park')}
+                    </button>
+                  ) : null}
+                  {intent.state !== 'archived' ? (
+                    <button
+                      type="button"
+                      onClick={() => onSetIntentState(intent.id, 'archived')}
+                      style={{ color: 'var(--color-text-secondary)' }}
+                    >
+                      {t('thread_intent_archive')}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </Card>
 
@@ -299,48 +390,101 @@ export function WorkThreadRuntimeSidebar({
         </div>
       </Card>
 
-      <Card title={t('thread_waiting_title')}>
+      <Card title={t('thread_related_sparks_title')}>
         <div className="space-y-2">
-          {thread.waitingFor.length === 0 ? (
+          {relatedSparks.length === 0 ? (
             <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-              {t('thread_waiting_empty')}
+              {t('thread_related_sparks_empty')}
             </div>
           ) : (
-            thread.waitingFor.slice(0, 5).map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => onToggleWaiting(item.id)}
-                className="flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left"
-                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            relatedSparks.slice(0, 8).map((spark) => (
+              <div
+                key={spark.id}
+                className="rounded-xl border px-3 py-2"
+                style={{ borderColor: 'var(--color-border)' }}
               >
-                <span className="min-w-0 flex-1">{item.title}</span>
-                <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {item.satisfied ? t('thread_status_done') : t(`thread_waiting_kind_${item.kind}`)}
-                </span>
-              </button>
+                <div className="text-sm" style={{ color: 'var(--color-text)' }}>
+                  {spark.content}
+                </div>
+                <div
+                  className="mt-1 text-[10px]"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
+                  {t(`thread_related_sparks_state_${spark.threadMeta?.sparkState ?? 'open'}`)}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => onOpenSparkInStream(spark.id)}
+                    style={{ color: 'var(--color-accent)' }}
+                  >
+                    {t('thread_related_sparks_open_stream')}
+                  </button>
+                  {!spark.threadMeta?.promotedThreadId ? (
+                    <button
+                      type="button"
+                      onClick={() => onCreateThreadFromSpark(spark.id)}
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      {t('thread_related_sparks_new_thread')}
+                    </button>
+                  ) : null}
+                  {!spark.threadMeta?.linkedTaskId ? (
+                    <button
+                      type="button"
+                      onClick={() => onCreateTaskFromSpark(spark.id)}
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      {t('thread_related_sparks_new_task')}
+                    </button>
+                  ) : null}
+                  {spark.threadMeta?.sparkState !== 'archived' ? (
+                    <button
+                      type="button"
+                      onClick={() => onArchiveSpark(spark.id)}
+                      style={{ color: 'var(--color-text-secondary)' }}
+                    >
+                      {t('thread_related_sparks_archive')}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
             ))
           )}
         </div>
       </Card>
 
-      <Card title={t('thread_interrupts_title')}>
+      <Card title={t('thread_blockers_title')}>
         <div className="space-y-2">
-          {thread.interrupts.length === 0 ? (
+          {blocks.length === 0 ? (
             <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-              {t('thread_interrupt_empty')}
+              {t('thread_blockers_empty')}
             </div>
           ) : (
-            thread.interrupts.slice(0, 4).map((interrupt) => (
+            blocks.slice(0, 8).map((block) => (
               <button
-                key={interrupt.id}
+                key={`${block.sourceKind}-${block.id}`}
                 type="button"
-                onClick={() => onResolveInterrupt(interrupt.id)}
-                className="flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left"
+                onClick={() => toggleBlock(block)}
+                className="flex w-full items-start justify-between rounded-xl border px-3 py-2 text-left"
                 style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               >
-                <span className="min-w-0 flex-1">{interrupt.title}</span>
-                <PauseCircle size={14} style={{ color: interrupt.resolved ? 'var(--color-success, #16a34a)' : 'var(--color-text-tertiary)' }} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm">{block.title}</div>
+                  {block.detail ? (
+                    <div className="mt-1 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {block.detail}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="ml-3 flex shrink-0 flex-col items-end gap-1">
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {t(`thread_block_source_${block.sourceKind ?? 'waiting'}`)}
+                  </span>
+                  <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {t(`thread_block_state_${block.state}`)}
+                  </span>
+                </div>
               </button>
             ))
           )}

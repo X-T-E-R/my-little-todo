@@ -1,24 +1,21 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useTaskStore, useRoleStore, useWorkThreadStore } from '../stores';
-import { normalizeLegacyWorkThreadBlocks } from '../utils/workThreadLegacyBlocks';
-import { buildWorkThreadSlashInsertion } from '../utils/workThreadSlash';
+import { useExecCoachStore, useRoleStore, useStreamStore, useTaskStore, useWorkThreadStore } from '../stores';
+import { getWorkThreadFocusLabel } from '../utils/workThreadFocus';
 import { decideInitialThreadRoute } from '../utils/workThreadUiPrefs';
-import type { ThinkSessionEditorHandle } from './ThinkSessionEditor';
-import { ThinkSessionEditor } from './ThinkSessionEditor';
 import { MaterialSidebar } from './think-session/MaterialSidebar';
 import { WorkThreadBoard } from './work-thread/WorkThreadBoard';
+import { WorkThreadDocumentEditor } from './work-thread/WorkThreadDocumentEditor';
 import { WorkThreadEditorShell } from './work-thread/WorkThreadEditorShell';
-import { getWorkThreadSlashCommands } from './work-thread/WorkThreadInlineMenu';
 import { WorkThreadRuntimeSidebar } from './work-thread/WorkThreadRuntimeSidebar';
 
 export function WorkThreadView({ onGoNow }: { onGoNow: () => void }) {
   const { t } = useTranslation('think');
-  const editorRef = useRef<ThinkSessionEditorHandle>(null);
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const roles = useRoleStore((s) => s.roles);
   const roleNames = useMemo(() => Object.fromEntries(roles.map((role) => [role.id, role.name])), [roles]);
   const selectTask = useTaskStore((s) => s.selectTask);
+  const streamEntries = useStreamStore((s) => s.entries);
 
   const threads = useWorkThreadStore((s) => s.threads);
   const currentThread = useWorkThreadStore((s) => s.currentThread);
@@ -41,22 +38,44 @@ export function WorkThreadView({ onGoNow }: { onGoNow: () => void }) {
   const createThread = useWorkThreadStore((s) => s.createThread);
   const dispatchThread = useWorkThreadStore((s) => s.dispatchThread);
   const deleteThread = useWorkThreadStore((s) => s.deleteThread);
-  const updateMission = useWorkThreadStore((s) => s.updateMission);
   const setStatus = useWorkThreadStore((s) => s.setStatus);
-  const updateResumeCard = useWorkThreadStore((s) => s.updateResumeCard);
   const toggleWaitingSatisfied = useWorkThreadStore((s) => s.toggleWaitingSatisfied);
   const resolveInterrupt = useWorkThreadStore((s) => s.resolveInterrupt);
   const updateDoc = useWorkThreadStore((s) => s.updateDoc);
+  const updateExplorationMarkdown = useWorkThreadStore((s) => s.updateExplorationMarkdown);
   const flushSave = useWorkThreadStore((s) => s.flushSave);
   const saveCheckpoint = useWorkThreadStore((s) => s.saveCheckpoint);
   const addTaskToThread = useWorkThreadStore((s) => s.addTaskToThread);
   const addStreamToThread = useWorkThreadStore((s) => s.addStreamToThread);
-  const toggleNextActionDone = useWorkThreadStore((s) => s.toggleNextActionDone);
+  const setIntentState = useWorkThreadStore((s) => s.setIntentState);
+  const promoteIntentToNextAction = useWorkThreadStore((s) => s.promoteIntentToNextAction);
+  const captureIntentAsSpark = useWorkThreadStore((s) => s.captureIntentAsSpark);
+  const createThreadFromIntent = useWorkThreadStore((s) => s.createThreadFromIntent);
+  const createThreadFromSpark = useWorkThreadStore((s) => s.createThreadFromSpark);
+  const createTaskFromSpark = useWorkThreadStore((s) => s.createTaskFromSpark);
+  const archiveSpark = useWorkThreadStore((s) => s.archiveSpark);
   const createTaskFromNextAction = useWorkThreadStore((s) => s.createTaskFromNextAction);
+  const toggleNextActionDone = useWorkThreadStore((s) => s.toggleNextActionDone);
+  const energyLevel = useExecCoachStore((s) => s.energyLevel);
+  const workMode = useExecCoachStore((s) => s.workMode);
+  const workStateNote = useExecCoachStore((s) => s.workStateNote);
   const syncStatus = useWorkThreadStore((s) => s.syncStatus);
   const syncMessage = useWorkThreadStore((s) => s.syncMessage);
   const pendingExternalThread = useWorkThreadStore((s) => s.pendingExternalThread);
-  const slashCommands = useMemo(() => getWorkThreadSlashCommands(t), [t]);
+  const workspaceFocus = useWorkThreadStore((s) => s.workspaceFocus);
+
+  const relatedSparks = useMemo(
+    () =>
+      currentThread
+        ? streamEntries.filter(
+            (entry) =>
+              entry.entryType === 'spark' &&
+              (entry.threadMeta?.sourceThreadId === currentThread.id ||
+                entry.threadMeta?.promotedThreadId === currentThread.id),
+          )
+        : [],
+    [currentThread, streamEntries],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -97,7 +116,6 @@ export function WorkThreadView({ onGoNow }: { onGoNow: () => void }) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const mediaQuery = window.matchMedia('(max-width: 1023.98px)');
-
     const syncCompactSidebarState = () => {
       const state = useWorkThreadStore.getState();
       if (!mediaQuery.matches) return;
@@ -105,23 +123,21 @@ export function WorkThreadView({ onGoNow }: { onGoNow: () => void }) {
         void state.setMaterialSidebarOpen(false);
       }
     };
-
     syncCompactSidebarState();
     const handleChange = () => syncCompactSidebarState();
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
 
-  useEffect(() => {
-    if (!currentThread) return;
-    const normalized = normalizeLegacyWorkThreadBlocks(currentThread.docMarkdown, {
-      waitingHeading: t('thread_waiting_title_short'),
-      interruptHeading: t('thread_interrupt_title_short'),
-    });
-    if (normalized !== currentThread.docMarkdown) {
-      updateDoc(normalized);
-    }
-  }, [currentThread, t, updateDoc]);
+  const openSparkInStream = (entryId: string) => {
+    if (typeof window === 'undefined') return;
+    window.sessionStorage.setItem('mlt-stream-scroll-to', entryId);
+    window.dispatchEvent(
+      new CustomEvent('mlt-navigate', {
+        detail: { view: 'stream' },
+      }),
+    );
+  };
 
   if ((threadListOpen || !currentThread) && loading && threads.length === 0) {
     return (
@@ -175,11 +191,15 @@ export function WorkThreadView({ onGoNow }: { onGoNow: () => void }) {
           }
           void setRuntimeSidebarOpen(!runtimeSidebarOpen);
         }}
-        onDropMarkdown={(markdown) => editorRef.current?.insertText(`\n${markdown}`)}
+        onDropMarkdown={(markdown) =>
+          updateDoc(
+            `${currentThread.docMarkdown.replace(/\s+$/u, '')}${currentThread.docMarkdown.trim() ? '\n\n' : ''}${markdown.trim()}`.trim(),
+          )
+        }
         leftSidebar={
           <MaterialSidebar
             currentRoleId={currentRoleId}
-            onInsertMarkdown={(markdown) => editorRef.current?.insertText(`\n${markdown}`)}
+            onInsertMarkdown={(markdown) => void updateExplorationMarkdown(`${currentThread.explorationMarkdown.trim()}\n\n${markdown}`.trim())}
             onOpenTask={(taskId) => selectTask(taskId)}
             onCreateThreadFromTask={(task) => void addTaskToThread(task, 'new')}
             onAddTaskToWorkingSet={(task) => void addTaskToThread(task, 'current')}
@@ -234,68 +254,61 @@ export function WorkThreadView({ onGoNow }: { onGoNow: () => void }) {
                         ? t('thread_sync_external_change')
                         : syncMessage}
               </div>
-              <div className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                {t('thread_editor_inline_hint')}
+              <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                <span style={{ color: 'var(--color-text-tertiary)' }}>
+                  {`单文档工作面 · ${getWorkThreadFocusLabel(currentThread, workspaceFocus)}`}
+                </span>
+                <span
+                  className="rounded-full px-2 py-0.5"
+                  style={{ color: 'var(--color-accent)', background: 'var(--color-accent-soft)' }}
+                >
+                  {t(`energy_${energyLevel}`, { ns: 'coach' })}
+                </span>
+                <span
+                  className="rounded-full px-2 py-0.5"
+                  style={{
+                    color: 'var(--color-text-secondary)',
+                    background: 'var(--color-bg)',
+                    border: '1px solid var(--color-border)',
+                  }}
+                >
+                  {t(`work_mode_${workMode}`, { ns: 'coach' })}
+                </span>
+                {workStateNote ? (
+                  <span style={{ color: 'var(--color-text-tertiary)' }}>{workStateNote}</span>
+                ) : null}
               </div>
             </div>
           </div>
         }
         centerBody={
-          <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-            <ThinkSessionEditor
-              ref={editorRef}
-              sessionId={`work-thread-${currentThread.id}`}
-              initialMarkdown={currentThread.docMarkdown}
-              onMarkdownChange={updateDoc}
-              nativeSlashUi="off"
-              editorClassName="work-thread-editor"
-              slashCommands={slashCommands}
-              onSlashCommand={(payload) => {
-                const insertion = buildWorkThreadSlashInsertion(payload.command.id, {
-                  checkpointLabel: new Date().toLocaleString(),
-                  waitingHeading: t('thread_waiting_title_short'),
-                  interruptHeading: t('thread_interrupt_title_short'),
-                  waitingTitlePlaceholder: t('thread_inline_title_placeholder'),
-                  waitingDetailPlaceholder: t('thread_inline_detail_placeholder'),
-                  interruptTitlePlaceholder: t('thread_inline_title_placeholder'),
-                  interruptDetailPlaceholder: t('thread_inline_detail_placeholder'),
-                  noteTitlePlaceholder: t('thread_inline_title_placeholder'),
-                  noteBodyPlaceholder: t('thread_inline_detail_placeholder'),
-                  linkTitlePlaceholder: t('thread_inline_title_placeholder'),
-                  linkUrlPlaceholder: t('thread_inline_link_placeholder'),
-                  checkpointResumePlaceholder: t('thread_inline_title_placeholder'),
-                  checkpointNextPlaceholder: t('thread_inline_detail_placeholder'),
-                });
-                if (!insertion) return;
-                editorRef.current?.replaceMarkdownRange(
-                  payload.replaceFrom,
-                  payload.replaceTo,
-                  insertion.markdown,
-                  {
-                    text: insertion.selectionText,
-                    fallback: 'end',
-                  },
-                );
-                if (insertion.shouldSaveCheckpoint) {
-                  void saveCheckpoint();
-                }
-              }}
-            />
-          </div>
+          <WorkThreadDocumentEditor
+            thread={currentThread}
+            relatedSparks={relatedSparks}
+            onUpdateDoc={updateDoc}
+            onOpenSparkInStream={openSparkInStream}
+          />
         }
         rightSidebar={
           <WorkThreadRuntimeSidebar
             thread={currentThread}
             events={currentEvents}
+            relatedSparks={relatedSparks}
             onResume={() => void dispatchThread(currentThread.id, 'manual')}
             onCheckpoint={() => void saveCheckpoint()}
             onStatusChange={(status) => void setStatus(status)}
-            onUpdateMission={(mission) => void updateMission(mission)}
-            onUpdateResumeCard={(patch) => void updateResumeCard(patch)}
             onToggleWaiting={(id) => void toggleWaitingSatisfied(id)}
             onToggleNextAction={(id) => void toggleNextActionDone(id)}
             onCreateTaskFromNextAction={(id) => void createTaskFromNextAction(id)}
+            onSetIntentState={(id, state) => void setIntentState(id, state)}
+            onPromoteIntent={(id) => void promoteIntentToNextAction(id)}
+            onCaptureIntentAsSpark={(id) => void captureIntentAsSpark(id)}
+            onCreateThreadFromIntent={(id) => void createThreadFromIntent(id)}
             onResolveInterrupt={(id) => void resolveInterrupt(id)}
+            onOpenSparkInStream={openSparkInStream}
+            onCreateThreadFromSpark={(entryId) => void createThreadFromSpark(entryId)}
+            onCreateTaskFromSpark={(entryId) => void createTaskFromSpark(entryId)}
+            onArchiveSpark={(entryId) => void archiveSpark(entryId)}
           />
         }
       />

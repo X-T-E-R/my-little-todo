@@ -714,7 +714,7 @@ export function NowView({
                   {t('thread_waiting_summary_label', { ns: 'think' })}
                 </p>
                 <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
-                  {thread.resumeCard.waitingSummary || t('thread_waiting_summary_empty', { ns: 'think' })}
+                  {thread.resumeCard.blockSummary || thread.resumeCard.waitingSummary || t('thread_waiting_summary_empty', { ns: 'think' })}
                 </p>
               </div>
             </div>
