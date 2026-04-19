@@ -112,6 +112,16 @@ export const BUILT_IN_MODULES: AppModule[] = [
     categoryOrder: 1,
   },
   {
+    id: 'embedded-host',
+    nameKey: 'module_embedded_host_name',
+    descriptionKey: 'module_embedded_host_desc',
+    defaultEnabled: false,
+    stability: 'beta',
+    hasSettingsPage: true,
+    category: 'integrations',
+    categoryOrder: 0,
+  },
+  {
     id: 'mcp-integration',
     nameKey: 'module_mcp_name',
     descriptionKey: 'module_mcp_desc',
@@ -119,7 +129,7 @@ export const BUILT_IN_MODULES: AppModule[] = [
     stability: 'beta',
     hasSettingsPage: true,
     category: 'integrations',
-    categoryOrder: 0,
+    categoryOrder: 1,
   },
   {
     id: 'file-host',
@@ -129,7 +139,7 @@ export const BUILT_IN_MODULES: AppModule[] = [
     stability: 'beta',
     hasSettingsPage: true,
     category: 'integrations',
-    categoryOrder: 1,
+    categoryOrder: 2,
   },
   {
     id: 'desktop-widget',

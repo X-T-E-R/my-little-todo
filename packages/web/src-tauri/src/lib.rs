@@ -1,4 +1,7 @@
+use tauri::Manager;
+
 mod desktop_shell;
+mod embedded_host;
 mod native_http;
 
 #[cfg(windows)]
@@ -27,12 +30,17 @@ pub fn run() {
             foreground::foreground_listen_start,
             foreground::foreground_listen_stop,
             desktop_shell::show_annotator_window,
+            embedded_host::embedded_host_get_runtime_state,
+            embedded_host::embedded_host_start,
+            embedded_host::embedded_host_stop,
+            embedded_host::embedded_host_restart,
             native_http::native_http_request,
         ])
         .setup(|app| {
             foreground::init_foreground_listener(app.handle())?;
             desktop_shell::register_annotator_shortcut(app.handle())?;
             let _ = desktop_shell::setup_tray(app.handle());
+            app.manage(std::sync::Mutex::new(embedded_host::EmbeddedHostManager::default()));
             Ok(())
         })
         .run(tauri::generate_context!())

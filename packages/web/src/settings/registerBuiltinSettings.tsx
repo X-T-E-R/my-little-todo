@@ -1,5 +1,6 @@
 import { AiAgentSettings } from '../features/ai-agent/AiAgentSettings';
 import { DesktopWidgetSettings } from '../features/desktop-widget/DesktopWidgetSettings';
+import { EmbeddedHostSettings } from '../features/embedded-host/EmbeddedHostSettings';
 import { FileHostSettings } from '../features/file-host/FileHostSettings';
 import { KanbanSettings } from '../features/kanban/KanbanSettings';
 import { McpIntegrationSettings } from '../features/mcp-integration/McpIntegrationSettings';
@@ -14,6 +15,7 @@ import { registerSettingsEntry } from './registry';
 const BUILTIN_SETTINGS = [
   { id: 'ai-agent', component: AiAgentSettings },
   { id: 'kanban', component: KanbanSettings },
+  { id: 'embedded-host', component: EmbeddedHostSettings },
   { id: 'mcp-integration', component: McpIntegrationSettings },
   { id: 'file-host', component: FileHostSettings },
   { id: 'desktop-widget', component: DesktopWidgetSettings },

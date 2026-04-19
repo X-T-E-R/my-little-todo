@@ -47,6 +47,21 @@ export const useModuleStore = create<{
   setModuleEnabled: async (id, en) => {
     await putSetting(settingKey(id), en ? 'true' : 'false');
     set((s) => ({ enabled: { ...s.enabled, [id]: en } }));
+    if (id === 'embedded-host' && !en) {
+      const [{ isTauriEnv }, { stopEmbeddedHost }, { useEmbeddedHostStore }] = await Promise.all([
+        import('../utils/platform'),
+        import('../features/embedded-host/embeddedHostBridge'),
+        import('../features/embedded-host/embeddedHostStore'),
+      ]);
+      if (isTauriEnv()) {
+        await stopEmbeddedHost().catch(() => {});
+      }
+      useEmbeddedHostStore.getState().setRuntimeState({
+        status: 'inactive',
+        baseUrl: null,
+        lastError: undefined,
+      });
+    }
   },
   isEnabled: (id) => get().enabled[id] ?? true,
 }));

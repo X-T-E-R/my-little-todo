@@ -1,16 +1,17 @@
 import { CheckCircle, Copy, ExternalLink, Server } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  getDesktopEmbeddedHostBaseUrl,
+  useEmbeddedHostStore,
+} from '../embedded-host/embeddedHostStore';
+import { useModuleStore } from '../../modules/moduleStore';
 import { getSetting, getSettingsApiBase, putSetting } from '../../storage/settingsApi';
 import { useRoleStore } from '../../stores';
 import { getAuthToken } from '../../stores/authStore';
 import { isTauriEnv } from '../../utils/platform';
 
-/** Embedded Axum MCP server in desktop (see `src-tauri/src/lib.rs`). */
-const TAURI_EMBEDDED_MCP_BASE = 'http://127.0.0.1:23981';
-
 function getMcpBaseUrl(): string {
-  if (isTauriEnv()) return TAURI_EMBEDDED_MCP_BASE;
   const api = getSettingsApiBase();
   if (api) return api.replace(/\/$/, '');
   return typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
@@ -104,6 +105,8 @@ export function McpIntegrationSettings() {
   const { t } = useTranslation('settings');
   const roles = useRoleStore((s) => s.roles);
   const loadRolesData = useRoleStore((s) => s.load);
+  const hydrateEmbeddedHost = useEmbeddedHostStore((s) => s.hydrate);
+  const embeddedHostModuleEnabled = useModuleStore((s) => s.isEnabled('embedded-host'));
 
   const [permLevel, setPermLevel] = useState<PermLevel>('read');
   const [allowedRoles, setAllowedRoles] = useState<string[]>([]);
@@ -117,7 +120,10 @@ export function McpIntegrationSettings() {
 
   useEffect(() => {
     void loadRolesData();
-  }, [loadRolesData]);
+    if (isTauriEnv()) {
+      void hydrateEmbeddedHost();
+    }
+  }, [hydrateEmbeddedHost, loadRolesData]);
 
   useEffect(() => {
     getSetting('mcp-permission-level').then((v) => {
@@ -201,7 +207,9 @@ export function McpIntegrationSettings() {
   };
 
   const token = getAuthToken();
-  const baseUrl = getMcpBaseUrl();
+  const desktopBaseUrl = isTauriEnv() ? getDesktopEmbeddedHostBaseUrl() : null;
+  const desktopHostUnavailable = isTauriEnv() && !desktopBaseUrl;
+  const baseUrl = desktopBaseUrl ?? getMcpBaseUrl();
   const mcpServerEntry: Record<string, unknown> = {
     url: `${baseUrl}/api/mcp`,
   };
@@ -390,30 +398,38 @@ export function McpIntegrationSettings() {
             ))}
           </select>
         </div>
-        <div className="relative">
-          <pre
-            className="rounded-xl p-3 text-xs font-mono overflow-x-auto"
-            style={{
-              background: 'var(--color-bg)',
-              border: '1px solid var(--color-border)',
-              color: 'var(--color-text-secondary)',
-            }}
-          >
-            {mcpConfig}
-          </pre>
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="absolute top-2 right-2 rounded-lg p-1.5 transition-colors hover:bg-[var(--color-surface)]"
-            title={t('Copy')}
-          >
-            {copied ? (
-              <CheckCircle size={14} className="text-emerald-500" />
-            ) : (
-              <Copy size={14} className="text-[var(--color-text-tertiary)]" />
-            )}
-          </button>
-        </div>
+        {desktopHostUnavailable ? (
+          <p className="rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-3 text-xs text-[var(--color-text-tertiary)]">
+            {embeddedHostModuleEnabled
+              ? t('Start the Embedded Host in settings to expose MCP on desktop.')
+              : t('Enable the Embedded Host module to expose MCP on desktop.')}
+          </p>
+        ) : (
+          <div className="relative">
+            <pre
+              className="rounded-xl p-3 text-xs font-mono overflow-x-auto"
+              style={{
+                background: 'var(--color-bg)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              {mcpConfig}
+            </pre>
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="absolute top-2 right-2 rounded-lg p-1.5 transition-colors hover:bg-[var(--color-surface)]"
+              title={t('Copy')}
+            >
+              {copied ? (
+                <CheckCircle size={14} className="text-emerald-500" />
+              ) : (
+                <Copy size={14} className="text-[var(--color-text-tertiary)]" />
+              )}
+            </button>
+          </div>
+        )}
         {ideConfig.pathHint && (
           <p className="text-[11px] text-[var(--color-text-tertiary)] mt-1">
             {t('Config file')}: <code className="font-mono">{ideConfig.pathHint}</code>

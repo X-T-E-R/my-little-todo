@@ -175,6 +175,7 @@ function useSettingsNav() {
 const PLUGIN_ICONS: Record<string, LucideIcon> = {
   'ai-agent': Bot,
   kanban: LayoutGrid,
+  'embedded-host': Server,
   'time-capsule': Sparkles,
   'ai-coach': Bot,
   'energy-indicator': Zap,

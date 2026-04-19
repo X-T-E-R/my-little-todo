@@ -28,6 +28,12 @@ vi.mock('../stores/authStore', () => ({
   getAuthToken: () => null,
 }));
 
+const embeddedHostStore = vi.hoisted(() => ({
+  getDesktopEmbeddedHostBaseUrl: vi.fn(() => 'http://127.0.0.1:23981'),
+}));
+
+vi.mock('../features/embedded-host/embeddedHostStore', () => embeddedHostStore);
+
 import {
   reconcilePluginServerRuntime,
   setPluginServerLauncherForTests,
@@ -54,6 +60,7 @@ describe('pluginServerRuntime', () => {
   beforeEach(() => {
     updates.length = 0;
     httpClient.request.mockClear();
+    embeddedHostStore.getDesktopEmbeddedHostBaseUrl.mockReturnValue('http://127.0.0.1:23981');
     setPluginServerLauncherForTests(null);
   });
 
@@ -169,6 +176,34 @@ describe('pluginServerRuntime', () => {
     expect(updates.at(-1)).toEqual({
       pluginId: 'demo-server',
       patch: { serverStatus: 'inactive', serverLastError: undefined },
+    });
+  });
+
+  it('marks desktop server plugins unavailable when the embedded host is not running', async () => {
+    embeddedHostStore.getDesktopEmbeddedHostBaseUrl.mockReturnValue(null);
+
+    await reconcilePluginServerRuntime(
+      {
+        id: 'demo-server',
+        manifest,
+        installedAt: '2026-04-14T00:00:00.000Z',
+        enabled: true,
+        source: 'file',
+        stability: 'beta',
+        serverApproved: true,
+        serverStatus: 'inactive',
+      },
+      async (pluginId, patch) => {
+        updates.push({ pluginId, patch });
+      },
+    );
+
+    expect(updates.at(-1)).toEqual({
+      pluginId: 'demo-server',
+      patch: {
+        serverStatus: 'unavailable',
+        serverLastError: 'Embedded host is not running.',
+      },
     });
   });
 });

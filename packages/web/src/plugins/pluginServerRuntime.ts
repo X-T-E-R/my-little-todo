@@ -1,11 +1,10 @@
 import type { PluginManifest } from '@my-little-todo/plugin-sdk';
+import { getDesktopEmbeddedHostBaseUrl } from '../features/embedded-host/embeddedHostStore';
 import { getAuthToken } from '../stores/authStore';
 import { getSettingsApiBase } from '../storage/settingsApi';
 import { createHttpClient } from '../utils/httpClient';
 import { isTauriEnv } from '../utils/platform';
 import type { InstalledPluginRecord } from './types';
-
-const TAURI_EMBEDDED_SERVER_BASE = 'http://127.0.0.1:23981';
 
 export type ServerRuntimePatch = Pick<
   InstalledPluginRecord,
@@ -62,7 +61,13 @@ export function setPluginServerLauncherForTests(
 }
 
 function serverApiBase(): string {
-  if (isTauriEnv()) return TAURI_EMBEDDED_SERVER_BASE;
+  if (isTauriEnv()) {
+    const baseUrl = getDesktopEmbeddedHostBaseUrl();
+    if (!baseUrl) {
+      throw new Error('Embedded host is not running.');
+    }
+    return baseUrl;
+  }
   const apiBase = getSettingsApiBase().replace(/\/$/, '');
   if (apiBase) return apiBase;
   return typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
@@ -202,6 +207,19 @@ export async function reconcilePluginServerRuntime(
     await updateState(record.id, {
       serverStatus: 'unavailable',
       serverLastError: 'Server plugins are only supported in the Tauri desktop host.',
+    });
+    return;
+  }
+
+  if (!getDesktopEmbeddedHostBaseUrl()) {
+    const active = activeRunners.get(record.id);
+    if (active) {
+      await clearActiveRunner(record.id);
+      await active.controller.stop();
+    }
+    await updateState(record.id, {
+      serverStatus: 'unavailable',
+      serverLastError: 'Embedded host is not running.',
     });
     return;
   }
