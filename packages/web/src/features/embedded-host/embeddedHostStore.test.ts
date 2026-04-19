@@ -35,10 +35,28 @@ describe('embeddedHostStore', () => {
       resolveDesktopHostBaseUrl({
         moduleEnabled: true,
         status: 'running',
+        baseUrl: null,
         config: {
           enabled: true,
           host: '127.0.0.1',
           port: 23981,
+          authProvider: 'none',
+          signupPolicy: 'invite_only',
+        },
+      }),
+    ).toBe('http://127.0.0.1:23981');
+  });
+
+  it('prefers the runtime base url when config changed before restart', () => {
+    expect(
+      resolveDesktopHostBaseUrl({
+        moduleEnabled: true,
+        status: 'running',
+        baseUrl: 'http://127.0.0.1:23981',
+        config: {
+          enabled: true,
+          host: '127.0.0.1',
+          port: 24981,
           authProvider: 'none',
           signupPolicy: 'invite_only',
         },

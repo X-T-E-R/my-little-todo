@@ -28,6 +28,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": [
+      "binaries/mlt-server"
+    ],
     "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",

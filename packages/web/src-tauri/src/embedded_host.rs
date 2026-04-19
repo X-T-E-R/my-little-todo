@@ -150,10 +150,15 @@ fn resolve_packaged_sidecar_path() -> Option<PathBuf> {
     if direct.exists() {
         return Some(direct);
     }
+    let binaries_dir = dir.join("binaries").join(filename);
+    if binaries_dir.exists() {
+        return Some(binaries_dir);
+    }
     None
 }
 
 fn resolve_dev_sidecar_path() -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
@@ -164,18 +169,29 @@ fn resolve_dev_sidecar_path() -> Option<PathBuf> {
         "mlt-server"
     };
     let candidates = [
+        manifest_dir
+            .join("binaries")
+            .join(format!("mlt-server-{}{}", env!("MLT_TAURI_TARGET"), executable_suffix())),
         repo_root.join("target").join("debug").join(filename),
         repo_root.join("target").join("release").join(filename),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        manifest_dir
             .join("target")
             .join("debug")
             .join(filename),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        manifest_dir
             .join("target")
             .join("release")
             .join(filename),
     ];
     candidates.into_iter().find(|candidate| candidate.exists())
+}
+
+fn executable_suffix() -> &'static str {
+    if cfg!(windows) {
+        ".exe"
+    } else {
+        ""
+    }
 }
 
 fn resolve_sidecar_path() -> Result<PathBuf, String> {

@@ -40,11 +40,12 @@ function parsePort(value: string | null): number | undefined {
 export function resolveDesktopHostBaseUrl(state: {
   moduleEnabled: boolean;
   status: EmbeddedHostStatus;
+  baseUrl?: string | null;
   config: EmbeddedHostConfig;
 }): string | null {
   if (!state.moduleEnabled) return null;
   if (state.status !== 'running') return null;
-  return embeddedHostBaseUrl(state.config);
+  return state.baseUrl ?? embeddedHostBaseUrl(state.config);
 }
 
 export function getDesktopEmbeddedHostBaseUrl(): string | null {
@@ -52,6 +53,7 @@ export function getDesktopEmbeddedHostBaseUrl(): string | null {
   return resolveDesktopHostBaseUrl({
     moduleEnabled: useModuleStore.getState().isEnabled('embedded-host'),
     status: state.status,
+    baseUrl: state.baseUrl,
     config: state.config,
   });
 }
@@ -109,10 +111,7 @@ export const useEmbeddedHostStore = create<EmbeddedHostStoreState>((set, get) =>
       set({
         config,
         lastError: undefined,
-        baseUrl:
-          get().status === 'running' && useModuleStore.getState().isEnabled('embedded-host')
-            ? embeddedHostBaseUrl(config)
-            : null,
+        baseUrl: get().baseUrl,
       });
     } catch (error) {
       set({
@@ -203,13 +202,12 @@ export const useEmbeddedHostStore = create<EmbeddedHostStoreState>((set, get) =>
   },
   setRuntimeState: (patch) => {
     const nextStatus = patch.status ?? get().status;
-    const config = get().config;
     set({
       status: nextStatus,
       lastError: patch.lastError ?? get().lastError,
       baseUrl:
         nextStatus === 'running' && useModuleStore.getState().isEnabled('embedded-host')
-          ? patch.baseUrl ?? embeddedHostBaseUrl(config)
+          ? patch.baseUrl ?? get().baseUrl
           : null,
     });
   },

@@ -94,12 +94,16 @@ const TAB_CONFIG = [
 async function hydratePluginsAndModules(hydrateModules: () => Promise<void>) {
   const { usePluginStore } = await import('./plugins/pluginStore');
   const { activatePlugin } = await import('./plugins/pluginRuntime');
+  const { useModuleStore } = await import('./modules/moduleStore');
   const { isTauriEnv } = await import('./utils/platform');
   await usePluginStore.getState().hydrate();
   await hydrateModules();
   if (isTauriEnv()) {
     const { useEmbeddedHostStore } = await import('./features/embedded-host/embeddedHostStore');
     await useEmbeddedHostStore.getState().hydrate();
+    if (useModuleStore.getState().isEnabled('embedded-host')) {
+      await useEmbeddedHostStore.getState().startRuntime();
+    }
   }
   for (const plugin of Object.values(usePluginStore.getState().plugins)) {
     if (!plugin.enabled) continue;
