@@ -2,9 +2,14 @@ use async_trait::async_trait;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Postgres;
 
+use crate::history_audit::{
+    build_history_summary, hydrate_task_revision_snapshot_json, sanitize_history_snapshot_json,
+};
+use crate::history_context::{current_history_group_id, new_history_group_id};
+
 use super::traits::{
-    AuditEventRecord, BlobMeta, ChangeRecord, DatabaseProvider, EntityRevisionRecord,
-    InviteRecord, NewUser, SessionRecord, User,
+    AuditEventRecord, BlobMeta, ChangeRecord, DatabaseProvider, EntityRevisionRecord, InviteRecord,
+    NewUser, SessionRecord, User,
 };
 
 async fn bump_version_pg<'e, E: sqlx::Executor<'e, Database = Postgres>>(
@@ -25,30 +30,6 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-fn build_history_summary(entity_type: &str, snapshot_json: &str) -> Option<String> {
-    let value: serde_json::Value = serde_json::from_str(snapshot_json).ok()?;
-    let summary = match entity_type {
-        "tasks" => serde_json::json!({
-            "title": value.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-            "status": value.get("status").and_then(|v| v.as_str()).unwrap_or(""),
-        }),
-        "stream_entries" => serde_json::json!({
-            "entry_type": value.get("entry_type").and_then(|v| v.as_str()).unwrap_or("spark"),
-            "content_length": value.get("content").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0),
-        }),
-        "settings" => serde_json::json!({
-            "key": value.get("key").and_then(|v| v.as_str()).unwrap_or(""),
-            "value_length": value.get("value").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0),
-        }),
-        "blobs" => serde_json::json!({
-            "filename": value.get("filename").and_then(|v| v.as_str()).unwrap_or(""),
-            "size": value.get("size").and_then(|v| v.as_i64()).unwrap_or(0),
-        }),
-        _ => return None,
-    };
-    Some(summary.to_string())
-}
-
 async fn insert_history_pg_tx(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     user_id: &str,
@@ -61,14 +42,17 @@ async fn insert_history_pg_tx(
     changed_at: i64,
     snapshot_json: &str,
 ) -> anyhow::Result<()> {
+    let group_id = current_history_group_id().unwrap_or_else(new_history_group_id);
+    let sanitized_snapshot_json = sanitize_history_snapshot_json(entity_type, snapshot_json);
     let event_id = uuid::Uuid::new_v4().to_string();
     sqlx::query(
         "INSERT INTO audit_events (
-            id, user_id, entity_type, entity_id, entity_version, global_version,
+            id, group_id, user_id, entity_type, entity_id, entity_version, global_version,
             action, source_kind, actor_type, actor_id, occurred_at, summary_json
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
     )
     .bind(&event_id)
+    .bind(&group_id)
     .bind(user_id)
     .bind(entity_type)
     .bind(entity_id)
@@ -79,18 +63,19 @@ async fn insert_history_pg_tx(
     .bind("user")
     .bind(user_id)
     .bind(changed_at)
-    .bind(build_history_summary(entity_type, snapshot_json))
+    .bind(build_history_summary(entity_type, &sanitized_snapshot_json))
     .execute(&mut **tx)
     .await?;
 
     sqlx::query(
         "INSERT INTO entity_revisions (
-            id, event_id, user_id, entity_type, entity_id, entity_version,
+            id, event_id, group_id, user_id, entity_type, entity_id, entity_version,
             global_version, op, changed_at, snapshot_json
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
     )
     .bind(uuid::Uuid::new_v4().to_string())
     .bind(event_id)
+    .bind(group_id)
     .bind(user_id)
     .bind(entity_type)
     .bind(entity_id)
@@ -98,7 +83,7 @@ async fn insert_history_pg_tx(
     .bind(global_version)
     .bind(op)
     .bind(changed_at)
-    .bind(snapshot_json)
+    .bind(sanitized_snapshot_json)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -488,8 +473,8 @@ pub struct PostgresProvider {
     pool: PgPool,
 }
 
-/// Schema migrations: 1=initial, 2=blobs, 3=sync columns+version_seq, 4=tasks+stream_entries, 5=stream updated_at, 6=align, 7=tasks.role_ids, 12=stream thread_meta, 13=history tables
-const CURRENT_SCHEMA_VERSION: i64 = 13;
+/// Schema migrations: 1=initial, 2=blobs, 3=sync columns+version_seq, 4=tasks+stream_entries, 5=stream updated_at, 6=align, 7=tasks.role_ids, 12=stream thread_meta, 13=history tables, 14=history group_id
+const CURRENT_SCHEMA_VERSION: i64 = 14;
 
 impl PostgresProvider {
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
@@ -821,9 +806,11 @@ impl PostgresProvider {
             .unwrap_or(false);
 
             if !has_is_enabled {
-                sqlx::query("ALTER TABLE users ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT TRUE")
-                    .execute(&pool)
-                    .await?;
+                sqlx::query(
+                    "ALTER TABLE users ADD COLUMN is_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+                )
+                .execute(&pool)
+                .await?;
             }
 
             sqlx::query(
@@ -871,6 +858,7 @@ impl PostgresProvider {
             sqlx::query(
                 "CREATE TABLE IF NOT EXISTS audit_events (
                     id TEXT PRIMARY KEY,
+                    group_id TEXT,
                     user_id TEXT NOT NULL,
                     entity_type TEXT NOT NULL,
                     entity_id TEXT NOT NULL,
@@ -890,6 +878,7 @@ impl PostgresProvider {
                 "CREATE TABLE IF NOT EXISTS entity_revisions (
                     id TEXT PRIMARY KEY,
                     event_id TEXT NOT NULL,
+                    group_id TEXT,
                     user_id TEXT NOT NULL,
                     entity_type TEXT NOT NULL,
                     entity_id TEXT NOT NULL,
@@ -928,6 +917,18 @@ impl PostgresProvider {
             .execute(&pool)
             .await?;
             sqlx::query("INSERT INTO schema_version (version) VALUES (13) ON CONFLICT DO NOTHING")
+                .execute(&pool)
+                .await?;
+        }
+
+        if current_version < 14 {
+            sqlx::query("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS group_id TEXT")
+                .execute(&pool)
+                .await?;
+            sqlx::query("ALTER TABLE entity_revisions ADD COLUMN IF NOT EXISTS group_id TEXT")
+                .execute(&pool)
+                .await?;
+            sqlx::query("INSERT INTO schema_version (version) VALUES (14) ON CONFLICT DO NOTHING")
                 .execute(&pool)
                 .await?;
         }
@@ -1671,7 +1672,11 @@ impl DatabaseProvider for PostgresProvider {
         };
         let owner = serde_json::from_str::<serde_json::Value>(&snapshot_json)
             .ok()
-            .and_then(|v| v.get("owner").and_then(|x| x.as_str()).map(|s| s.to_string()))
+            .and_then(|v| {
+                v.get("owner")
+                    .and_then(|x| x.as_str())
+                    .map(|s| s.to_string())
+            })
             .unwrap_or_default();
         let next_ver = bump_version_pg(&mut *tx).await?;
         let changed_at = now_ms();
@@ -1686,7 +1691,10 @@ impl DatabaseProvider for PostgresProvider {
         if let Ok(mut snapshot_value) = serde_json::from_str::<serde_json::Value>(&snapshot_json) {
             if let Some(obj) = snapshot_value.as_object_mut() {
                 obj.insert("version".into(), serde_json::json!(next_ver));
-                obj.insert("deleted_at".into(), serde_json::json!(changed_at.to_string()));
+                obj.insert(
+                    "deleted_at".into(),
+                    serde_json::json!(changed_at.to_string()),
+                );
             }
             snapshot_json = snapshot_value.to_string();
         }
@@ -1910,9 +1918,21 @@ impl DatabaseProvider for PostgresProvider {
         limit: i64,
     ) -> anyhow::Result<Vec<EntityRevisionRecord>> {
         let lim = limit.clamp(1, 500);
-        let rows: Vec<(String, String, String, String, String, i64, i64, String, i64, String)> =
+        let rows: Vec<(
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            String,
+            i64,
+            i64,
+            String,
+            i64,
+            String,
+        )> =
             sqlx::query_as(
-                "SELECT id, event_id, user_id, entity_type, entity_id, entity_version, global_version, op, changed_at, snapshot_json
+                "SELECT id, event_id, group_id, user_id, entity_type, entity_id, entity_version, global_version, op, changed_at, snapshot_json
                  FROM entity_revisions
                  WHERE user_id = $1 AND entity_type = $2 AND entity_id = $3
                  ORDER BY global_version DESC LIMIT $4",
@@ -1923,21 +1943,44 @@ impl DatabaseProvider for PostgresProvider {
             .bind(lim)
             .fetch_all(&self.pool)
             .await?;
-        Ok(rows
-            .into_iter()
-            .map(|r| EntityRevisionRecord {
-                id: r.0,
-                event_id: r.1,
-                user_id: r.2,
-                entity_type: r.3,
-                entity_id: r.4,
-                entity_version: r.5,
-                global_version: r.6,
-                op: r.7,
-                changed_at: r.8,
-                snapshot_json: r.9,
-            })
-            .collect())
+        let mut revisions = Vec::with_capacity(rows.len());
+        for row in rows {
+            let snapshot_json = if entity_type == "tasks" {
+                let stream_snapshot: Option<(String,)> = sqlx::query_as(
+                    "SELECT snapshot_json
+                     FROM entity_revisions
+                     WHERE user_id = $1 AND entity_type = 'stream_entries' AND entity_id = $2 AND global_version <= $3
+                     ORDER BY CASE WHEN $4::text IS NOT NULL AND group_id = $4 THEN 0 ELSE 1 END, global_version DESC
+                     LIMIT 1",
+                )
+                .bind(user_id)
+                .bind(entity_id)
+                .bind(row.7)
+                .bind(row.2.as_deref())
+                .fetch_optional(&self.pool)
+                .await?;
+                hydrate_task_revision_snapshot_json(
+                    &row.10,
+                    stream_snapshot.as_ref().map(|value| value.0.as_str()),
+                )
+            } else {
+                row.10.clone()
+            };
+            revisions.push(EntityRevisionRecord {
+                id: row.0,
+                event_id: row.1,
+                group_id: row.2,
+                user_id: row.3,
+                entity_type: row.4,
+                entity_id: row.5,
+                entity_version: row.6,
+                global_version: row.7,
+                op: row.8,
+                changed_at: row.9,
+                snapshot_json,
+            });
+        }
+        Ok(revisions)
     }
 
     async fn list_audit_events(
@@ -1950,6 +1993,7 @@ impl DatabaseProvider for PostgresProvider {
         let lim = limit.clamp(1, 500);
         let rows: Vec<(
             String,
+            Option<String>,
             String,
             String,
             String,
@@ -1964,7 +2008,7 @@ impl DatabaseProvider for PostgresProvider {
         )> = match (entity_type, entity_id) {
             (Some(kind), Some(id)) => {
                 sqlx::query_as(
-                    "SELECT id, user_id, entity_type, entity_id, entity_version, global_version, action, source_kind, actor_type, actor_id, occurred_at, summary_json
+                    "SELECT id, group_id, user_id, entity_type, entity_id, entity_version, global_version, action, source_kind, actor_type, actor_id, occurred_at, summary_json
                      FROM audit_events
                      WHERE user_id = $1 AND entity_type = $2 AND entity_id = $3
                      ORDER BY occurred_at DESC LIMIT $4",
@@ -1978,7 +2022,7 @@ impl DatabaseProvider for PostgresProvider {
             }
             (Some(kind), None) => {
                 sqlx::query_as(
-                    "SELECT id, user_id, entity_type, entity_id, entity_version, global_version, action, source_kind, actor_type, actor_id, occurred_at, summary_json
+                    "SELECT id, group_id, user_id, entity_type, entity_id, entity_version, global_version, action, source_kind, actor_type, actor_id, occurred_at, summary_json
                      FROM audit_events
                      WHERE user_id = $1 AND entity_type = $2
                      ORDER BY occurred_at DESC LIMIT $3",
@@ -1991,7 +2035,7 @@ impl DatabaseProvider for PostgresProvider {
             }
             _ => {
                 sqlx::query_as(
-                    "SELECT id, user_id, entity_type, entity_id, entity_version, global_version, action, source_kind, actor_type, actor_id, occurred_at, summary_json
+                    "SELECT id, group_id, user_id, entity_type, entity_id, entity_version, global_version, action, source_kind, actor_type, actor_id, occurred_at, summary_json
                      FROM audit_events
                      WHERE user_id = $1
                      ORDER BY occurred_at DESC LIMIT $2",
@@ -2006,17 +2050,18 @@ impl DatabaseProvider for PostgresProvider {
             .into_iter()
             .map(|r| AuditEventRecord {
                 id: r.0,
-                user_id: r.1,
-                entity_type: r.2,
-                entity_id: r.3,
-                entity_version: r.4,
-                global_version: r.5,
-                action: r.6,
-                source_kind: r.7,
-                actor_type: r.8,
-                actor_id: r.9,
-                occurred_at: r.10,
-                summary_json: r.11,
+                group_id: r.1,
+                user_id: r.2,
+                entity_type: r.3,
+                entity_id: r.4,
+                entity_version: r.5,
+                global_version: r.6,
+                action: r.7,
+                source_kind: r.8,
+                actor_type: r.9,
+                actor_id: r.10,
+                occurred_at: r.11,
+                summary_json: r.12,
             })
             .collect())
     }

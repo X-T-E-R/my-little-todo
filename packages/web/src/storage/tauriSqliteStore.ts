@@ -43,6 +43,12 @@ import {
   normalizeTaskRoleIds,
   shouldProjectStreamRoleToTask,
 } from './taskEntryBridge';
+import {
+  buildHistorySummary,
+  createHistoryGroupId,
+  hydrateTaskSnapshotFromRawHistory,
+  sanitizeSettingHistorySnapshot,
+} from './historyAudit';
 import { reportNativeDiagnostic } from '../utils/nativeDiagnostics';
 import {
   deserializeWorkThread,
@@ -544,6 +550,24 @@ export async function ensureTauriSqliteSchema(db: Database): Promise<void> {
           [18, Date.now()],
         );
       }
+      const verAfter18 =
+        (
+          await db.select<{ version: number }[]>(
+            'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
+          )
+        )[0]?.version ?? 0;
+      if (verAfter18 < 19) {
+        try {
+          await db.execute('ALTER TABLE audit_events ADD COLUMN group_id TEXT');
+        } catch {}
+        try {
+          await db.execute('ALTER TABLE entity_revisions ADD COLUMN group_id TEXT');
+        } catch {}
+        await db.execute(
+          'INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES ($1, $2)',
+          [19, Date.now()],
+        );
+      }
   }
 
   for (const sql of CREATE_INDEXES_SQL) {
@@ -627,6 +651,7 @@ function workThreadEventFromRow(r: Record<string, unknown>): WorkThreadEvent {
 function rowToAuditEventRecord(r: Record<string, unknown>): AuditEventRecord {
   return {
     id: String(r.id),
+    groupId: r.group_id != null ? String(r.group_id) : null,
     userId: String(r.user_id),
     entityType: String(r.entity_type) as HistoryEntityType,
     entityId: String(r.entity_id),
@@ -645,6 +670,7 @@ function rowToEntityRevisionRecord(r: Record<string, unknown>): EntityRevisionRe
   return {
     id: String(r.id),
     eventId: String(r.event_id),
+    groupId: r.group_id != null ? String(r.group_id) : null,
     userId: String(r.user_id),
     entityType: String(r.entity_type) as HistoryEntityType,
     entityId: String(r.entity_id),
@@ -729,58 +755,48 @@ type HistoryWrite = {
   entityType: HistoryEntityType;
   entityVersion: number;
   globalVersion: number;
+  groupId?: string | null;
   op: HistoryOperation;
   snapshot: unknown;
   userId?: string;
 };
 
-function buildHistorySummary(entityType: HistoryEntityType, snapshot: unknown): string | null {
-  if (!snapshot || typeof snapshot !== 'object') return null;
-  const record = snapshot as Record<string, unknown>;
-  switch (entityType) {
-    case 'tasks':
-      return JSON.stringify({
-        title: String(record.title ?? ''),
-        status: String(record.status ?? ''),
-      });
-    case 'stream_entries':
-      return JSON.stringify({
-        entry_type: String(record.entry_type ?? record.entryType ?? 'spark'),
-        content_length: String(record.content ?? '').length,
-      });
-    case 'settings':
-      return JSON.stringify({
-        key: String(record.key ?? ''),
-        value_length: String(record.value ?? '').length,
-      });
-    case 'blobs':
-      return JSON.stringify({
-        filename: String(record.filename ?? ''),
-        size: Number(record.size ?? 0),
-      });
-    case 'work_threads':
-      return JSON.stringify({
-        title: String(record.title ?? ''),
-        status: String(record.status ?? ''),
-      });
-    default:
-      return null;
-  }
-}
-
 async function writeHistory(db: Database, input: HistoryWrite): Promise<void> {
   const eventId = crypto.randomUUID();
-  const snapshotJson =
-    typeof input.snapshot === 'string' ? input.snapshot : JSON.stringify(input.snapshot);
+  const groupId = input.groupId ?? createHistoryGroupId();
+  const rawSnapshot =
+    typeof input.snapshot === 'string'
+      ? JSON.parse(input.snapshot)
+      : JSON.parse(JSON.stringify(input.snapshot));
+  const snapshot =
+    input.entityType === 'settings' &&
+    rawSnapshot &&
+    typeof rawSnapshot === 'object' &&
+    typeof (rawSnapshot as Record<string, unknown>).key === 'string'
+      ? sanitizeSettingHistorySnapshot(
+          String((rawSnapshot as Record<string, unknown>).key),
+          String((rawSnapshot as Record<string, unknown>).value ?? ''),
+          {
+            deletedAt:
+              (rawSnapshot as Record<string, unknown>).deleted_at != null
+                ? Number((rawSnapshot as Record<string, unknown>).deleted_at)
+                : null,
+            updatedAt: Number((rawSnapshot as Record<string, unknown>).updated_at ?? input.changedAt),
+            version: Number((rawSnapshot as Record<string, unknown>).version ?? input.entityVersion),
+          },
+        )
+      : rawSnapshot;
+  const snapshotJson = JSON.stringify(snapshot);
   const summaryJson = buildHistorySummary(input.entityType, input.snapshot);
   const userId = input.userId ?? LOCAL_DESKTOP_USER_ID;
   await db.execute(
     `INSERT INTO audit_events (
-      id, user_id, entity_type, entity_id, entity_version, global_version,
+      id, group_id, user_id, entity_type, entity_id, entity_version, global_version,
       action, source_kind, actor_type, actor_id, occurred_at, summary_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [
       eventId,
+      groupId,
       userId,
       input.entityType,
       input.entityId,
@@ -796,12 +812,13 @@ async function writeHistory(db: Database, input: HistoryWrite): Promise<void> {
   );
   await db.execute(
     `INSERT INTO entity_revisions (
-      id, event_id, user_id, entity_type, entity_id, entity_version,
+      id, event_id, group_id, user_id, entity_type, entity_id, entity_version,
       global_version, op, changed_at, snapshot_json
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
       crypto.randomUUID(),
       eventId,
+      groupId,
       userId,
       input.entityType,
       input.entityId,
@@ -826,22 +843,6 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
       'UPDATE tasks SET deleted_at = $3, updated_at = $3, version = $4 WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL',
       [LOCAL_DESKTOP_USER_ID, id, ts, v],
     );
-    const rows = await db.select<Record<string, unknown>[]>(
-      'SELECT * FROM tasks WHERE user_id = $1 AND id = $2 AND version = $3 LIMIT 1',
-      [LOCAL_DESKTOP_USER_ID, id, v],
-    );
-    if (rows[0]) {
-      await writeHistory(db, {
-        action: 'delete_task_facet',
-        changedAt: ts,
-        entityId: id,
-        entityType: 'tasks',
-        entityVersion: v,
-        globalVersion: v,
-        op: 'delete',
-        snapshot: rowToTaskDbRow(rows[0]),
-      });
-    }
     notifySync();
   };
 
@@ -891,6 +892,7 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
     },
 
     async putTask(task: Task): Promise<void> {
+      const groupId = createHistoryGroupId();
       const existingStreamRows = await db.select<Record<string, unknown>[]>(
         'SELECT * FROM stream_entries WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL',
         [LOCAL_DESKTOP_USER_ID, task.id],
@@ -943,6 +945,7 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
         entityType: 'stream_entries',
         entityVersion: streamRow.version,
         globalVersion: streamRow.version,
+        groupId,
         op: 'upsert',
         snapshot: streamRow,
       });
@@ -1011,6 +1014,7 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
         entityType: 'tasks',
         entityVersion: row.version,
         globalVersion: row.version,
+        groupId,
         op: 'upsert',
         snapshot: row,
       });
@@ -1018,6 +1022,13 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
     },
 
     async deleteTask(id: string): Promise<void> {
+      const groupId = createHistoryGroupId();
+      const currentTask = await this.getTask(id);
+      const currentStreamRows = await db.select<Record<string, unknown>[]>(
+        'SELECT * FROM stream_entries WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL LIMIT 1',
+        [LOCAL_DESKTOP_USER_ID, id],
+      );
+      const currentStream = currentStreamRows[0] ? rowToStreamDbRow(currentStreamRows[0]) : null;
       await deleteTaskFacet(id);
       const ts = now();
       const v = await bumpVersion(db);
@@ -1037,8 +1048,69 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
           entityType: 'stream_entries',
           entityVersion: v,
           globalVersion: v,
+          groupId,
           op: 'delete',
           snapshot: rowToStreamDbRow(rows[0]),
+        });
+      }
+      if (currentTask) {
+        await writeHistory(db, {
+          action: 'delete_task',
+          changedAt: ts,
+          entityId: id,
+          entityType: 'tasks',
+          entityVersion: v,
+          globalVersion: v,
+          groupId,
+          op: 'delete',
+          snapshot: {
+            ...currentTask,
+            deleted_at: ts,
+            version: v,
+          },
+        });
+      } else if (currentStream) {
+        await writeHistory(db, {
+          action: 'delete_task',
+          changedAt: ts,
+          entityId: id,
+          entityType: 'tasks',
+          entityVersion: v,
+          globalVersion: v,
+          groupId,
+          op: 'delete',
+          snapshot: {
+            id,
+            title: '',
+            title_customized: 0,
+            description: null,
+            status: 'inbox',
+            body: currentStream.content,
+            created_at: currentStream.timestamp,
+            updated_at: ts,
+            completed_at: null,
+            ddl: null,
+            ddl_type: null,
+            planned_at: null,
+            role_ids: currentStream.role_id ? [currentStream.role_id] : [],
+            primary_role: currentStream.role_id ?? null,
+            tags: JSON.parse(currentStream.tags),
+            parent_id: null,
+            subtask_ids: [],
+            task_type: 'task',
+            priority: null,
+            promoted: null,
+            phase: null,
+            kanban_column: null,
+            resources: [],
+            reminders: [],
+            submissions: [],
+            postponements: [],
+            status_history: [],
+            progress_logs: [],
+            version: v,
+            deleted_at: ts,
+          },
         });
       }
       notifySync();
@@ -1103,6 +1175,7 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
     },
 
     async putStreamEntry(entry: StreamEntry): Promise<void> {
+      const groupId = createHistoryGroupId();
       const v = await bumpVersion(db);
       const row = streamEntryToDbRow(entry, v, null);
       await db.execute(
@@ -1139,6 +1212,7 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
         entityType: 'stream_entries',
         entityVersion: row.version,
         globalVersion: row.version,
+        groupId,
         op: 'upsert',
         snapshot: row,
       });
@@ -1174,6 +1248,7 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
               entityType: 'tasks',
               entityVersion: nextVersion,
               globalVersion: nextVersion,
+              groupId,
               op: 'upsert',
               snapshot: rowToTaskDbRow(taskRows[0]),
             });
@@ -1184,6 +1259,8 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
     },
 
     async deleteStreamEntry(id: string): Promise<void> {
+      const groupId = createHistoryGroupId();
+      const currentTask = await this.getTask(id);
       await deleteTaskFacet(id);
       const ts = now();
       const v = await bumpVersion(db);
@@ -1203,8 +1280,26 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
           entityType: 'stream_entries',
           entityVersion: v,
           globalVersion: v,
+          groupId,
           op: 'delete',
           snapshot: rowToStreamDbRow(rows[0]),
+        });
+      }
+      if (currentTask) {
+        await writeHistory(db, {
+          action: 'delete_linked_task',
+          changedAt: ts,
+          entityId: id,
+          entityType: 'tasks',
+          entityVersion: v,
+          globalVersion: v,
+          groupId,
+          op: 'delete',
+          snapshot: {
+            ...currentTask,
+            deleted_at: ts,
+            version: v,
+          },
         });
       }
       notifySync();
@@ -1638,7 +1733,34 @@ export async function createTauriSqliteDataStore(): Promise<DataStore> {
          LIMIT ${lim}`,
         [LOCAL_DESKTOP_USER_ID, entityType, entityId],
       );
-      return rows.map(rowToEntityRevisionRecord);
+      const revisions = rows.map(rowToEntityRevisionRecord);
+      if (entityType !== 'tasks') return revisions;
+      const hydrated: EntityRevisionRecord[] = [];
+      for (const revision of revisions) {
+        const streamRows = await db.select<Record<string, unknown>[]>(
+          `SELECT snapshot_json FROM entity_revisions
+           WHERE user_id = $1
+             AND entity_type = 'stream_entries'
+             AND entity_id = $2
+             AND global_version <= $3
+           ORDER BY CASE WHEN group_id = $4 THEN 0 ELSE 1 END, global_version DESC
+           LIMIT 1`,
+          [
+            LOCAL_DESKTOP_USER_ID,
+            entityId,
+            revision.globalVersion,
+            revision.groupId,
+          ],
+        );
+        hydrated.push({
+          ...revision,
+          snapshotJson: hydrateTaskSnapshotFromRawHistory(
+            revision.snapshotJson,
+            streamRows[0]?.snapshot_json != null ? String(streamRows[0].snapshot_json) : null,
+          ),
+        });
+      }
+      return hydrated;
     },
 
     async listAuditEvents(

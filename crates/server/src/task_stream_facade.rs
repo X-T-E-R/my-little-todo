@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use chrono::{TimeZone, Utc};
 use serde_json::{json, Value};
 
+use crate::history_context::{new_history_group_id, with_history_group};
 use crate::providers::DatabaseProvider;
 
 #[derive(Clone, Default)]
@@ -100,7 +101,10 @@ pub async fn load_context(
     }
 
     tasks.sort_by(|left, right| {
-        let left_updated = left.get("updated_at").and_then(|value| value.as_i64()).unwrap_or(0);
+        let left_updated = left
+            .get("updated_at")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0);
         let right_updated = right
             .get("updated_at")
             .and_then(|value| value.as_i64())
@@ -127,7 +131,11 @@ pub async fn get_task(
     user_id: &str,
     id: &str,
 ) -> Result<Option<Value>, String> {
-    Ok(load_context(db, user_id).await?.tasks_by_id.get(id).cloned())
+    Ok(load_context(db, user_id)
+        .await?
+        .tasks_by_id
+        .get(id)
+        .cloned())
 }
 
 pub async fn list_stream_from_rows(
@@ -154,9 +162,13 @@ pub fn validate_public_task_payload(payload: &Value) -> Result<(), String> {
     let Some(obj) = payload.as_object() else {
         return Err("Task payload must be a JSON object".into());
     };
-    if obj.contains_key("role") || obj.contains_key("role_id") || obj.contains_key("source_stream_id")
+    if obj.contains_key("role")
+        || obj.contains_key("role_id")
+        || obj.contains_key("source_stream_id")
     {
-        return Err("Legacy task fields `role`, `role_id`, and `source_stream_id` are not accepted".into());
+        return Err(
+            "Legacy task fields `role`, `role_id`, and `source_stream_id` are not accepted".into(),
+        );
     }
     if let Some(primary_role) = obj.get("primary_role") {
         if !primary_role.is_null() && primary_role.as_str().is_none() {
@@ -208,36 +220,40 @@ pub async fn put_task(
     id: &str,
     payload: &Value,
 ) -> Result<Value, String> {
-    validate_public_task_payload(payload)?;
-    let context = load_context(db, user_id).await?;
-    let existing_public = context.tasks_by_id.get(id);
-    let existing_raw_task = context.raw_task_by_canonical_id.get(id);
-    let existing_stream = context.stream_by_id.get(id);
-    let merged = merge_public_task(existing_public, payload, id);
-    let raw_task = public_task_to_raw_task(&merged, existing_raw_task, id);
-    let raw_stream = public_task_to_raw_stream(&merged, existing_stream, id);
+    let group_id = new_history_group_id();
+    with_history_group(group_id, async {
+        validate_public_task_payload(payload)?;
+        let context = load_context(db, user_id).await?;
+        let existing_public = context.tasks_by_id.get(id);
+        let existing_raw_task = context.raw_task_by_canonical_id.get(id);
+        let existing_stream = context.stream_by_id.get(id);
+        let merged = merge_public_task(existing_public, payload, id);
+        let raw_task = public_task_to_raw_task(&merged, existing_raw_task, id);
+        let raw_stream = public_task_to_raw_stream(&merged, existing_stream, id);
 
-    db.upsert_stream_entry_json(user_id, &raw_stream.to_string())
-        .await
-        .map_err(|e| e.to_string())?;
-    db.upsert_task_json(user_id, &raw_task.to_string())
-        .await
-        .map_err(|e| e.to_string())?;
+        db.upsert_stream_entry_json(user_id, &raw_stream.to_string())
+            .await
+            .map_err(|e| e.to_string())?;
+        db.upsert_task_json(user_id, &raw_task.to_string())
+            .await
+            .map_err(|e| e.to_string())?;
 
-    if let Some(raw_ids) = context.raw_task_ids_by_canonical_id.get(id) {
-        for raw_id in raw_ids {
-            if raw_id == id {
-                continue;
+        if let Some(raw_ids) = context.raw_task_ids_by_canonical_id.get(id) {
+            for raw_id in raw_ids {
+                if raw_id == id {
+                    continue;
+                }
+                db.delete_task_row(user_id, raw_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
             }
-            db.delete_task_row(user_id, raw_id)
-                .await
-                .map_err(|e| e.to_string())?;
         }
-    }
 
-    get_task(db, user_id, id)
-        .await?
-        .ok_or_else(|| format!("Task not found after upsert: {}", id))
+        get_task(db, user_id, id)
+            .await?
+            .ok_or_else(|| format!("Task not found after upsert: {}", id))
+    })
+    .await
 }
 
 pub async fn delete_task(
@@ -245,21 +261,25 @@ pub async fn delete_task(
     user_id: &str,
     id: &str,
 ) -> Result<bool, String> {
-    let context = load_context(db, user_id).await?;
-    let had_task = context.tasks_by_id.contains_key(id);
-    if let Some(raw_ids) = context.raw_task_ids_by_canonical_id.get(id) {
-        for raw_id in raw_ids {
-            db.delete_task_row(user_id, raw_id)
+    let group_id = new_history_group_id();
+    with_history_group(group_id, async {
+        let context = load_context(db, user_id).await?;
+        let had_task = context.tasks_by_id.contains_key(id);
+        if let Some(raw_ids) = context.raw_task_ids_by_canonical_id.get(id) {
+            for raw_id in raw_ids {
+                db.delete_task_row(user_id, raw_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        if context.stream_by_id.contains_key(id) {
+            db.delete_stream_entry_row(user_id, id)
                 .await
                 .map_err(|e| e.to_string())?;
         }
-    }
-    if context.stream_by_id.contains_key(id) {
-        db.delete_stream_entry_row(user_id, id)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(had_task)
+        Ok(had_task)
+    })
+    .await
 }
 
 pub async fn put_stream_entry(
@@ -268,66 +288,70 @@ pub async fn put_stream_entry(
     id: &str,
     payload: &Value,
 ) -> Result<Value, String> {
-    validate_public_stream_payload(payload)?;
-    let context = load_context(db, user_id).await?;
-    let existing_stream = context.stream_by_id.get(id);
-    let merged = merge_public_stream(existing_stream, payload, id);
-    let raw_stream = public_stream_to_raw(&merged);
-    db.upsert_stream_entry_json(user_id, &raw_stream.to_string())
-        .await
-        .map_err(|e| e.to_string())?;
+    let group_id = new_history_group_id();
+    with_history_group(group_id, async {
+        validate_public_stream_payload(payload)?;
+        let context = load_context(db, user_id).await?;
+        let existing_stream = context.stream_by_id.get(id);
+        let merged = merge_public_stream(existing_stream, payload, id);
+        let raw_stream = public_stream_to_raw(&merged);
+        db.upsert_stream_entry_json(user_id, &raw_stream.to_string())
+            .await
+            .map_err(|e| e.to_string())?;
 
-    if let Some(existing_task) = context.tasks_by_id.get(id) {
-        let existing_raw_task = context.raw_task_by_canonical_id.get(id);
-        let current_role_count = existing_task
-            .get("role_ids")
-            .and_then(|value| value.as_array())
-            .map(|arr| arr.len())
-            .unwrap_or(0);
-        if current_role_count <= 1 {
-            let projected_roles = merged
-                .get("role_id")
-                .and_then(|value| value.as_str())
-                .map(|role| vec![Value::String(role.to_string())])
-                .unwrap_or_default();
-            let projected_task = merge_public_task(
-                Some(existing_task),
-                &json!({
-                    "body": merged.get("content").cloned().unwrap_or(Value::String(String::new())),
-                    "role_ids": projected_roles,
-                    "primary_role": merged.get("role_id").cloned().unwrap_or(Value::Null),
-                    "created_at": merged.get("timestamp").cloned().unwrap_or(Value::from(now_ms())),
-                    "updated_at": merged.get("updated_at").cloned().unwrap_or(Value::from(now_ms())),
-                    "tags": merged.get("tags").cloned().unwrap_or(Value::Array(vec![])),
-                }),
-                id,
-            );
-            let raw_task = public_task_to_raw_task(&projected_task, existing_raw_task, id);
-            db.upsert_task_json(user_id, &raw_task.to_string())
-                .await
-                .map_err(|e| e.to_string())?;
-            if let Some(raw_ids) = context.raw_task_ids_by_canonical_id.get(id) {
-                for raw_id in raw_ids {
-                    if raw_id == id {
-                        continue;
+        if let Some(existing_task) = context.tasks_by_id.get(id) {
+            let existing_raw_task = context.raw_task_by_canonical_id.get(id);
+            let current_role_count = existing_task
+                .get("role_ids")
+                .and_then(|value| value.as_array())
+                .map(|arr| arr.len())
+                .unwrap_or(0);
+            if current_role_count <= 1 {
+                let projected_roles = merged
+                    .get("role_id")
+                    .and_then(|value| value.as_str())
+                    .map(|role| vec![Value::String(role.to_string())])
+                    .unwrap_or_default();
+                let projected_task = merge_public_task(
+                    Some(existing_task),
+                    &json!({
+                        "body": merged.get("content").cloned().unwrap_or(Value::String(String::new())),
+                        "role_ids": projected_roles,
+                        "primary_role": merged.get("role_id").cloned().unwrap_or(Value::Null),
+                        "created_at": merged.get("timestamp").cloned().unwrap_or(Value::from(now_ms())),
+                        "updated_at": merged.get("updated_at").cloned().unwrap_or(Value::from(now_ms())),
+                        "tags": merged.get("tags").cloned().unwrap_or(Value::Array(vec![])),
+                    }),
+                    id,
+                );
+                let raw_task = public_task_to_raw_task(&projected_task, existing_raw_task, id);
+                db.upsert_task_json(user_id, &raw_task.to_string())
+                    .await
+                    .map_err(|e| e.to_string())?;
+                if let Some(raw_ids) = context.raw_task_ids_by_canonical_id.get(id) {
+                    for raw_id in raw_ids {
+                        if raw_id == id {
+                            continue;
+                        }
+                        db.delete_task_row(user_id, raw_id)
+                            .await
+                            .map_err(|e| e.to_string())?;
                     }
-                    db.delete_task_row(user_id, raw_id)
-                        .await
-                        .map_err(|e| e.to_string())?;
                 }
             }
         }
-    }
 
-    let refreshed_rows = db
-        .list_all_stream_json(user_id)
-        .await
-        .map_err(|e| e.to_string())?;
-    let refreshed = list_stream_from_rows(db, user_id, refreshed_rows).await?;
-    refreshed
-        .into_iter()
-        .find(|stream| stream["id"] == id)
-        .ok_or_else(|| format!("Stream entry not found after upsert: {}", id))
+        let refreshed_rows = db
+            .list_all_stream_json(user_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let refreshed = list_stream_from_rows(db, user_id, refreshed_rows).await?;
+        refreshed
+            .into_iter()
+            .find(|stream| stream["id"] == id)
+            .ok_or_else(|| format!("Stream entry not found after upsert: {}", id))
+    })
+    .await
 }
 
 pub async fn delete_stream_entry(
@@ -335,21 +359,25 @@ pub async fn delete_stream_entry(
     user_id: &str,
     id: &str,
 ) -> Result<bool, String> {
-    let context = load_context(db, user_id).await?;
-    let had_stream = context.stream_by_id.contains_key(id);
-    if let Some(raw_ids) = context.raw_task_ids_by_canonical_id.get(id) {
-        for raw_id in raw_ids {
-            db.delete_task_row(user_id, raw_id)
+    let group_id = new_history_group_id();
+    with_history_group(group_id, async {
+        let context = load_context(db, user_id).await?;
+        let had_stream = context.stream_by_id.contains_key(id);
+        if let Some(raw_ids) = context.raw_task_ids_by_canonical_id.get(id) {
+            for raw_id in raw_ids {
+                db.delete_task_row(user_id, raw_id)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        if had_stream {
+            db.delete_stream_entry_row(user_id, id)
                 .await
                 .map_err(|e| e.to_string())?;
         }
-    }
-    if had_stream {
-        db.delete_stream_entry_row(user_id, id)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(had_stream)
+        Ok(had_stream)
+    })
+    .await
 }
 
 fn merge_public_task(existing: Option<&Value>, patch: &Value, id: &str) -> Value {
@@ -366,7 +394,11 @@ fn merge_public_task(existing: Option<&Value>, patch: &Value, id: &str) -> Value
                 .collect::<Vec<_>>()
         })
         .or_else(|| {
-            existing.and_then(|task| task.get("role_ids").and_then(|value| value.as_array()).cloned())
+            existing.and_then(|task| {
+                task.get("role_ids")
+                    .and_then(|value| value.as_array())
+                    .cloned()
+            })
         })
         .unwrap_or_default();
 
@@ -487,32 +519,141 @@ fn public_stream_to_raw(public: &Value) -> Value {
     })
 }
 
+pub fn hydrate_task_snapshot_from_history(
+    task_snapshot: &Value,
+    stream_snapshot: Option<&Value>,
+) -> Value {
+    let role_ids = unique_strings(
+        parse_string_array(task_snapshot.get("role_ids"))
+            .into_iter()
+            .chain(
+                task_snapshot
+                    .get("role_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+            )
+            .chain(
+                stream_snapshot
+                    .and_then(|stream| stream.get("role_id"))
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+            )
+            .collect(),
+    );
+    let tags = unique_strings(
+        parse_string_array(task_snapshot.get("tags"))
+            .into_iter()
+            .chain(
+                stream_snapshot
+                    .map(|stream| parse_string_array(stream.get("tags")))
+                    .unwrap_or_default(),
+            )
+            .collect(),
+    );
+    let created_at = stream_snapshot
+        .and_then(|stream| stream.get("timestamp"))
+        .and_then(|value| value.as_i64())
+        .unwrap_or_else(|| {
+            task_snapshot
+                .get("created_at")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0)
+        });
+    let updated_at = task_snapshot
+        .get("updated_at")
+        .and_then(|value| value.as_i64())
+        .unwrap_or(0)
+        .max(
+            stream_snapshot
+                .and_then(|stream| stream.get("updated_at").or_else(|| stream.get("timestamp")))
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0),
+        );
+    json!({
+        "id": task_snapshot.get("id").cloned().unwrap_or(Value::String(String::new())),
+        "title": task_snapshot.get("title").cloned().unwrap_or(Value::String(String::new())),
+        "title_customized": task_snapshot.get("title_customized").cloned().unwrap_or(Value::from(0)),
+        "description": task_snapshot.get("description").cloned().unwrap_or(Value::Null),
+        "status": task_snapshot.get("status").cloned().unwrap_or(Value::String("inbox".into())),
+        "body": stream_snapshot
+            .and_then(|stream| stream.get("content"))
+            .cloned()
+            .unwrap_or_else(|| task_snapshot.get("body").cloned().unwrap_or(Value::String(String::new()))),
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "completed_at": task_snapshot.get("completed_at").cloned().unwrap_or(Value::Null),
+        "ddl": task_snapshot.get("ddl").cloned().unwrap_or(Value::Null),
+        "ddl_type": task_snapshot.get("ddl_type").cloned().unwrap_or(Value::Null),
+        "planned_at": task_snapshot.get("planned_at").cloned().unwrap_or(Value::Null),
+        "role_ids": role_ids,
+        "primary_role": role_ids.get(0).cloned().unwrap_or(Value::Null),
+        "tags": tags,
+        "parent_id": task_snapshot.get("parent_id").cloned().unwrap_or(Value::Null),
+        "subtask_ids": parse_string_array(task_snapshot.get("subtask_ids")),
+        "task_type": task_snapshot.get("task_type").cloned().unwrap_or(Value::String("task".into())),
+        "priority": task_snapshot.get("priority").cloned().unwrap_or(Value::Null),
+        "promoted": task_snapshot.get("promoted").cloned().unwrap_or(Value::Null),
+        "phase": task_snapshot.get("phase").cloned().unwrap_or(Value::Null),
+        "kanban_column": task_snapshot.get("kanban_column").cloned().unwrap_or(Value::Null),
+        "resources": parse_value_array(task_snapshot.get("resources")),
+        "reminders": parse_value_array(task_snapshot.get("reminders")),
+        "submissions": parse_value_array(task_snapshot.get("submissions")),
+        "postponements": parse_value_array(task_snapshot.get("postponements")),
+        "status_history": parse_value_array(task_snapshot.get("status_history")),
+        "progress_logs": parse_value_array(task_snapshot.get("progress_logs")),
+        "version": task_snapshot.get("version").cloned().unwrap_or(Value::from(0)),
+        "deleted_at": task_snapshot.get("deleted_at").cloned().unwrap_or(Value::Null),
+    })
+}
+
 fn normalize_task(
     raw_task: &Value,
     canonical_ids: &HashMap<String, String>,
     stream_by_id: &HashMap<String, Value>,
     canonical_id: &str,
 ) -> Value {
-    let linked_stream = stream_by_id
-        .get(canonical_id)
-        .or_else(|| raw_task.get("source_stream_id").and_then(|value| value.as_str()).and_then(|id| stream_by_id.get(id)));
+    let linked_stream = stream_by_id.get(canonical_id).or_else(|| {
+        raw_task
+            .get("source_stream_id")
+            .and_then(|value| value.as_str())
+            .and_then(|id| stream_by_id.get(id))
+    });
     let role_ids = unique_strings(
         parse_string_array(raw_task.get("role_ids"))
             .into_iter()
-            .chain(raw_task.get("role_id").and_then(|value| value.as_str()).map(str::to_string))
-            .chain(linked_stream.and_then(|stream| stream.get("role_id")).and_then(|value| value.as_str()).map(str::to_string))
+            .chain(
+                raw_task
+                    .get("role_id")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+            )
+            .chain(
+                linked_stream
+                    .and_then(|stream| stream.get("role_id"))
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+            )
             .collect(),
     );
     let tags = unique_strings(
         parse_string_array(raw_task.get("tags"))
             .into_iter()
-            .chain(linked_stream.map(|stream| parse_string_array(stream.get("tags"))).unwrap_or_default())
+            .chain(
+                linked_stream
+                    .map(|stream| parse_string_array(stream.get("tags")))
+                    .unwrap_or_default(),
+            )
             .collect(),
     );
     let created_at = linked_stream
         .and_then(|stream| stream.get("timestamp"))
         .and_then(|value| value.as_i64())
-        .unwrap_or_else(|| raw_task.get("created_at").and_then(|value| value.as_i64()).unwrap_or(0));
+        .unwrap_or_else(|| {
+            raw_task
+                .get("created_at")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0)
+        });
     let updated_at = raw_task
         .get("updated_at")
         .and_then(|value| value.as_i64())
@@ -526,10 +667,20 @@ fn normalize_task(
     let parent_id = raw_task
         .get("parent_id")
         .and_then(|value| value.as_str())
-        .and_then(|parent| canonical_ids.get(parent).cloned().or_else(|| Some(parent.to_string())));
+        .and_then(|parent| {
+            canonical_ids
+                .get(parent)
+                .cloned()
+                .or_else(|| Some(parent.to_string()))
+        });
     let subtask_ids = parse_string_array(raw_task.get("subtask_ids"))
         .into_iter()
-        .map(|subtask_id| canonical_ids.get(&subtask_id).cloned().unwrap_or(subtask_id))
+        .map(|subtask_id| {
+            canonical_ids
+                .get(&subtask_id)
+                .cloned()
+                .unwrap_or(subtask_id)
+        })
         .collect::<Vec<_>>();
 
     json!({
@@ -590,14 +741,47 @@ fn normalize_stream(raw_stream: &Value, task_id: Option<&str>) -> Value {
     value
 }
 
-fn compare_task_priority(left: &Value, right: &Value, stream_by_id: &HashMap<String, Value>) -> Ordering {
-    let left_entry = resolve_stream_id(left, stream_by_id).and_then(|id| stream_by_id.get(&id).cloned());
-    let right_entry = resolve_stream_id(right, stream_by_id).and_then(|id| stream_by_id.get(&id).cloned());
+fn compare_task_priority(
+    left: &Value,
+    right: &Value,
+    stream_by_id: &HashMap<String, Value>,
+) -> Ordering {
+    let left_entry =
+        resolve_stream_id(left, stream_by_id).and_then(|id| stream_by_id.get(&id).cloned());
+    let right_entry =
+        resolve_stream_id(right, stream_by_id).and_then(|id| stream_by_id.get(&id).cloned());
     raw_task_updated_at(right, right_entry.as_ref())
         .cmp(&raw_task_updated_at(left, left_entry.as_ref()))
-        .then_with(|| raw_task_created_at(right, right_entry.as_ref()).cmp(&raw_task_created_at(left, left_entry.as_ref())))
-        .then_with(|| right.get("title_customized").and_then(|value| value.as_i64()).unwrap_or(0).cmp(&left.get("title_customized").and_then(|value| value.as_i64()).unwrap_or(0)))
-        .then_with(|| right.get("body").and_then(|value| value.as_str()).unwrap_or("").len().cmp(&left.get("body").and_then(|value| value.as_str()).unwrap_or("").len()))
+        .then_with(|| {
+            raw_task_created_at(right, right_entry.as_ref())
+                .cmp(&raw_task_created_at(left, left_entry.as_ref()))
+        })
+        .then_with(|| {
+            right
+                .get("title_customized")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0)
+                .cmp(
+                    &left
+                        .get("title_customized")
+                        .and_then(|value| value.as_i64())
+                        .unwrap_or(0),
+                )
+        })
+        .then_with(|| {
+            right
+                .get("body")
+                .and_then(|value| value.as_str())
+                .unwrap_or("")
+                .len()
+                .cmp(
+                    &left
+                        .get("body")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or("")
+                        .len(),
+                )
+        })
         .then_with(|| raw_task_id(right).cmp(&raw_task_id(left)))
 }
 
@@ -606,7 +790,9 @@ fn resolve_stream_id(task: &Value, stream_by_id: &HashMap<String, Value>) -> Opt
     if stream_by_id.contains_key(raw_id) {
         return Some(raw_id.to_string());
     }
-    let source_stream_id = task.get("source_stream_id").and_then(|value| value.as_str())?;
+    let source_stream_id = task
+        .get("source_stream_id")
+        .and_then(|value| value.as_str())?;
     if stream_by_id.contains_key(source_stream_id) {
         return Some(source_stream_id.to_string());
     }
@@ -629,7 +815,11 @@ fn raw_task_created_at(task: &Value, entry: Option<&Value>) -> i64 {
     entry
         .and_then(|stream| stream.get("timestamp"))
         .and_then(|value| value.as_i64())
-        .unwrap_or_else(|| task.get("created_at").and_then(|value| value.as_i64()).unwrap_or(0))
+        .unwrap_or_else(|| {
+            task.get("created_at")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0)
+        })
 }
 
 fn raw_task_id(task: &Value) -> Option<&str> {
@@ -654,7 +844,9 @@ fn parse_string_array(value: Option<&Value>) -> Vec<String> {
 fn parse_value_array(value: Option<&Value>) -> Value {
     match value {
         Some(Value::Array(arr)) => Value::Array(arr.clone()),
-        Some(Value::String(raw)) => serde_json::from_str::<Value>(raw).unwrap_or(Value::Array(vec![])),
+        Some(Value::String(raw)) => {
+            serde_json::from_str::<Value>(raw).unwrap_or(Value::Array(vec![]))
+        }
         _ => Value::Array(vec![]),
     }
 }
@@ -665,7 +857,10 @@ fn unique_strings(values: Vec<String>) -> Value {
         if value.trim().is_empty() {
             continue;
         }
-        if out.iter().any(|existing| existing.as_str() == Some(value.as_str())) {
+        if out
+            .iter()
+            .any(|existing| existing.as_str() == Some(value.as_str()))
+        {
             continue;
         }
         out.push(Value::String(value));
@@ -699,7 +894,7 @@ fn now_ms() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_task, unique_strings};
+    use super::{hydrate_task_snapshot_from_history, normalize_task, unique_strings};
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -745,5 +940,42 @@ mod tests {
             unique_strings(vec!["a".into(), "b".into(), "a".into(), "".into()]),
             json!(["a", "b"])
         );
+    }
+
+    #[test]
+    fn hydrate_task_history_uses_stream_content_and_tags() {
+        let task = json!({
+            "id": "se-1",
+            "title": "Task",
+            "title_customized": 0,
+            "status": "inbox",
+            "body": "",
+            "created_at": 100,
+            "updated_at": 120,
+            "role_ids": "[\"role-a\"]",
+            "tags": "[\"task\"]",
+            "subtask_ids": "[]",
+            "resources": "[]",
+            "reminders": "[]",
+            "submissions": "[]",
+            "postponements": "[]",
+            "status_history": "[]",
+            "progress_logs": "[]",
+            "version": 3,
+        });
+        let stream = json!({
+            "id": "se-1",
+            "content": "Body from stream",
+            "timestamp": 90,
+            "updated_at": 140,
+            "role_id": "role-b",
+            "tags": "[\"stream\"]",
+        });
+
+        let hydrated = hydrate_task_snapshot_from_history(&task, Some(&stream));
+        assert_eq!(hydrated["body"], "Body from stream");
+        assert_eq!(hydrated["primary_role"], "role-a");
+        assert_eq!(hydrated["tags"], json!(["task", "stream"]));
+        assert_eq!(hydrated["updated_at"], 140);
     }
 }

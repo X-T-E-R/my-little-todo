@@ -48,6 +48,14 @@ describe('ensureTauriSqliteSchema', () => {
     expect(createUserScopedIndexAt).toBeGreaterThan(alterUserIdAt);
     expect(statements.some((statement) => statement.includes('schema_version'))).toBe(true);
     expect(
+      statements.some((statement) => statement.includes('ALTER TABLE audit_events ADD COLUMN group_id')),
+    ).toBe(true);
+    expect(
+      statements.some((statement) =>
+        statement.includes('ALTER TABLE entity_revisions ADD COLUMN group_id'),
+      ),
+    ).toBe(true);
+    expect(
       statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS audit_events')),
     ).toBe(true);
     expect(

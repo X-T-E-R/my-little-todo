@@ -27,6 +27,12 @@ function normalizeAuditEventRecord(value: unknown): AuditEventRecord {
   const row = value as Record<string, unknown>;
   return {
     id: String(row.id),
+    groupId:
+      row.group_id != null
+        ? String(row.group_id)
+        : row.groupId != null
+          ? String(row.groupId)
+          : null,
     userId: String(row.user_id ?? row.userId ?? ''),
     entityType: String(row.entity_type ?? row.entityType) as HistoryEntityType,
     entityId: String(row.entity_id ?? row.entityId ?? ''),
@@ -51,6 +57,12 @@ function normalizeEntityRevisionRecord(value: unknown): EntityRevisionRecord {
   return {
     id: String(row.id),
     eventId: String(row.event_id ?? row.eventId ?? ''),
+    groupId:
+      row.group_id != null
+        ? String(row.group_id)
+        : row.groupId != null
+          ? String(row.groupId)
+          : null,
     userId: String(row.user_id ?? row.userId ?? ''),
     entityType: String(row.entity_type ?? row.entityType) as HistoryEntityType,
     entityId: String(row.entity_id ?? row.entityId ?? ''),

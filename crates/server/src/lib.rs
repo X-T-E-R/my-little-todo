@@ -3,6 +3,8 @@ pub mod backup;
 pub mod config;
 pub mod export;
 pub mod extension_registry;
+pub mod history_audit;
+pub mod history_context;
 pub mod providers;
 pub mod routes;
 pub mod task_stream_facade;
@@ -281,7 +283,10 @@ pub fn create_app(
         .with_state(state.clone());
 
     let history_routes = Router::new()
-        .route("/history/revisions", get(routes::history::list_entity_revisions))
+        .route(
+            "/history/revisions",
+            get(routes::history::list_entity_revisions),
+        )
         .route("/history/events", get(routes::history::list_audit_events))
         .layer(axum_mw::from_fn_with_state(
             state.clone(),

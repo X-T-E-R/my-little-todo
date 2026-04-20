@@ -5,7 +5,7 @@
 
 import { LOCAL_DESKTOP_USER_ID } from './localUser';
 
-export const SCHEMA_VERSION = 18;
+export const SCHEMA_VERSION = 19;
 
 export const CREATE_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -183,6 +183,7 @@ export const CREATE_TABLES_SQL = [
 
   `CREATE TABLE IF NOT EXISTS audit_events (
     id TEXT PRIMARY KEY,
+    group_id TEXT,
     user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}',
     entity_type TEXT NOT NULL,
     entity_id TEXT NOT NULL,
@@ -199,6 +200,7 @@ export const CREATE_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS entity_revisions (
     id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL,
+    group_id TEXT,
     user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}',
     entity_type TEXT NOT NULL,
     entity_id TEXT NOT NULL,

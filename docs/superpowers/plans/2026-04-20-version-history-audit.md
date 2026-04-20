@@ -79,9 +79,7 @@
 - UI history panel
 - Restore/revert UI
 - Diff persistence
-- Multi-row grouped event transactions across complex workflows
 - Fine-grained request correlation plumbing through all server routes
-- Sensitive-setting allowlist or redaction policy beyond current summary-only event payloads
 
 ## Data Model
 
@@ -159,6 +157,32 @@ Indexes:
 - `GET /api/history/events?limit=...&entityType=...&entityId=...`
 
 Response shape stays JSON-native so the web client can build history UI later without another schema pass.
+
+## Phase 2 Gaps Found During Smoke Verification
+
+The first implementation passed write/read smoke tests, but exposed three practical gaps that should be fixed before calling this a product-grade history system:
+
+### Gap 1: Task revision snapshots are still raw task facets
+
+- Current `tasks` revision payloads do not contain the user-facing body content, because body lives in `stream_entries`.
+- Fix: hydrate task revision reads by joining the latest matching stream revision at or before the task revision's `global_version`.
+
+### Gap 2: One user action still appears as multiple unrelated history rows
+
+- A task write currently produces one stream revision and one task revision with no stable correlation key.
+- Fix: add `group_id` to both history tables and populate it from high-level operations when a single action writes multiple entities.
+
+### Gap 3: Settings history may capture secrets
+
+- Some settings values can contain API keys, bearer tokens, or passwords.
+- Fix: add a small sensitive-key detector and store redacted snapshots for matching settings while keeping event metadata.
+
+### Second-round implementation scope
+
+- Add `group_id` to `audit_events` and `entity_revisions`
+- Hydrate `tasks` history on read in both local SQLite stores and server providers
+- Add redacted settings snapshot policy in both local and server write paths
+- Verify with fresh HTTP smoke tests for create/delete/history readback
 
 ## Implementation Tasks
 

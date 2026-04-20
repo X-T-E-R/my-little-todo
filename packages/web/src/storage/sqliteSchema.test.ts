@@ -14,6 +14,7 @@ describe('sqliteSchema desktop host compatibility', () => {
     expect(tables).toContain('CREATE TABLE IF NOT EXISTS invites');
     expect(tables).toContain('CREATE TABLE IF NOT EXISTS audit_events');
     expect(tables).toContain('CREATE TABLE IF NOT EXISTS entity_revisions');
+    expect(tables).toContain('group_id TEXT');
   });
 
   it('adds user-scoped indexes for shared core tables', () => {

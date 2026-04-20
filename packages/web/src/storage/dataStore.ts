@@ -16,6 +16,7 @@ export type HistoryOperation = 'upsert' | 'delete';
 export interface EntityRevisionRecord {
   id: string;
   eventId: string;
+  groupId: string | null;
   userId: string;
   entityType: HistoryEntityType;
   entityId: string;
@@ -28,6 +29,7 @@ export interface EntityRevisionRecord {
 
 export interface AuditEventRecord {
   id: string;
+  groupId: string | null;
   userId: string;
   entityType: HistoryEntityType;
   entityId: string;

@@ -66,6 +66,8 @@ pub struct ChangeRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEventRecord {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     pub user_id: String,
     pub entity_type: String,
     pub entity_id: String,
@@ -84,6 +86,8 @@ pub struct AuditEventRecord {
 pub struct EntityRevisionRecord {
     pub id: String,
     pub event_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     pub user_id: String,
     pub entity_type: String,
     pub entity_id: String,
@@ -181,11 +185,8 @@ pub trait DatabaseProvider: Send + Sync {
     ) -> anyhow::Result<Vec<ChangeRecord>>;
     async fn get_max_version(&self) -> anyhow::Result<i64>;
     async fn get_max_version_for_user(&self, user_id: &str) -> anyhow::Result<i64>;
-    async fn apply_remote_change(
-        &self,
-        user_id: &str,
-        change: &ChangeRecord,
-    ) -> anyhow::Result<()>;
+    async fn apply_remote_change(&self, user_id: &str, change: &ChangeRecord)
+        -> anyhow::Result<()>;
     async fn apply_remote_changes_batch(
         &self,
         user_id: &str,
