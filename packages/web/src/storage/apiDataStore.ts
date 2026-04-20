@@ -7,6 +7,9 @@ import {
   taskToDbRow,
 } from '@my-little-todo/core';
 import type {
+  AuditEventRecord,
+  EntityRevisionRecord,
+  HistoryEntityType,
   StreamEntry,
   Task,
   ThinkSession,
@@ -19,6 +22,45 @@ import type { AttachmentConfig, UploadResult } from './blobApi';
 import type { DataStore } from './dataStore';
 import { getPrimaryRoleId, hydrateTaskWithEntry } from './taskEntryBridge';
 import { deserializeWorkThread, deserializeWorkThreadEvent } from './workThreadStorage';
+
+function normalizeAuditEventRecord(value: unknown): AuditEventRecord {
+  const row = value as Record<string, unknown>;
+  return {
+    id: String(row.id),
+    userId: String(row.user_id ?? row.userId ?? ''),
+    entityType: String(row.entity_type ?? row.entityType) as HistoryEntityType,
+    entityId: String(row.entity_id ?? row.entityId ?? ''),
+    entityVersion: Number(row.entity_version ?? row.entityVersion ?? 0),
+    globalVersion: Number(row.global_version ?? row.globalVersion ?? 0),
+    action: String(row.action ?? ''),
+    sourceKind: String(row.source_kind ?? row.sourceKind ?? ''),
+    actorType: String(row.actor_type ?? row.actorType ?? ''),
+    actorId: String(row.actor_id ?? row.actorId ?? ''),
+    occurredAt: Number(row.occurred_at ?? row.occurredAt ?? 0),
+    summaryJson:
+      row.summary_json != null
+        ? String(row.summary_json)
+        : row.summaryJson != null
+          ? String(row.summaryJson)
+          : null,
+  };
+}
+
+function normalizeEntityRevisionRecord(value: unknown): EntityRevisionRecord {
+  const row = value as Record<string, unknown>;
+  return {
+    id: String(row.id),
+    eventId: String(row.event_id ?? row.eventId ?? ''),
+    userId: String(row.user_id ?? row.userId ?? ''),
+    entityType: String(row.entity_type ?? row.entityType) as HistoryEntityType,
+    entityId: String(row.entity_id ?? row.entityId ?? ''),
+    entityVersion: Number(row.entity_version ?? row.entityVersion ?? 0),
+    globalVersion: Number(row.global_version ?? row.globalVersion ?? 0),
+    op: String(row.op ?? 'upsert') as EntityRevisionRecord['op'],
+    changedAt: Number(row.changed_at ?? row.changedAt ?? 0),
+    snapshotJson: String(row.snapshot_json ?? row.snapshotJson ?? '{}'),
+  };
+}
 
 const THINK_SESSIONS_KV = 'think-sessions:v1';
 const WORK_THREADS_KV = 'work-threads:v1';
@@ -426,6 +468,34 @@ export function createApiDataStore(baseUrl: string, token?: string): DataStore {
       } catch {
         return [];
       }
+    },
+
+    async listEntityRevisions(
+      entityType: HistoryEntityType,
+      entityId: string,
+      limit = 50,
+    ): Promise<EntityRevisionRecord[]> {
+      const lim = Math.min(Math.max(1, limit), 500);
+      const res = await fetch(
+        `${baseUrl}/api/history/revisions?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}&limit=${encodeURIComponent(String(lim))}`,
+        { headers: authOnly() },
+      );
+      if (!res.ok) return [];
+      const rows = (await res.json()) as unknown[];
+      return rows.map(normalizeEntityRevisionRecord);
+    },
+
+    async listAuditEvents(limit = 100, filters): Promise<AuditEventRecord[]> {
+      const lim = Math.min(Math.max(1, limit), 500);
+      const params = new URLSearchParams({ limit: String(lim) });
+      if (filters?.entityType) params.set('entityType', filters.entityType);
+      if (filters?.entityId) params.set('entityId', filters.entityId);
+      const res = await fetch(`${baseUrl}/api/history/events?${params.toString()}`, {
+        headers: authOnly(),
+      });
+      if (!res.ok) return [];
+      const rows = (await res.json()) as unknown[];
+      return rows.map(normalizeAuditEventRecord);
     },
   };
 }

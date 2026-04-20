@@ -6,12 +6,14 @@ import { CREATE_INDEXES_SQL, CREATE_TABLES_SQL, SCHEMA_VERSION } from './sqliteS
 describe('sqliteSchema desktop host compatibility', () => {
   it('keeps the embedded-host compatibility schema enabled', () => {
     const tables = CREATE_TABLES_SQL.join('\n');
-    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(17);
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(18);
     expect(tables).toContain(`user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`);
     expect(tables).toContain(`owner      TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}'`);
     expect(tables).toContain('CREATE TABLE IF NOT EXISTS users');
     expect(tables).toContain('CREATE TABLE IF NOT EXISTS sessions');
     expect(tables).toContain('CREATE TABLE IF NOT EXISTS invites');
+    expect(tables).toContain('CREATE TABLE IF NOT EXISTS audit_events');
+    expect(tables).toContain('CREATE TABLE IF NOT EXISTS entity_revisions');
   });
 
   it('adds user-scoped indexes for shared core tables', () => {
@@ -26,6 +28,12 @@ describe('sqliteSchema desktop host compatibility', () => {
     );
     expect(CREATE_INDEXES_SQL).toContain(
       'CREATE INDEX IF NOT EXISTS idx_blobs_owner ON blobs(owner)',
+    );
+    expect(CREATE_INDEXES_SQL).toContain(
+      'CREATE INDEX IF NOT EXISTS idx_audit_events_user_time ON audit_events(user_id, occurred_at DESC)',
+    );
+    expect(CREATE_INDEXES_SQL).toContain(
+      'CREATE INDEX IF NOT EXISTS idx_entity_revisions_entity ON entity_revisions(user_id, entity_type, entity_id, global_version DESC)',
     );
   });
 });

@@ -3,6 +3,7 @@ pub mod ai_proxy;
 pub mod backup;
 pub mod blobs;
 pub mod data;
+pub mod history;
 pub mod mcp;
 pub mod plugins;
 pub mod session;

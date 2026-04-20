@@ -47,5 +47,13 @@ describe('ensureTauriSqliteSchema', () => {
     expect(alterUserIdAt).toBeGreaterThan(-1);
     expect(createUserScopedIndexAt).toBeGreaterThan(alterUserIdAt);
     expect(statements.some((statement) => statement.includes('schema_version'))).toBe(true);
+    expect(
+      statements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS audit_events')),
+    ).toBe(true);
+    expect(
+      statements.some((statement) =>
+        statement.includes('CREATE TABLE IF NOT EXISTS entity_revisions'),
+      ),
+    ).toBe(true);
   });
 });

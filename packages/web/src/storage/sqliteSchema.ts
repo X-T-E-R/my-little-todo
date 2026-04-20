@@ -5,7 +5,7 @@
 
 import { LOCAL_DESKTOP_USER_ID } from './localUser';
 
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 18;
 
 export const CREATE_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -180,6 +180,34 @@ export const CREATE_TABLES_SQL = [
     updated_at       INTEGER NOT NULL,
     last_matched_at  INTEGER
   )`,
+
+  `CREATE TABLE IF NOT EXISTS audit_events (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}',
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    entity_version INTEGER NOT NULL,
+    global_version INTEGER NOT NULL,
+    action TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    actor_type TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    occurred_at INTEGER NOT NULL,
+    summary_json TEXT
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS entity_revisions (
+    id TEXT PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    user_id TEXT NOT NULL DEFAULT '${LOCAL_DESKTOP_USER_ID}',
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    entity_version INTEGER NOT NULL,
+    global_version INTEGER NOT NULL,
+    op TEXT NOT NULL,
+    changed_at INTEGER NOT NULL,
+    snapshot_json TEXT NOT NULL
+  )`,
 ];
 
 export const CREATE_INDEXES_SQL = [
@@ -205,4 +233,10 @@ export const CREATE_INDEXES_SQL = [
   'CREATE INDEX IF NOT EXISTS idx_work_threads_updated ON work_threads(updated_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_work_thread_events_thread ON work_thread_events(thread_id, created_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_audit_events_user_time ON audit_events(user_id, occurred_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events(user_id, entity_type, entity_id, occurred_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_audit_events_source ON audit_events(user_id, source_kind, occurred_at DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_entity_revisions_event ON entity_revisions(event_id)',
+  'CREATE INDEX IF NOT EXISTS idx_entity_revisions_user_global ON entity_revisions(user_id, global_version DESC)',
+  'CREATE INDEX IF NOT EXISTS idx_entity_revisions_entity ON entity_revisions(user_id, entity_type, entity_id, global_version DESC)',
 ];

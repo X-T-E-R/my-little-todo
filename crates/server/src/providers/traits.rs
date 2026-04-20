@@ -63,6 +63,37 @@ pub struct ChangeRecord {
     pub deleted_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditEventRecord {
+    pub id: String,
+    pub user_id: String,
+    pub entity_type: String,
+    pub entity_id: String,
+    pub entity_version: i64,
+    pub global_version: i64,
+    pub action: String,
+    pub source_kind: String,
+    pub actor_type: String,
+    pub actor_id: String,
+    pub occurred_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_json: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityRevisionRecord {
+    pub id: String,
+    pub event_id: String,
+    pub user_id: String,
+    pub entity_type: String,
+    pub entity_id: String,
+    pub entity_version: i64,
+    pub global_version: i64,
+    pub op: String,
+    pub changed_at: i64,
+    pub snapshot_json: String,
+}
+
 #[async_trait]
 pub trait DatabaseProvider: Send + Sync {
     async fn list_tasks_json(&self, user_id: &str) -> anyhow::Result<Vec<String>>;
@@ -160,6 +191,21 @@ pub trait DatabaseProvider: Send + Sync {
         user_id: &str,
         changes: &[ChangeRecord],
     ) -> anyhow::Result<()>;
+
+    async fn list_entity_revisions(
+        &self,
+        user_id: &str,
+        entity_type: &str,
+        entity_id: &str,
+        limit: i64,
+    ) -> anyhow::Result<Vec<EntityRevisionRecord>>;
+    async fn list_audit_events(
+        &self,
+        user_id: &str,
+        limit: i64,
+        entity_type: Option<&str>,
+        entity_id: Option<&str>,
+    ) -> anyhow::Result<Vec<AuditEventRecord>>;
 
     async fn close(&self) -> anyhow::Result<()>;
 }

@@ -10,6 +10,36 @@ import type { AttachmentConfig, UploadResult } from './blobApi';
 
 /** Tables that participate in sync replication. */
 export type SyncTable = 'tasks' | 'stream_entries' | 'settings' | 'blobs';
+export type HistoryEntityType = SyncTable | 'work_threads';
+export type HistoryOperation = 'upsert' | 'delete';
+
+export interface EntityRevisionRecord {
+  id: string;
+  eventId: string;
+  userId: string;
+  entityType: HistoryEntityType;
+  entityId: string;
+  entityVersion: number;
+  globalVersion: number;
+  op: HistoryOperation;
+  changedAt: number;
+  snapshotJson: string;
+}
+
+export interface AuditEventRecord {
+  id: string;
+  userId: string;
+  entityType: HistoryEntityType;
+  entityId: string;
+  entityVersion: number;
+  globalVersion: number;
+  action: string;
+  sourceKind: string;
+  actorType: string;
+  actorId: string;
+  occurredAt: number;
+  summaryJson: string | null;
+}
 
 /**
  * Incremental change record for local sync (native stores).
@@ -89,6 +119,18 @@ export interface DataStore {
   deleteWorkThread(id: string): Promise<void>;
   appendWorkThreadEvent(event: WorkThreadEvent): Promise<void>;
   listWorkThreadEvents(threadId: string, limit?: number): Promise<WorkThreadEvent[]>;
+
+  // ── History / audit ────────────────────────────────────────────
+
+  listEntityRevisions(
+    entityType: HistoryEntityType,
+    entityId: string,
+    limit?: number,
+  ): Promise<EntityRevisionRecord[]>;
+  listAuditEvents(
+    limit?: number,
+    filters?: { entityType?: HistoryEntityType; entityId?: string },
+  ): Promise<AuditEventRecord[]>;
 
   // ── Sync (optional: native SQLite stores) ──────────────────────
 

@@ -280,6 +280,15 @@ pub fn create_app(
         ))
         .with_state(state.clone());
 
+    let history_routes = Router::new()
+        .route("/history/revisions", get(routes::history::list_entity_revisions))
+        .route("/history/events", get(routes::history::list_audit_events))
+        .layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ))
+        .with_state(state.clone());
+
     let health_state = state.clone();
     let static_dir = config.static_dir.clone();
 
@@ -296,6 +305,7 @@ pub fn create_app(
         .nest("/api", plugin_routes)
         .nest("/api", blob_routes)
         .nest("/api", sync_routes)
+        .nest("/api", history_routes)
         .route(
             "/health",
             get(move || async move {

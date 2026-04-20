@@ -16,7 +16,14 @@ import type {
   WorkThreadEvent,
 } from '@my-little-todo/core';
 import type { AttachmentConfig, UploadResult } from './blobApi';
-import type { DataStore, LocalChangeRecord } from './dataStore';
+import type {
+  AuditEventRecord,
+  DataStore,
+  EntityRevisionRecord,
+  HistoryEntityType,
+  HistoryOperation,
+  LocalChangeRecord,
+} from './dataStore';
 import { LOCAL_DESKTOP_USER_ID } from './localUser';
 import { CREATE_INDEXES_SQL, CREATE_TABLES_SQL, SCHEMA_VERSION } from './sqliteSchema';
 import {
@@ -462,6 +469,14 @@ async function ensureSchema(db: CapDB): Promise<void> {
         `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (17, ${Date.now()})`,
       );
     }
+    const rowsV17 = await db.query('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1');
+    const verBefore18 =
+      rowsV17.values?.[0]?.version != null ? Number(rowsV17.values[0].version) : 0;
+    if (verBefore18 < 18) {
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (18, ${Date.now()})`,
+      );
+    }
   }
 
   for (const sql of CREATE_INDEXES_SQL) {
@@ -497,10 +512,134 @@ function workThreadEventFromRow(r: Record<string, unknown>): WorkThreadEvent {
   return deserializeWorkThreadEvent(r);
 }
 
+function rowToAuditEventRecord(r: Record<string, unknown>): AuditEventRecord {
+  return {
+    id: String(r.id),
+    userId: String(r.user_id),
+    entityType: String(r.entity_type) as HistoryEntityType,
+    entityId: String(r.entity_id),
+    entityVersion: Number(r.entity_version ?? 0),
+    globalVersion: Number(r.global_version ?? 0),
+    action: String(r.action),
+    sourceKind: String(r.source_kind),
+    actorType: String(r.actor_type),
+    actorId: String(r.actor_id),
+    occurredAt: Number(r.occurred_at),
+    summaryJson: r.summary_json != null ? String(r.summary_json) : null,
+  };
+}
+
+function rowToEntityRevisionRecord(r: Record<string, unknown>): EntityRevisionRecord {
+  return {
+    id: String(r.id),
+    eventId: String(r.event_id),
+    userId: String(r.user_id),
+    entityType: String(r.entity_type) as HistoryEntityType,
+    entityId: String(r.entity_id),
+    entityVersion: Number(r.entity_version ?? 0),
+    globalVersion: Number(r.global_version ?? 0),
+    op: String(r.op) as HistoryOperation,
+    changedAt: Number(r.changed_at),
+    snapshotJson: String(r.snapshot_json ?? '{}'),
+  };
+}
+
 async function bumpVersion(db: CapDB): Promise<number> {
   await db.execute('UPDATE version_seq SET current_version = current_version + 1 WHERE id = 1');
   const rows = await db.query('SELECT current_version as c FROM version_seq WHERE id = 1');
   return rows.values?.[0]?.c != null ? Number(rows.values[0].c) : 0;
+}
+
+type HistoryWrite = {
+  action: string;
+  changedAt: number;
+  entityId: string;
+  entityType: HistoryEntityType;
+  entityVersion: number;
+  globalVersion: number;
+  op: HistoryOperation;
+  snapshot: unknown;
+  userId?: string;
+};
+
+function buildHistorySummary(entityType: HistoryEntityType, snapshot: unknown): string | null {
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const record = snapshot as Record<string, unknown>;
+  switch (entityType) {
+    case 'tasks':
+      return JSON.stringify({
+        title: String(record.title ?? ''),
+        status: String(record.status ?? ''),
+      });
+    case 'stream_entries':
+      return JSON.stringify({
+        entry_type: String(record.entry_type ?? record.entryType ?? 'spark'),
+        content_length: String(record.content ?? '').length,
+      });
+    case 'settings':
+      return JSON.stringify({
+        key: String(record.key ?? ''),
+        value_length: String(record.value ?? '').length,
+      });
+    case 'blobs':
+      return JSON.stringify({
+        filename: String(record.filename ?? ''),
+        size: Number(record.size ?? 0),
+      });
+    case 'work_threads':
+      return JSON.stringify({
+        title: String(record.title ?? ''),
+        status: String(record.status ?? ''),
+      });
+    default:
+      return null;
+  }
+}
+
+async function writeHistory(db: CapDB, input: HistoryWrite): Promise<void> {
+  const eventId = crypto.randomUUID();
+  const snapshotJson =
+    typeof input.snapshot === 'string' ? input.snapshot : JSON.stringify(input.snapshot);
+  const summaryJson = buildHistorySummary(input.entityType, input.snapshot);
+  const userId = input.userId ?? LOCAL_DESKTOP_USER_ID;
+  await db.execute(
+    `INSERT INTO audit_events (
+      id, user_id, entity_type, entity_id, entity_version, global_version,
+      action, source_kind, actor_type, actor_id, occurred_at, summary_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      eventId,
+      userId,
+      input.entityType,
+      input.entityId,
+      input.entityVersion,
+      input.globalVersion,
+      input.action,
+      'desktop-ui',
+      'local-user',
+      LOCAL_DESKTOP_USER_ID,
+      input.changedAt,
+      summaryJson,
+    ],
+  );
+  await db.execute(
+    `INSERT INTO entity_revisions (
+      id, event_id, user_id, entity_type, entity_id, entity_version,
+      global_version, op, changed_at, snapshot_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      crypto.randomUUID(),
+      eventId,
+      userId,
+      input.entityType,
+      input.entityId,
+      input.entityVersion,
+      input.globalVersion,
+      input.op,
+      input.changedAt,
+      snapshotJson,
+    ],
+  );
 }
 
 function rowToTaskDbRow(r: Record<string, unknown>): TaskDbRow {
@@ -602,6 +741,23 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       'UPDATE tasks SET deleted_at = ?, updated_at = ?, version = ? WHERE user_id = ? AND id = ? AND deleted_at IS NULL',
       [ts, ts, v, LOCAL_DESKTOP_USER_ID, id],
     );
+    const rows = await db.query(
+      'SELECT * FROM tasks WHERE user_id = ? AND id = ? AND version = ? LIMIT 1',
+      [LOCAL_DESKTOP_USER_ID, id, v],
+    );
+    const row = rows.values?.[0];
+    if (row) {
+      await writeHistory(db, {
+        action: 'delete_task_facet',
+        changedAt: ts,
+        entityId: id,
+        entityType: 'tasks',
+        entityVersion: v,
+        globalVersion: v,
+        op: 'delete',
+        snapshot: rowToTaskDbRow(row),
+      });
+    }
   };
 
   return {
@@ -693,6 +849,16 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           streamRow.updated_at ?? streamRow.timestamp,
         ],
       );
+      await writeHistory(db, {
+        action: 'upsert_stream_entry',
+        changedAt: streamRow.updated_at ?? streamRow.timestamp,
+        entityId: streamRow.id,
+        entityType: 'stream_entries',
+        entityVersion: streamRow.version,
+        globalVersion: streamRow.version,
+        op: 'upsert',
+        snapshot: streamRow,
+      });
 
       const v = await bumpVersion(db);
       const t = deriveTaskFacetFromEntry({ ...task, updatedAt: new Date() }, canonicalEntry);
@@ -751,6 +917,16 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           row.deleted_at,
         ],
       );
+      await writeHistory(db, {
+        action: 'upsert_task',
+        changedAt: row.updated_at,
+        entityId: row.id,
+        entityType: 'tasks',
+        entityVersion: row.version,
+        globalVersion: row.version,
+        op: 'upsert',
+        snapshot: row,
+      });
     },
 
     async deleteTask(id: string): Promise<void> {
@@ -761,6 +937,23 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
         'UPDATE stream_entries SET deleted_at = ?, version = ? WHERE user_id = ? AND id = ? AND deleted_at IS NULL',
         [ts, v, LOCAL_DESKTOP_USER_ID, id],
       );
+      const rows = await db.query(
+        'SELECT * FROM stream_entries WHERE user_id = ? AND id = ? AND version = ? LIMIT 1',
+        [LOCAL_DESKTOP_USER_ID, id, v],
+      );
+      const row = rows.values?.[0];
+      if (row) {
+        await writeHistory(db, {
+          action: 'delete_stream_entry',
+          changedAt: ts,
+          entityId: id,
+          entityType: 'stream_entries',
+          entityVersion: v,
+          globalVersion: v,
+          op: 'delete',
+          snapshot: rowToStreamDbRow(row),
+        });
+      }
     },
 
     deleteTaskFacet,
@@ -861,6 +1054,16 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           row.updated_at ?? row.timestamp,
         ],
       );
+      await writeHistory(db, {
+        action: 'upsert_stream_entry',
+        changedAt: row.updated_at ?? row.timestamp,
+        entityId: row.id,
+        entityType: 'stream_entries',
+        entityVersion: row.version,
+        globalVersion: row.version,
+        op: 'upsert',
+        snapshot: row,
+      });
       const linkedTaskRows = await db.query(
         'SELECT * FROM tasks WHERE user_id = ? AND id = ? AND deleted_at IS NULL',
         [LOCAL_DESKTOP_USER_ID, entry.id],
@@ -881,6 +1084,23 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
               entry.id,
             ],
           );
+          const taskRows = await db.query(
+            'SELECT * FROM tasks WHERE user_id = ? AND id = ? AND version = ? LIMIT 1',
+            [LOCAL_DESKTOP_USER_ID, entry.id, nextVersion],
+          );
+          const taskRow = taskRows.values?.[0];
+          if (taskRow) {
+            await writeHistory(db, {
+              action: 'project_stream_role_to_task',
+              changedAt: Number(taskRow.updated_at ?? Date.now()),
+              entityId: entry.id,
+              entityType: 'tasks',
+              entityVersion: nextVersion,
+              globalVersion: nextVersion,
+              op: 'upsert',
+              snapshot: rowToTaskDbRow(taskRow),
+            });
+          }
         }
       }
     },
@@ -893,6 +1113,23 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
         'UPDATE stream_entries SET deleted_at = ?, version = ? WHERE user_id = ? AND id = ? AND deleted_at IS NULL',
         [ts, v, LOCAL_DESKTOP_USER_ID, id],
       );
+      const rows = await db.query(
+        'SELECT * FROM stream_entries WHERE user_id = ? AND id = ? AND version = ? LIMIT 1',
+        [LOCAL_DESKTOP_USER_ID, id, v],
+      );
+      const row = rows.values?.[0];
+      if (row) {
+        await writeHistory(db, {
+          action: 'delete_stream_entry',
+          changedAt: ts,
+          entityId: id,
+          entityType: 'stream_entries',
+          entityVersion: v,
+          globalVersion: v,
+          op: 'delete',
+          snapshot: rowToStreamDbRow(row),
+        });
+      }
     },
 
     async getSetting(key: string): Promise<string | null> {
@@ -912,6 +1149,22 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
          ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, version = excluded.version, deleted_at = NULL`,
         [LOCAL_DESKTOP_USER_ID, key, value, ts, v],
       );
+      await writeHistory(db, {
+        action: 'put_setting',
+        changedAt: ts,
+        entityId: key,
+        entityType: 'settings',
+        entityVersion: v,
+        globalVersion: v,
+        op: 'upsert',
+        snapshot: {
+          key,
+          value,
+          updated_at: ts,
+          version: v,
+          deleted_at: null,
+        },
+      });
     },
 
     async deleteSetting(key: string): Promise<void> {
@@ -921,6 +1174,29 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
         'UPDATE settings SET deleted_at = ?, updated_at = ?, version = ? WHERE user_id = ? AND key = ? AND deleted_at IS NULL',
         [ts, ts, v, LOCAL_DESKTOP_USER_ID, key],
       );
+      const rows = await db.query(
+        'SELECT key, value, updated_at, version, deleted_at FROM settings WHERE user_id = ? AND key = ? AND version = ? LIMIT 1',
+        [LOCAL_DESKTOP_USER_ID, key, v],
+      );
+      const row = rows.values?.[0];
+      if (row) {
+        await writeHistory(db, {
+          action: 'delete_setting',
+          changedAt: ts,
+          entityId: key,
+          entityType: 'settings',
+          entityVersion: v,
+          globalVersion: v,
+          op: 'delete',
+          snapshot: {
+            key,
+            value: String(row.value ?? ''),
+            updated_at: Number(row.updated_at ?? ts),
+            version: v,
+            deleted_at: Number(row.deleted_at ?? ts),
+          },
+        });
+      }
     },
 
     async getAllSettings(): Promise<Record<string, string>> {
@@ -955,6 +1231,25 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           v,
         ],
       );
+      await writeHistory(db, {
+        action: 'upload_blob',
+        changedAt: ts,
+        entityId: id,
+        entityType: 'blobs',
+        entityVersion: v,
+        globalVersion: v,
+        op: 'upsert',
+        snapshot: {
+          id,
+          owner: LOCAL_DESKTOP_USER_ID,
+          filename: file.name,
+          mime_type: file.type || 'application/octet-stream',
+          size: file.size,
+          created_at: ts,
+          version: v,
+          deleted_at: null,
+        },
+      });
       return {
         id,
         url: `blob://${id}`,
@@ -989,6 +1284,32 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
         'UPDATE blobs SET deleted_at = ?, version = ? WHERE owner = ? AND id = ? AND deleted_at IS NULL',
         [ts, v, LOCAL_DESKTOP_USER_ID, id],
       );
+      const rows = await db.query(
+        'SELECT id, owner, filename, mime_type, size, created_at, version, deleted_at FROM blobs WHERE owner = ? AND id = ? AND version = ? LIMIT 1',
+        [LOCAL_DESKTOP_USER_ID, id, v],
+      );
+      const row = rows.values?.[0];
+      if (row) {
+        await writeHistory(db, {
+          action: 'delete_blob',
+          changedAt: ts,
+          entityId: id,
+          entityType: 'blobs',
+          entityVersion: v,
+          globalVersion: v,
+          op: 'delete',
+          snapshot: {
+            id: String(row.id),
+            owner: String(row.owner),
+            filename: String(row.filename),
+            mime_type: String(row.mime_type),
+            size: Number(row.size),
+            created_at: Number(row.created_at),
+            version: v,
+            deleted_at: Number(row.deleted_at ?? ts),
+          },
+        });
+      }
     },
 
     async getAttachmentConfig(): Promise<AttachmentConfig> {
@@ -1057,6 +1378,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
 
     async saveWorkThread(thread: WorkThread): Promise<void> {
       const row = serializeWorkThread(thread);
+      const globalVersion = await bumpVersion(db);
       await db.execute(
         `INSERT INTO work_threads (
           id, title, mission, status, lane, role_id, root_markdown, exploration_markdown, doc_markdown, context_items, intents, spark_containers, next_actions,
@@ -1112,6 +1434,16 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           row.updated_at,
         ],
       );
+      await writeHistory(db, {
+        action: 'save_work_thread',
+        changedAt: row.updated_at,
+        entityId: row.id,
+        entityType: 'work_threads',
+        entityVersion: globalVersion,
+        globalVersion,
+        op: 'upsert',
+        snapshot: row,
+      });
     },
 
     async getWorkThread(id: string): Promise<WorkThread | null> {
@@ -1130,8 +1462,23 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
     },
 
     async deleteWorkThread(id: string): Promise<void> {
+      const rows = await db.query('SELECT * FROM work_threads WHERE id = ? LIMIT 1', [id]);
+      const row = rows.values?.[0];
       await db.execute('DELETE FROM work_thread_events WHERE thread_id = ?', [id]);
       await db.execute('DELETE FROM work_threads WHERE id = ?', [id]);
+      if (row) {
+        const globalVersion = await bumpVersion(db);
+        await writeHistory(db, {
+          action: 'delete_work_thread',
+          changedAt: now(),
+          entityId: id,
+          entityType: 'work_threads',
+          entityVersion: globalVersion,
+          globalVersion,
+          op: 'delete',
+          snapshot: row,
+        });
+      }
     },
 
     async appendWorkThreadEvent(event: WorkThreadEvent): Promise<void> {
@@ -1160,6 +1507,42 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       );
       if (!rows.values) return [];
       return rows.values.map((r) => workThreadEventFromRow(r as Record<string, unknown>));
+    },
+
+    async listEntityRevisions(
+      entityType: HistoryEntityType,
+      entityId: string,
+      limit = 50,
+    ): Promise<EntityRevisionRecord[]> {
+      const lim = Math.min(Math.max(1, limit), 500);
+      const rows = await db.query(
+        `SELECT * FROM entity_revisions
+         WHERE user_id = ? AND entity_type = ? AND entity_id = ?
+         ORDER BY global_version DESC LIMIT ${lim}`,
+        [LOCAL_DESKTOP_USER_ID, entityType, entityId],
+      );
+      return (rows.values ?? []).map((row) =>
+        rowToEntityRevisionRecord(row as Record<string, unknown>),
+      );
+    },
+
+    async listAuditEvents(limit = 100, filters): Promise<AuditEventRecord[]> {
+      const lim = Math.min(Math.max(1, limit), 500);
+      const clauses = ['user_id = ?'];
+      const params: unknown[] = [LOCAL_DESKTOP_USER_ID];
+      if (filters?.entityType) {
+        clauses.push('entity_type = ?');
+        params.push(filters.entityType);
+      }
+      if (filters?.entityId) {
+        clauses.push('entity_id = ?');
+        params.push(filters.entityId);
+      }
+      const rows = await db.query(
+        `SELECT * FROM audit_events WHERE ${clauses.join(' AND ')} ORDER BY occurred_at DESC LIMIT ${lim}`,
+        params,
+      );
+      return (rows.values ?? []).map((row) => rowToAuditEventRecord(row as Record<string, unknown>));
     },
 
     async getMaxVersion(): Promise<number> {

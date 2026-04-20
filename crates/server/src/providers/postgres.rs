@@ -3,7 +3,8 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Postgres;
 
 use super::traits::{
-    BlobMeta, ChangeRecord, DatabaseProvider, InviteRecord, NewUser, SessionRecord, User,
+    AuditEventRecord, BlobMeta, ChangeRecord, DatabaseProvider, EntityRevisionRecord,
+    InviteRecord, NewUser, SessionRecord, User,
 };
 
 async fn bump_version_pg<'e, E: sqlx::Executor<'e, Database = Postgres>>(
@@ -17,14 +18,101 @@ async fn bump_version_pg<'e, E: sqlx::Executor<'e, Database = Postgres>>(
     Ok(row.0)
 }
 
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn build_history_summary(entity_type: &str, snapshot_json: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(snapshot_json).ok()?;
+    let summary = match entity_type {
+        "tasks" => serde_json::json!({
+            "title": value.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+            "status": value.get("status").and_then(|v| v.as_str()).unwrap_or(""),
+        }),
+        "stream_entries" => serde_json::json!({
+            "entry_type": value.get("entry_type").and_then(|v| v.as_str()).unwrap_or("spark"),
+            "content_length": value.get("content").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0),
+        }),
+        "settings" => serde_json::json!({
+            "key": value.get("key").and_then(|v| v.as_str()).unwrap_or(""),
+            "value_length": value.get("value").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0),
+        }),
+        "blobs" => serde_json::json!({
+            "filename": value.get("filename").and_then(|v| v.as_str()).unwrap_or(""),
+            "size": value.get("size").and_then(|v| v.as_i64()).unwrap_or(0),
+        }),
+        _ => return None,
+    };
+    Some(summary.to_string())
+}
+
+async fn insert_history_pg_tx(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    user_id: &str,
+    entity_type: &str,
+    entity_id: &str,
+    entity_version: i64,
+    global_version: i64,
+    action: &str,
+    op: &str,
+    changed_at: i64,
+    snapshot_json: &str,
+) -> anyhow::Result<()> {
+    let event_id = uuid::Uuid::new_v4().to_string();
+    sqlx::query(
+        "INSERT INTO audit_events (
+            id, user_id, entity_type, entity_id, entity_version, global_version,
+            action, source_kind, actor_type, actor_id, occurred_at, summary_json
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
+    )
+    .bind(&event_id)
+    .bind(user_id)
+    .bind(entity_type)
+    .bind(entity_id)
+    .bind(entity_version)
+    .bind(global_version)
+    .bind(action)
+    .bind("server-api")
+    .bind("user")
+    .bind(user_id)
+    .bind(changed_at)
+    .bind(build_history_summary(entity_type, snapshot_json))
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO entity_revisions (
+            id, event_id, user_id, entity_type, entity_id, entity_version,
+            global_version, op, changed_at, snapshot_json
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(event_id)
+    .bind(user_id)
+    .bind(entity_type)
+    .bind(entity_id)
+    .bind(entity_version)
+    .bind(global_version)
+    .bind(op)
+    .bind(changed_at)
+    .bind(snapshot_json)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 async fn upsert_task_json_tx(
     tx: &mut sqlx::Transaction<'_, Postgres>,
     user_id: &str,
     json: &str,
 ) -> anyhow::Result<()> {
-    let v: serde_json::Value = serde_json::from_str(json)?;
+    let mut v: serde_json::Value = serde_json::from_str(json)?;
     let next_ver = bump_version_pg(&mut **tx).await?;
     let updated_at = v["updated_at"].as_i64().unwrap_or(0);
+    let entity_id = v["id"].as_str().unwrap_or("").to_string();
     sqlx::query(
         r#"INSERT INTO tasks (
                 user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
@@ -79,6 +167,24 @@ async fn upsert_task_json_tx(
     .bind(None::<String>)
     .execute(&mut **tx)
     .await?;
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert("version".into(), serde_json::json!(next_ver));
+        obj.insert("deleted_at".into(), serde_json::Value::Null);
+        obj.insert("user_id".into(), serde_json::json!(user_id));
+    }
+    insert_history_pg_tx(
+        tx,
+        user_id,
+        "tasks",
+        &entity_id,
+        next_ver,
+        next_ver,
+        "upsert_task",
+        "upsert",
+        updated_at,
+        &v.to_string(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -87,16 +193,14 @@ async fn upsert_stream_entry_json_tx(
     user_id: &str,
     json: &str,
 ) -> anyhow::Result<()> {
-    let v: serde_json::Value = serde_json::from_str(json)?;
+    let mut v: serde_json::Value = serde_json::from_str(json)?;
     let next_ver = bump_version_pg(&mut **tx).await?;
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+    let now_ms = now_ms();
     let updated_at = v
         .get("updated_at")
         .and_then(|x| x.as_i64())
         .unwrap_or(now_ms);
+    let entity_id = v["id"].as_str().unwrap_or("").to_string();
     sqlx::query(
         r#"INSERT INTO stream_entries (
                 user_id, id, content, entry_type, "timestamp", date_key, role_id, extracted_task_id,
@@ -124,6 +228,25 @@ async fn upsert_stream_entry_json_tx(
     .bind(updated_at)
     .execute(&mut **tx)
     .await?;
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert("version".into(), serde_json::json!(next_ver));
+        obj.insert("deleted_at".into(), serde_json::Value::Null);
+        obj.insert("user_id".into(), serde_json::json!(user_id));
+        obj.insert("updated_at".into(), serde_json::json!(updated_at));
+    }
+    insert_history_pg_tx(
+        tx,
+        user_id,
+        "stream_entries",
+        &entity_id,
+        next_ver,
+        next_ver,
+        "upsert_stream_entry",
+        "upsert",
+        updated_at,
+        &v.to_string(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -136,10 +259,7 @@ async fn apply_remote_change_tx(
         "tasks" => {
             if change.deleted_at.is_some() {
                 let next_ver = bump_version_pg(&mut **tx).await?;
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
+                let now_ms = now_ms();
                 sqlx::query(
                     "UPDATE tasks SET deleted_at = NOW()::text, updated_at = $1, version = $2
                      WHERE user_id = $3 AND id = $4 AND deleted_at IS NULL",
@@ -150,6 +270,40 @@ async fn apply_remote_change_tx(
                 .bind(&change.key)
                 .execute(&mut **tx)
                 .await?;
+                let row: Option<(String,)> = sqlx::query_as(
+                    r#"SELECT json_build_object(
+                        'id', id, 'title', title, 'title_customized', title_customized, 'description', description, 'status', status, 'body', body,
+                        'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
+                        'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
+                        'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                        'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                        'task_type', task_type,
+                        'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
+                        'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
+                        'status_history', status_history, 'progress_logs', progress_logs,
+                        'version', version, 'deleted_at', deleted_at, 'user_id', user_id
+                    )::text FROM tasks WHERE user_id = $1 AND id = $2 AND version = $3 LIMIT 1"#,
+                )
+                .bind(user_id)
+                .bind(&change.key)
+                .bind(next_ver)
+                .fetch_optional(&mut **tx)
+                .await?;
+                if let Some((snapshot_json,)) = row {
+                    insert_history_pg_tx(
+                        tx,
+                        user_id,
+                        "tasks",
+                        &change.key,
+                        next_ver,
+                        next_ver,
+                        "delete_task",
+                        "delete",
+                        now_ms,
+                        &snapshot_json,
+                    )
+                    .await?;
+                }
             } else if let Some(data) = &change.data {
                 upsert_task_json_tx(tx, user_id, data).await?;
             }
@@ -157,6 +311,7 @@ async fn apply_remote_change_tx(
         "stream_entries" => {
             if change.deleted_at.is_some() {
                 let next_ver = bump_version_pg(&mut **tx).await?;
+                let changed_at = now_ms();
                 sqlx::query(
                     "UPDATE stream_entries SET deleted_at = NOW()::text, version = $1
                      WHERE user_id = $2 AND id = $3 AND deleted_at IS NULL",
@@ -166,6 +321,35 @@ async fn apply_remote_change_tx(
                 .bind(&change.key)
                 .execute(&mut **tx)
                 .await?;
+                let row: Option<(String,)> = sqlx::query_as(
+                    r#"SELECT json_build_object(
+                        'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', "timestamp",
+                        'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
+                        'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta,
+                        'version', version, 'deleted_at', deleted_at, 'updated_at', COALESCE(updated_at, "timestamp"),
+                        'user_id', user_id
+                    )::text FROM stream_entries WHERE user_id = $1 AND id = $2 AND version = $3 LIMIT 1"#,
+                )
+                .bind(user_id)
+                .bind(&change.key)
+                .bind(next_ver)
+                .fetch_optional(&mut **tx)
+                .await?;
+                if let Some((snapshot_json,)) = row {
+                    insert_history_pg_tx(
+                        tx,
+                        user_id,
+                        "stream_entries",
+                        &change.key,
+                        next_ver,
+                        next_ver,
+                        "delete_stream_entry",
+                        "delete",
+                        changed_at,
+                        &snapshot_json,
+                    )
+                    .await?;
+                }
             } else if let Some(data) = &change.data {
                 upsert_stream_entry_json_tx(tx, user_id, data).await?;
             }
@@ -173,6 +357,7 @@ async fn apply_remote_change_tx(
         "settings" => {
             if change.deleted_at.is_some() {
                 let next_ver = bump_version_pg(&mut **tx).await?;
+                let changed_at = now_ms();
                 sqlx::query(
                     "UPDATE settings SET deleted_at = NOW()::text, updated_at = NOW(), version = $1
                      WHERE user_id = $2 AND key = $3 AND deleted_at IS NULL",
@@ -182,10 +367,37 @@ async fn apply_remote_change_tx(
                 .bind(&change.key)
                 .execute(&mut **tx)
                 .await?;
+                let row: Option<(String,)> = sqlx::query_as(
+                    r#"SELECT json_build_object(
+                        'key', key, 'value', value, 'updated_at', EXTRACT(EPOCH FROM updated_at) * 1000, 'version', version,
+                        'deleted_at', deleted_at, 'user_id', user_id
+                    )::text FROM settings WHERE user_id = $1 AND key = $2 AND version = $3 LIMIT 1"#,
+                )
+                .bind(user_id)
+                .bind(&change.key)
+                .bind(next_ver)
+                .fetch_optional(&mut **tx)
+                .await?;
+                if let Some((snapshot_json,)) = row {
+                    insert_history_pg_tx(
+                        tx,
+                        user_id,
+                        "settings",
+                        &change.key,
+                        next_ver,
+                        next_ver,
+                        "delete_setting",
+                        "delete",
+                        changed_at,
+                        &snapshot_json,
+                    )
+                    .await?;
+                }
             } else if let Some(data) = &change.data {
                 let v: serde_json::Value = serde_json::from_str(data)?;
                 let value = v["value"].as_str().unwrap_or("");
                 let next_ver = bump_version_pg(&mut **tx).await?;
+                let changed_at = now_ms();
                 sqlx::query(
                     r#"INSERT INTO settings (user_id, key, value, updated_at, version, deleted_at)
                      VALUES ($1, $2, $3, NOW(), $4, NULL)
@@ -201,11 +413,34 @@ async fn apply_remote_change_tx(
                 .bind(next_ver)
                 .execute(&mut **tx)
                 .await?;
+                let snapshot_json = serde_json::json!({
+                    "key": change.key,
+                    "value": value,
+                    "updated_at": changed_at,
+                    "version": next_ver,
+                    "deleted_at": serde_json::Value::Null,
+                    "user_id": user_id,
+                })
+                .to_string();
+                insert_history_pg_tx(
+                    tx,
+                    user_id,
+                    "settings",
+                    &change.key,
+                    next_ver,
+                    next_ver,
+                    "put_setting",
+                    "upsert",
+                    changed_at,
+                    &snapshot_json,
+                )
+                .await?;
             }
         }
         "blobs" => {
             if change.deleted_at.is_some() {
                 let next_ver = bump_version_pg(&mut **tx).await?;
+                let changed_at = now_ms();
                 sqlx::query(
                     "UPDATE blobs SET deleted_at = NOW()::text, version = $1
                      WHERE owner = $2 AND id = $3 AND deleted_at IS NULL",
@@ -215,6 +450,33 @@ async fn apply_remote_change_tx(
                 .bind(&change.key)
                 .execute(&mut **tx)
                 .await?;
+                let row: Option<(String,)> = sqlx::query_as(
+                    r#"SELECT json_build_object(
+                        'id', id, 'owner', owner, 'filename', filename, 'mime_type', mime_type,
+                        'size', size, 'created_at', EXTRACT(EPOCH FROM created_at) * 1000,
+                        'version', version, 'deleted_at', deleted_at
+                    )::text FROM blobs WHERE owner = $1 AND id = $2 AND version = $3 LIMIT 1"#,
+                )
+                .bind(user_id)
+                .bind(&change.key)
+                .bind(next_ver)
+                .fetch_optional(&mut **tx)
+                .await?;
+                if let Some((snapshot_json,)) = row {
+                    insert_history_pg_tx(
+                        tx,
+                        user_id,
+                        "blobs",
+                        &change.key,
+                        next_ver,
+                        next_ver,
+                        "delete_blob",
+                        "delete",
+                        changed_at,
+                        &snapshot_json,
+                    )
+                    .await?;
+                }
             }
         }
         _ => {}
@@ -226,8 +488,8 @@ pub struct PostgresProvider {
     pool: PgPool,
 }
 
-/// Schema migrations: 1=initial, 2=blobs, 3=sync columns+version_seq, 4=tasks+stream_entries, 5=stream updated_at, 6=align, 7=tasks.role_ids, 12=stream thread_meta
-const CURRENT_SCHEMA_VERSION: i64 = 12;
+/// Schema migrations: 1=initial, 2=blobs, 3=sync columns+version_seq, 4=tasks+stream_entries, 5=stream updated_at, 6=align, 7=tasks.role_ids, 12=stream thread_meta, 13=history tables
+const CURRENT_SCHEMA_VERSION: i64 = 13;
 
 impl PostgresProvider {
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
@@ -605,6 +867,71 @@ impl PostgresProvider {
                 .await?;
         }
 
+        if current_version < 13 {
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS audit_events (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    entity_type TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    entity_version BIGINT NOT NULL,
+                    global_version BIGINT NOT NULL,
+                    action TEXT NOT NULL,
+                    source_kind TEXT NOT NULL,
+                    actor_type TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    occurred_at BIGINT NOT NULL,
+                    summary_json TEXT
+                )",
+            )
+            .execute(&pool)
+            .await?;
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS entity_revisions (
+                    id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    entity_type TEXT NOT NULL,
+                    entity_id TEXT NOT NULL,
+                    entity_version BIGINT NOT NULL,
+                    global_version BIGINT NOT NULL,
+                    op TEXT NOT NULL,
+                    changed_at BIGINT NOT NULL,
+                    snapshot_json TEXT NOT NULL
+                )",
+            )
+            .execute(&pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_audit_events_user_time ON audit_events (user_id, occurred_at DESC)",
+            )
+            .execute(&pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events (user_id, entity_type, entity_id, occurred_at DESC)",
+            )
+            .execute(&pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_entity_revisions_user_global ON entity_revisions (user_id, global_version DESC)",
+            )
+            .execute(&pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_entity_revisions_entity ON entity_revisions (user_id, entity_type, entity_id, global_version DESC)",
+            )
+            .execute(&pool)
+            .await?;
+            sqlx::query(
+                "CREATE INDEX IF NOT EXISTS idx_entity_revisions_event ON entity_revisions (event_id)",
+            )
+            .execute(&pool)
+            .await?;
+            sqlx::query("INSERT INTO schema_version (version) VALUES (13) ON CONFLICT DO NOTHING")
+                .execute(&pool)
+                .await?;
+        }
+
         let _ = CURRENT_SCHEMA_VERSION;
         Ok(Self { pool })
     }
@@ -656,82 +983,61 @@ impl DatabaseProvider for PostgresProvider {
     }
 
     async fn upsert_task_json(&self, user_id: &str, json: &str) -> anyhow::Result<()> {
-        let v: serde_json::Value = serde_json::from_str(json)?;
-        let next_ver = bump_version_pg(&self.pool).await?;
-        let updated_at = v["updated_at"].as_i64().unwrap_or(0);
-        sqlx::query(
-            r#"INSERT INTO tasks (
-                user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
-                ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
-                task_type,
-                tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
-                version, deleted_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
-            ON CONFLICT(user_id, id) DO UPDATE SET
-                title=EXCLUDED.title, title_customized=EXCLUDED.title_customized, description=EXCLUDED.description, status=EXCLUDED.status, body=EXCLUDED.body,
-                created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at, completed_at=EXCLUDED.completed_at,
-                ddl=EXCLUDED.ddl, ddl_type=EXCLUDED.ddl_type, planned_at=EXCLUDED.planned_at,
-                role_id=EXCLUDED.role_id, role_ids=EXCLUDED.role_ids, parent_id=EXCLUDED.parent_id, source_stream_id=EXCLUDED.source_stream_id,
-                priority=EXCLUDED.priority, promoted=EXCLUDED.promoted, phase=EXCLUDED.phase, kanban_column=EXCLUDED.kanban_column,
-                task_type=EXCLUDED.task_type,
-                tags=EXCLUDED.tags, subtask_ids=EXCLUDED.subtask_ids, resources=EXCLUDED.resources,
-                reminders=EXCLUDED.reminders, submissions=EXCLUDED.submissions, postponements=EXCLUDED.postponements,
-                status_history=EXCLUDED.status_history, progress_logs=EXCLUDED.progress_logs,
-                version=EXCLUDED.version, deleted_at=EXCLUDED.deleted_at"#,
-        )
-        .bind(user_id)
-        .bind(v["id"].as_str().unwrap_or(""))
-        .bind(v["title"].as_str().unwrap_or(""))
-        .bind(v["title_customized"].as_i64().unwrap_or(0))
-        .bind(v["description"].as_str())
-        .bind(v["status"].as_str().unwrap_or("inbox"))
-        .bind(v["body"].as_str().unwrap_or(""))
-        .bind(v["created_at"].as_i64().unwrap_or(0))
-        .bind(updated_at)
-        .bind(v["completed_at"].as_i64())
-        .bind(v["ddl"].as_i64())
-        .bind(v["ddl_type"].as_str())
-        .bind(v["planned_at"].as_i64())
-        .bind(v["role_id"].as_str())
-        .bind(v["role_ids"].as_str())
-        .bind(v["parent_id"].as_str())
-        .bind(v["source_stream_id"].as_str())
-        .bind(v["priority"].as_f64())
-        .bind(v["promoted"].as_i64())
-        .bind(v["phase"].as_str())
-        .bind(v["kanban_column"].as_str())
-        .bind(v["task_type"].as_str())
-        .bind(v["tags"].as_str().unwrap_or("[]"))
-        .bind(v["subtask_ids"].as_str().unwrap_or("[]"))
-        .bind(v["resources"].as_str().unwrap_or("[]"))
-        .bind(v["reminders"].as_str().unwrap_or("[]"))
-        .bind(v["submissions"].as_str().unwrap_or("[]"))
-        .bind(v["postponements"].as_str().unwrap_or("[]"))
-        .bind(v["status_history"].as_str().unwrap_or("[]"))
-        .bind(v["progress_logs"].as_str().unwrap_or("[]"))
-        .bind(next_ver)
-        .bind(None::<String>)
-        .execute(&self.pool)
-        .await?;
+        let mut tx = self.pool.begin().await?;
+        upsert_task_json_tx(&mut tx, user_id, json).await?;
+        tx.commit().await?;
         Ok(())
     }
 
     async fn delete_task_row(&self, user_id: &str, id: &str) -> anyhow::Result<()> {
-        let next_ver = bump_version_pg(&self.pool).await?;
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
+        let mut tx = self.pool.begin().await?;
+        let next_ver = bump_version_pg(&mut *tx).await?;
+        let changed_at = now_ms();
         sqlx::query(
             "UPDATE tasks SET deleted_at = NOW()::text, updated_at = $1, version = $2
              WHERE user_id = $3 AND id = $4 AND deleted_at IS NULL",
         )
-        .bind(now_ms)
+        .bind(changed_at)
         .bind(next_ver)
         .bind(user_id)
         .bind(id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        let row: Option<(String,)> = sqlx::query_as(
+            r#"SELECT json_build_object(
+                'id', id, 'title', title, 'title_customized', title_customized, 'description', description, 'status', status, 'body', body,
+                'created_at', created_at, 'updated_at', updated_at, 'completed_at', completed_at,
+                'ddl', ddl, 'ddl_type', ddl_type, 'planned_at', planned_at,
+                'role_id', role_id, 'role_ids', role_ids, 'parent_id', parent_id, 'source_stream_id', source_stream_id,
+                'priority', priority, 'promoted', promoted, 'phase', phase, 'kanban_column', kanban_column,
+                'task_type', task_type,
+                'tags', tags, 'subtask_ids', subtask_ids, 'resources', resources,
+                'reminders', reminders, 'submissions', submissions, 'postponements', postponements,
+                'status_history', status_history, 'progress_logs', progress_logs,
+                'version', version, 'deleted_at', deleted_at, 'user_id', user_id
+            )::text FROM tasks WHERE user_id = $1 AND id = $2 AND version = $3 LIMIT 1"#,
+        )
+        .bind(user_id)
+        .bind(id)
+        .bind(next_ver)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((snapshot_json,)) = row {
+            insert_history_pg_tx(
+                &mut tx,
+                user_id,
+                "tasks",
+                id,
+                next_ver,
+                next_ver,
+                "delete_task",
+                "delete",
+                changed_at,
+                &snapshot_json,
+            )
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -834,48 +1140,16 @@ impl DatabaseProvider for PostgresProvider {
     }
 
     async fn upsert_stream_entry_json(&self, user_id: &str, json: &str) -> anyhow::Result<()> {
-        let v: serde_json::Value = serde_json::from_str(json)?;
-        let next_ver = bump_version_pg(&self.pool).await?;
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
-        let updated_at = v
-            .get("updated_at")
-            .and_then(|x| x.as_i64())
-            .unwrap_or(now_ms);
-        sqlx::query(
-            r#"INSERT INTO stream_entries (
-                user_id, id, content, entry_type, "timestamp", date_key, role_id, extracted_task_id,
-                tags, attachments, thread_meta, version, deleted_at, updated_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-            ON CONFLICT(user_id, id) DO UPDATE SET
-                content=EXCLUDED.content, entry_type=EXCLUDED.entry_type, "timestamp"=EXCLUDED."timestamp",
-                date_key=EXCLUDED.date_key, role_id=EXCLUDED.role_id, extracted_task_id=EXCLUDED.extracted_task_id,
-                tags=EXCLUDED.tags, attachments=EXCLUDED.attachments, thread_meta=EXCLUDED.thread_meta, version=EXCLUDED.version, deleted_at=EXCLUDED.deleted_at,
-                updated_at=EXCLUDED.updated_at"#,
-        )
-        .bind(user_id)
-        .bind(v["id"].as_str().unwrap_or(""))
-        .bind(v["content"].as_str().unwrap_or(""))
-        .bind(v["entry_type"].as_str().unwrap_or("spark"))
-        .bind(v["timestamp"].as_i64().unwrap_or(0))
-        .bind(v["date_key"].as_str().unwrap_or(""))
-        .bind(v["role_id"].as_str())
-        .bind(v["extracted_task_id"].as_str())
-        .bind(v["tags"].as_str().unwrap_or("[]"))
-        .bind(v["attachments"].as_str().unwrap_or("[]"))
-        .bind(v["thread_meta"].as_str())
-        .bind(next_ver)
-        .bind(None::<String>)
-        .bind(updated_at)
-        .execute(&self.pool)
-        .await?;
+        let mut tx = self.pool.begin().await?;
+        upsert_stream_entry_json_tx(&mut tx, user_id, json).await?;
+        tx.commit().await?;
         Ok(())
     }
 
     async fn delete_stream_entry_row(&self, user_id: &str, id: &str) -> anyhow::Result<()> {
-        let next_ver = bump_version_pg(&self.pool).await?;
+        let mut tx = self.pool.begin().await?;
+        let next_ver = bump_version_pg(&mut *tx).await?;
+        let changed_at = now_ms();
         sqlx::query(
             "UPDATE stream_entries SET deleted_at = NOW()::text, version = $1
              WHERE user_id = $2 AND id = $3 AND deleted_at IS NULL",
@@ -883,8 +1157,38 @@ impl DatabaseProvider for PostgresProvider {
         .bind(next_ver)
         .bind(user_id)
         .bind(id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        let row: Option<(String,)> = sqlx::query_as(
+            r#"SELECT json_build_object(
+                'id', id, 'content', content, 'entry_type', entry_type, 'timestamp', "timestamp",
+                'date_key', date_key, 'role_id', role_id, 'extracted_task_id', extracted_task_id,
+                'tags', tags, 'attachments', attachments, 'thread_meta', thread_meta,
+                'version', version, 'deleted_at', deleted_at, 'updated_at', COALESCE(updated_at, "timestamp"),
+                'user_id', user_id
+            )::text FROM stream_entries WHERE user_id = $1 AND id = $2 AND version = $3 LIMIT 1"#,
+        )
+        .bind(user_id)
+        .bind(id)
+        .bind(next_ver)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((snapshot_json,)) = row {
+            insert_history_pg_tx(
+                &mut tx,
+                user_id,
+                "stream_entries",
+                id,
+                next_ver,
+                next_ver,
+                "delete_stream_entry",
+                "delete",
+                changed_at,
+                &snapshot_json,
+            )
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -1179,7 +1483,9 @@ impl DatabaseProvider for PostgresProvider {
     }
 
     async fn put_setting(&self, user_id: &str, key: &str, value: &str) -> anyhow::Result<()> {
-        let next_ver = bump_version_pg(&self.pool).await?;
+        let mut tx = self.pool.begin().await?;
+        let next_ver = bump_version_pg(&mut *tx).await?;
+        let changed_at = now_ms();
         sqlx::query(
             "INSERT INTO settings (user_id, key, value, updated_at, version, deleted_at)
              VALUES ($1, $2, $3, NOW(), $4, NULL)
@@ -1193,13 +1499,38 @@ impl DatabaseProvider for PostgresProvider {
         .bind(key)
         .bind(value)
         .bind(next_ver)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        let snapshot_json = serde_json::json!({
+            "key": key,
+            "value": value,
+            "updated_at": changed_at,
+            "version": next_ver,
+            "deleted_at": serde_json::Value::Null,
+            "user_id": user_id,
+        })
+        .to_string();
+        insert_history_pg_tx(
+            &mut tx,
+            user_id,
+            "settings",
+            key,
+            next_ver,
+            next_ver,
+            "put_setting",
+            "upsert",
+            changed_at,
+            &snapshot_json,
+        )
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 
     async fn delete_setting(&self, user_id: &str, key: &str) -> anyhow::Result<()> {
-        let next_ver = bump_version_pg(&self.pool).await?;
+        let mut tx = self.pool.begin().await?;
+        let next_ver = bump_version_pg(&mut *tx).await?;
+        let changed_at = now_ms();
         sqlx::query(
             "UPDATE settings SET deleted_at = NOW()::text, updated_at = NOW(), version = $1
              WHERE user_id = $2 AND key = $3 AND deleted_at IS NULL",
@@ -1207,8 +1538,35 @@ impl DatabaseProvider for PostgresProvider {
         .bind(next_ver)
         .bind(user_id)
         .bind(key)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        let row: Option<(String,)> = sqlx::query_as(
+            r#"SELECT json_build_object(
+                'key', key, 'value', value, 'updated_at', EXTRACT(EPOCH FROM updated_at) * 1000, 'version', version,
+                'deleted_at', deleted_at, 'user_id', user_id
+            )::text FROM settings WHERE user_id = $1 AND key = $2 AND version = $3 LIMIT 1"#,
+        )
+        .bind(user_id)
+        .bind(key)
+        .bind(next_ver)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some((snapshot_json,)) = row {
+            insert_history_pg_tx(
+                &mut tx,
+                user_id,
+                "settings",
+                key,
+                next_ver,
+                next_ver,
+                "delete_setting",
+                "delete",
+                changed_at,
+                &snapshot_json,
+            )
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -1230,7 +1588,9 @@ impl DatabaseProvider for PostgresProvider {
         mime_type: &str,
         size: i64,
     ) -> anyhow::Result<()> {
-        let next_ver = bump_version_pg(&self.pool).await?;
+        let mut tx = self.pool.begin().await?;
+        let next_ver = bump_version_pg(&mut *tx).await?;
+        let changed_at = now_ms();
         sqlx::query(
             "INSERT INTO blobs (id, owner, filename, mime_type, size, version, deleted_at)
              VALUES ($1, $2, $3, $4, $5, $6, NULL)
@@ -1244,8 +1604,33 @@ impl DatabaseProvider for PostgresProvider {
         .bind(mime_type)
         .bind(size)
         .bind(next_ver)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        let snapshot_json = serde_json::json!({
+            "id": id,
+            "owner": owner,
+            "filename": filename,
+            "mime_type": mime_type,
+            "size": size,
+            "created_at": changed_at,
+            "version": next_ver,
+            "deleted_at": serde_json::Value::Null,
+        })
+        .to_string();
+        insert_history_pg_tx(
+            &mut tx,
+            owner,
+            "blobs",
+            id,
+            next_ver,
+            next_ver,
+            "put_blob_meta",
+            "upsert",
+            changed_at,
+            &snapshot_json,
+        )
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -1269,15 +1654,56 @@ impl DatabaseProvider for PostgresProvider {
     }
 
     async fn delete_blob_meta(&self, id: &str) -> anyhow::Result<()> {
-        let next_ver = bump_version_pg(&self.pool).await?;
+        let mut tx = self.pool.begin().await?;
+        let row: Option<(String,)> = sqlx::query_as(
+            r#"SELECT json_build_object(
+                'id', id, 'owner', owner, 'filename', filename, 'mime_type', mime_type,
+                'size', size, 'created_at', EXTRACT(EPOCH FROM created_at) * 1000,
+                'version', version, 'deleted_at', deleted_at
+            )::text FROM blobs WHERE id = $1 AND deleted_at IS NULL LIMIT 1"#,
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((mut snapshot_json,)) = row else {
+            tx.commit().await?;
+            return Ok(());
+        };
+        let owner = serde_json::from_str::<serde_json::Value>(&snapshot_json)
+            .ok()
+            .and_then(|v| v.get("owner").and_then(|x| x.as_str()).map(|s| s.to_string()))
+            .unwrap_or_default();
+        let next_ver = bump_version_pg(&mut *tx).await?;
+        let changed_at = now_ms();
         sqlx::query(
             "UPDATE blobs SET deleted_at = NOW()::text, version = $1
              WHERE id = $2 AND deleted_at IS NULL",
         )
         .bind(next_ver)
         .bind(id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        if let Ok(mut snapshot_value) = serde_json::from_str::<serde_json::Value>(&snapshot_json) {
+            if let Some(obj) = snapshot_value.as_object_mut() {
+                obj.insert("version".into(), serde_json::json!(next_ver));
+                obj.insert("deleted_at".into(), serde_json::json!(changed_at.to_string()));
+            }
+            snapshot_json = snapshot_value.to_string();
+        }
+        insert_history_pg_tx(
+            &mut tx,
+            &owner,
+            "blobs",
+            id,
+            next_ver,
+            next_ver,
+            "delete_blob",
+            "delete",
+            changed_at,
+            &snapshot_json,
+        )
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -1474,6 +1900,125 @@ impl DatabaseProvider for PostgresProvider {
         }
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn list_entity_revisions(
+        &self,
+        user_id: &str,
+        entity_type: &str,
+        entity_id: &str,
+        limit: i64,
+    ) -> anyhow::Result<Vec<EntityRevisionRecord>> {
+        let lim = limit.clamp(1, 500);
+        let rows: Vec<(String, String, String, String, String, i64, i64, String, i64, String)> =
+            sqlx::query_as(
+                "SELECT id, event_id, user_id, entity_type, entity_id, entity_version, global_version, op, changed_at, snapshot_json
+                 FROM entity_revisions
+                 WHERE user_id = $1 AND entity_type = $2 AND entity_id = $3
+                 ORDER BY global_version DESC LIMIT $4",
+            )
+            .bind(user_id)
+            .bind(entity_type)
+            .bind(entity_id)
+            .bind(lim)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| EntityRevisionRecord {
+                id: r.0,
+                event_id: r.1,
+                user_id: r.2,
+                entity_type: r.3,
+                entity_id: r.4,
+                entity_version: r.5,
+                global_version: r.6,
+                op: r.7,
+                changed_at: r.8,
+                snapshot_json: r.9,
+            })
+            .collect())
+    }
+
+    async fn list_audit_events(
+        &self,
+        user_id: &str,
+        limit: i64,
+        entity_type: Option<&str>,
+        entity_id: Option<&str>,
+    ) -> anyhow::Result<Vec<AuditEventRecord>> {
+        let lim = limit.clamp(1, 500);
+        let rows: Vec<(
+            String,
+            String,
+            String,
+            String,
+            i64,
+            i64,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            Option<String>,
+        )> = match (entity_type, entity_id) {
+            (Some(kind), Some(id)) => {
+                sqlx::query_as(
+                    "SELECT id, user_id, entity_type, entity_id, entity_version, global_version, action, source_kind, actor_type, actor_id, occurred_at, summary_json
+                     FROM audit_events
+                     WHERE user_id = $1 AND entity_type = $2 AND entity_id = $3
+                     ORDER BY occurred_at DESC LIMIT $4",
+                )
+                .bind(user_id)
+                .bind(kind)
+                .bind(id)
+                .bind(lim)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            (Some(kind), None) => {
+                sqlx::query_as(
+                    "SELECT id, user_id, entity_type, entity_id, entity_version, global_version, action, source_kind, actor_type, actor_id, occurred_at, summary_json
+                     FROM audit_events
+                     WHERE user_id = $1 AND entity_type = $2
+                     ORDER BY occurred_at DESC LIMIT $3",
+                )
+                .bind(user_id)
+                .bind(kind)
+                .bind(lim)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            _ => {
+                sqlx::query_as(
+                    "SELECT id, user_id, entity_type, entity_id, entity_version, global_version, action, source_kind, actor_type, actor_id, occurred_at, summary_json
+                     FROM audit_events
+                     WHERE user_id = $1
+                     ORDER BY occurred_at DESC LIMIT $2",
+                )
+                .bind(user_id)
+                .bind(lim)
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+        Ok(rows
+            .into_iter()
+            .map(|r| AuditEventRecord {
+                id: r.0,
+                user_id: r.1,
+                entity_type: r.2,
+                entity_id: r.3,
+                entity_version: r.4,
+                global_version: r.5,
+                action: r.6,
+                source_kind: r.7,
+                actor_type: r.8,
+                actor_id: r.9,
+                occurred_at: r.10,
+                summary_json: r.11,
+            })
+            .collect())
     }
 
     async fn close(&self) -> anyhow::Result<()> {
