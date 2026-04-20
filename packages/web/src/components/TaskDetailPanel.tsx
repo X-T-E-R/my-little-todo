@@ -64,6 +64,7 @@ import { MilkdownBodyEditor } from './MilkdownBodyEditor';
 import { ProgressRing } from './ProgressRing';
 import { RolePillMulti } from './RolePickerPopover';
 import { SmartDatePicker } from './SmartDatePicker';
+import { TaskVersionHistorySection } from './TaskVersionHistorySection';
 import type { RichMarkdownEditorHandle } from './RichMarkdownEditor';
 
 const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
@@ -1509,6 +1510,11 @@ export function TaskDetailPanel() {
                     </div>
                   </div>
                 )}
+
+                <TaskVersionHistorySection
+                  taskId={task.id}
+                  revisionSeed={task.updatedAt.getTime()}
+                />
 
                 {/* Source spark link */}
                 {(task.sourceStreamId ?? task.id) &&

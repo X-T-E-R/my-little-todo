@@ -184,6 +184,47 @@ The first implementation passed write/read smoke tests, but exposed three practi
 - Add redacted settings snapshot policy in both local and server write paths
 - Verify with fresh HTTP smoke tests for create/delete/history readback
 
+## Phase 3 Remaining Work
+
+The storage layer is now usable, but the product still lacks a readable history experience. The next pass should focus on surfacing this capability in the task UI before expanding to restore or global admin views.
+
+### UI priorities
+
+- Show version history directly inside `TaskDetailPanel`
+- Show audit context next to revisions instead of forcing raw JSON inspection
+- Compute diffs on demand from adjacent snapshots instead of persisting patch rows
+- Keep the first UI limited to tasks; settings/blobs/work-thread can follow later
+
+### Phase 3 implementation scope
+
+- Add a small task history UI helper for parsing snapshots and computing readable diffs
+- Add a dedicated `TaskVersionHistorySection` component
+- Load both revision rows and audit rows from `DataStore`
+- Surface:
+  - operation type
+  - timestamp
+  - source / actor
+  - correlated `group_id`
+  - changed-field summary
+  - expandable before/after detail
+- Add targeted unit tests for diff formatting helpers
+
+### Phase 3 execution status
+
+- [x] Add task history UI helper and diff tests
+- [x] Add `TaskVersionHistorySection`
+- [x] Load task revisions + audit events from `DataStore`
+- [x] Show changed-field summary, source, actor, `group_id`, and expandable before/after detail
+- [ ] Add UI interaction-level automated test coverage
+- [ ] Add global history browser outside task detail
+
+### Still postponed after Phase 3
+
+- Restore / revert action
+- Global history browser in Settings/Admin
+- Retention / compaction controls
+- Richer `source_kind` attribution across every mutation path
+
 ## Implementation Tasks
 
 ### Task 1: Add shared history types and plan constraints
