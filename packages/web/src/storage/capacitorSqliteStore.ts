@@ -50,6 +50,7 @@ import {
   deserializeWorkThreadEvent,
   serializeWorkThread,
 } from './workThreadStorage';
+import { parseSqliteTimestamp, requireSqliteTimestamp } from './sqliteTimestamp';
 
 type CapDB = {
   execute(statement: string, values?: unknown[]): Promise<{ changes?: { changes?: number } }>;
@@ -497,6 +498,33 @@ async function ensureSchema(db: CapDB): Promise<void> {
         `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (19, ${Date.now()})`,
       );
     }
+    const rowsV19 = await db.query('SELECT version FROM schema_version ORDER BY version DESC LIMIT 1');
+    const verBefore20 =
+      rowsV19.values?.[0]?.version != null ? Number(rowsV19.values[0].version) : 0;
+    if (verBefore20 < 20) {
+      const alterColumns = [
+        'ALTER TABLE tasks ADD COLUMN thread_id TEXT',
+        'ALTER TABLE tasks ADD COLUMN resume_text TEXT',
+        'ALTER TABLE tasks ADD COLUMN pause_json TEXT',
+        "ALTER TABLE work_threads ADD COLUMN body_markdown TEXT NOT NULL DEFAULT ''",
+        'ALTER TABLE work_threads ADD COLUMN resume_text TEXT',
+        'ALTER TABLE work_threads ADD COLUMN pause_json TEXT',
+        "ALTER TABLE work_threads ADD COLUMN blocks_json TEXT NOT NULL DEFAULT '[]'",
+      ];
+      for (const sql of alterColumns) {
+        try {
+          await db.execute(sql);
+        } catch {
+          /* column may already exist */
+        }
+      }
+      await db.execute(
+        "UPDATE work_threads SET body_markdown = COALESCE(root_markdown, doc_markdown, '') WHERE trim(COALESCE(body_markdown, '')) = ''",
+      );
+      await db.execute(
+        `INSERT OR REPLACE INTO schema_version (version, applied_at) VALUES (20, ${Date.now()})`,
+      );
+    }
   }
 
   for (const sql of CREATE_INDEXES_SQL) {
@@ -663,14 +691,17 @@ function rowToTaskDbRow(r: Record<string, unknown>): TaskDbRow {
     description: r.description != null ? String(r.description) : null,
     status: String(r.status),
     body: String(r.body),
-    created_at: Number(r.created_at),
-    updated_at: Number(r.updated_at),
-    completed_at: r.completed_at != null ? Number(r.completed_at) : null,
-    ddl: r.ddl != null ? Number(r.ddl) : null,
+    created_at: requireSqliteTimestamp(r.created_at),
+    updated_at: requireSqliteTimestamp(r.updated_at),
+    completed_at: parseSqliteTimestamp(r.completed_at),
+    ddl: parseSqliteTimestamp(r.ddl),
     ddl_type: r.ddl_type != null ? String(r.ddl_type) : null,
-    planned_at: r.planned_at != null ? Number(r.planned_at) : null,
+    planned_at: parseSqliteTimestamp(r.planned_at),
     role_id: r.role_id != null ? String(r.role_id) : null,
     role_ids: r.role_ids != null ? String(r.role_ids) : null,
+    thread_id: r.thread_id != null ? String(r.thread_id) : null,
+    resume_text: r.resume_text != null ? String(r.resume_text) : null,
+    pause_json: r.pause_json != null ? String(r.pause_json) : null,
     parent_id: r.parent_id != null ? String(r.parent_id) : null,
     source_stream_id: r.source_stream_id != null ? String(r.source_stream_id) : null,
     priority: r.priority != null ? Number(r.priority) : null,
@@ -687,7 +718,7 @@ function rowToTaskDbRow(r: Record<string, unknown>): TaskDbRow {
     status_history: String(r.status_history ?? '[]'),
     progress_logs: String(r.progress_logs ?? '[]'),
     version: Number(r.version ?? 0),
-    deleted_at: r.deleted_at != null ? Number(r.deleted_at) : null,
+    deleted_at: parseSqliteTimestamp(r.deleted_at),
   };
 }
 
@@ -696,7 +727,7 @@ function rowToStreamDbRow(r: Record<string, unknown>): StreamEntryDbRow {
     id: String(r.id),
     content: String(r.content),
     entry_type: String(r.entry_type),
-    timestamp: Number(r.timestamp),
+    timestamp: requireSqliteTimestamp(r.timestamp),
     date_key: String(r.date_key),
     role_id: r.role_id != null ? String(r.role_id) : null,
     extracted_task_id: r.extracted_task_id != null ? String(r.extracted_task_id) : null,
@@ -704,9 +735,11 @@ function rowToStreamDbRow(r: Record<string, unknown>): StreamEntryDbRow {
     attachments: String(r.attachments ?? '[]'),
     thread_meta: r.thread_meta != null ? String(r.thread_meta) : null,
     version: Number(r.version ?? 0),
-    deleted_at: r.deleted_at != null ? Number(r.deleted_at) : null,
+    deleted_at: parseSqliteTimestamp(r.deleted_at),
     updated_at:
-      r.updated_at != null && r.updated_at !== undefined ? Number(r.updated_at) : undefined,
+      r.updated_at != null && r.updated_at !== undefined
+        ? parseSqliteTimestamp(r.updated_at) ?? undefined
+        : undefined,
   };
 }
 
@@ -747,6 +780,27 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
   await ensureSchema(db);
 
   const now = () => Date.now();
+  const getTaskById = async (id: string): Promise<Task | null> => {
+    const rows = await db.query('SELECT * FROM tasks WHERE user_id = ? AND id = ? AND deleted_at IS NULL', [
+      LOCAL_DESKTOP_USER_ID,
+      id,
+    ]);
+    if (!rows.values?.length) return null;
+    const taskRow = rowToTaskDbRow(rows.values[0]);
+    const streamIds = [...new Set([taskRow.id, resolvedStreamEntryId(taskRow)])];
+    const placeholders = streamIds.map(() => '?').join(', ');
+    const streamRows = await db.query(
+      `SELECT * FROM stream_entries WHERE user_id = ? AND id IN (${placeholders}) AND deleted_at IS NULL`,
+      [LOCAL_DESKTOP_USER_ID, ...streamIds],
+    );
+    const streamRowsById = new Map(
+      (streamRows.values ?? []).map((r) => {
+        const row = rowToStreamDbRow(r);
+        return [row.id, row] as const;
+      }),
+    );
+    return taskFromJoinedRows(taskRow, streamRowsById);
+  };
   const deleteTaskFacet = async (id: string): Promise<void> => {
     const ts = now();
     const v = await bumpVersion(db);
@@ -778,25 +832,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
     },
 
     async getTask(id: string): Promise<Task | null> {
-      const rows = await db.query('SELECT * FROM tasks WHERE user_id = ? AND id = ? AND deleted_at IS NULL', [
-        LOCAL_DESKTOP_USER_ID,
-        id,
-      ]);
-      if (!rows.values?.length) return null;
-      const taskRow = rowToTaskDbRow(rows.values[0]);
-      const streamIds = [...new Set([taskRow.id, resolvedStreamEntryId(taskRow)])];
-      const placeholders = streamIds.map(() => '?').join(', ');
-      const streamRows = await db.query(
-        `SELECT * FROM stream_entries WHERE user_id = ? AND id IN (${placeholders}) AND deleted_at IS NULL`,
-        [LOCAL_DESKTOP_USER_ID, ...streamIds],
-      );
-      const streamRowsById = new Map(
-        (streamRows.values ?? []).map((r) => {
-          const row = rowToStreamDbRow(r);
-          return [row.id, row] as const;
-        }),
-      );
-      return taskFromJoinedRows(taskRow, streamRowsById);
+      return getTaskById(id);
     },
 
     async putTask(task: Task): Promise<void> {
@@ -864,16 +900,17 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       await db.execute(
         `INSERT INTO tasks (
           user_id, id, title, title_customized, description, status, body, created_at, updated_at, completed_at,
-          ddl, ddl_type, planned_at, role_id, role_ids, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
+          ddl, ddl_type, planned_at, role_id, role_ids, thread_id, resume_text, pause_json, parent_id, source_stream_id, priority, promoted, phase, kanban_column,
           task_type,
           tags, subtask_ids, resources, reminders, submissions, postponements, status_history, progress_logs,
           version, deleted_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(user_id, id) DO UPDATE SET
           title=excluded.title, title_customized=excluded.title_customized, description=excluded.description, status=excluded.status, body=excluded.body,
           created_at=excluded.created_at, updated_at=excluded.updated_at, completed_at=excluded.completed_at,
           ddl=excluded.ddl, ddl_type=excluded.ddl_type, planned_at=excluded.planned_at,
-          role_id=excluded.role_id, role_ids=excluded.role_ids, parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
+          role_id=excluded.role_id, role_ids=excluded.role_ids, thread_id=excluded.thread_id, resume_text=excluded.resume_text, pause_json=excluded.pause_json,
+          parent_id=excluded.parent_id, source_stream_id=excluded.source_stream_id,
           priority=excluded.priority, promoted=excluded.promoted, phase=excluded.phase, kanban_column=excluded.kanban_column,
           task_type=excluded.task_type,
           tags=excluded.tags, subtask_ids=excluded.subtask_ids, resources=excluded.resources,
@@ -896,6 +933,9 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
           row.planned_at,
           null,
           row.role_ids ?? JSON.stringify(normalizeTaskRoleIds(task, canonicalEntry.roleId)),
+          row.thread_id,
+          row.resume_text,
+          row.pause_json,
           row.parent_id,
           null,
           row.priority,
@@ -930,7 +970,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
 
     async deleteTask(id: string): Promise<void> {
       const groupId = createHistoryGroupId();
-      const currentTask = await this.getTask(id);
+      const currentTask = await getTaskById(id);
       const currentStreamRows = await db.query(
         'SELECT * FROM stream_entries WHERE user_id = ? AND id = ? AND deleted_at IS NULL LIMIT 1',
         [LOCAL_DESKTOP_USER_ID, id],
@@ -998,6 +1038,9 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
             ddl: null,
             ddl_type: null,
             planned_at: null,
+            thread_id: null,
+            resume_text: null,
+            pause_json: null,
             role_ids: currentStream.role_id ? [currentStream.role_id] : [],
             primary_role: currentStream.role_id ?? null,
             tags: JSON.parse(currentStream.tags),
@@ -1175,7 +1218,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
 
     async deleteStreamEntry(id: string): Promise<void> {
       const groupId = createHistoryGroupId();
-      const currentTask = await this.getTask(id);
+      const currentTask = await getTaskById(id);
       await deleteTaskFacet(id);
       const ts = now();
       const v = await bumpVersion(db);
@@ -1465,11 +1508,16 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
       const globalVersion = await bumpVersion(db);
       await db.execute(
         `INSERT INTO work_threads (
-          id, title, mission, status, lane, role_id, root_markdown, exploration_markdown, doc_markdown, context_items, intents, spark_containers, next_actions,
+          id, title, body_markdown, resume_text, pause_json, blocks_json,
+          mission, status, lane, role_id, root_markdown, exploration_markdown, doc_markdown, context_items, intents, spark_containers, next_actions,
           resume_card, working_set, waiting_for, interrupts, exploration_blocks, inline_anchors, scheduler_meta, sync_meta, suggestions, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           title=excluded.title,
+          body_markdown=excluded.body_markdown,
+          resume_text=excluded.resume_text,
+          pause_json=excluded.pause_json,
+          blocks_json=excluded.blocks_json,
           mission=excluded.mission,
           status=excluded.status,
           lane=excluded.lane,
@@ -1494,6 +1542,10 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
         [
           row.id,
           row.title,
+          row.body_markdown,
+          row.resume_text,
+          row.pause_json,
+          row.blocks_json,
           row.mission,
           row.status,
           row.lane,
@@ -1707,8 +1759,8 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
         for (const r of settingRows.values) {
           const key = String(r.key);
           const version = Number(r.version);
-          const updatedAt = Number(r.updated_at);
-          const deletedAt = r.deleted_at != null ? Number(r.deleted_at) : null;
+          const updatedAt = requireSqliteTimestamp(r.updated_at);
+          const deletedAt = parseSqliteTimestamp(r.deleted_at);
           out.push({
             table: 'settings',
             key,
@@ -1737,13 +1789,13 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
         for (const r of blobRows.values) {
           const bid = String(r.id);
           const version = Number(r.version);
-          const deletedAt = r.deleted_at != null ? Number(r.deleted_at) : null;
+          const deletedAt = parseSqliteTimestamp(r.deleted_at);
           const meta = {
             id: bid,
             filename: String(r.filename),
             mime_type: String(r.mime_type),
             size: Number(r.size),
-            created_at: Number(r.created_at),
+            created_at: requireSqliteTimestamp(r.created_at),
             version,
             deleted_at: deletedAt,
           };
@@ -1752,7 +1804,7 @@ export async function createCapacitorSqliteDataStore(): Promise<DataStore> {
             key: bid,
             data: deletedAt != null ? null : JSON.stringify(meta),
             version,
-            updatedAt: Number(r.created_at),
+            updatedAt: requireSqliteTimestamp(r.created_at),
             deletedAt,
           });
         }

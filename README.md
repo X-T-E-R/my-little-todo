@@ -1,10 +1,15 @@
 # My Little Todo
 
+![My Little Todo banner](docs/brand/banner-en.svg)
+
+> Move, don't just list.
+>
 > Not a task manager — your external execution system.
 
 Traditional todo apps are "ledgers" that faithfully record your debts. My Little Todo is a "coach" — it pushes you forward, then watches you run.
 
 [中文文档](README-CN.md)
+[Brand Assets](docs/brand/README.md)
 
 ## Features
 
@@ -28,6 +33,8 @@ This repository is still in a pre-release skeleton refactor stage for extensions
 - freeze auth/sync/MCP scope instead of turning them into separate platforms
 
 See [docs/architecture/03-host-plugin-platform.md](docs/architecture/03-host-plugin-platform.md).
+
+For runtime data version history and audit logging, see [docs/architecture/05-version-history-and-audit.md](docs/architecture/05-version-history-and-audit.md).
 
 Stable release scope:
 

@@ -16,12 +16,15 @@ const nativeDriverPath = path.join(
   'tauri-webdriver',
   process.platform === 'win32' ? 'msedgedriver.exe' : 'msedgedriver',
 );
-const applicationPath = path.join(
+const defaultApplicationPath = path.join(
   repoRoot,
   'target',
   'debug',
   process.platform === 'win32' ? 'my-little-todo.exe' : 'my-little-todo',
 );
+const applicationPath = process.env.MLT_TAURI_E2E_APPLICATION
+  ? path.resolve(process.env.MLT_TAURI_E2E_APPLICATION)
+  : defaultApplicationPath;
 const tauriE2eDataDir = path.join(
   repoRoot,
   '.cache',
@@ -29,6 +32,9 @@ const tauriE2eDataDir = path.join(
   'appdata',
   `run-${Date.now()}-${process.pid}`,
 );
+const tauriE2eSeedDir = process.env.MLT_TAURI_E2E_SEED_DIR
+  ? path.resolve(process.env.MLT_TAURI_E2E_SEED_DIR)
+  : null;
 
 let tauriDriverProcess;
 
@@ -63,6 +69,15 @@ exports.config = {
   onPrepare() {
     fs.rmSync(tauriE2eDataDir, { recursive: true, force: true });
     fs.mkdirSync(tauriE2eDataDir, { recursive: true });
+    if (tauriE2eSeedDir) {
+      fs.cpSync(tauriE2eSeedDir, tauriE2eDataDir, {
+        force: true,
+        recursive: true,
+      });
+    }
+    if (process.env.MLT_TAURI_E2E_APPLICATION) {
+      return;
+    }
     const result = spawnSync(
       pnpmCommand,
       ['--filter', '@my-little-todo/web', 'exec', 'tauri', 'build', '--debug', '--no-bundle'],

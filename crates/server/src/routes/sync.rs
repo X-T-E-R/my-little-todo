@@ -4,10 +4,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    providers::traits::ChangeRecord,
-    AppState,
-};
+use crate::{providers::traits::ChangeRecord, AppState};
 
 #[derive(Deserialize)]
 pub struct SinceParam {

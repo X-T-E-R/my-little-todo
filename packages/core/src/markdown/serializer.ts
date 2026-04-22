@@ -49,6 +49,10 @@ function serializeTaskMetaHeader(task: Task): string[] {
   pushMeta('ddl', task.ddl?.toISOString());
   pushMeta('ddl_type', task.ddlType);
   pushMeta('planned', task.plannedAt?.toISOString());
+  pushMeta('thread_id', task.threadId);
+  pushMeta('resume', task.resume);
+  pushMeta('pause_reason', task.pause?.reason);
+  pushMeta('pause_then', task.pause?.then);
   const rids = taskRoleIds(task);
   if (rids.length > 1) {
     meta.push(`roles: [${rids.map((id) => `"${id}"`).join(', ')}]`);

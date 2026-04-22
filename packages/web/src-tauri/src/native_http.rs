@@ -28,7 +28,14 @@ pub struct NativeHttpResponse {
     pub body_text: String,
 }
 
-type PreparedRequest = (Method, Url, HeaderMap, Option<String>, Option<Vec<u8>>, Duration);
+type PreparedRequest = (
+    Method,
+    Url,
+    HeaderMap,
+    Option<String>,
+    Option<Vec<u8>>,
+    Duration,
+);
 
 fn prepare_request(req: &NativeHttpRequest) -> Result<PreparedRequest, String> {
     let method = req
@@ -69,7 +76,10 @@ pub async fn native_http_request(req: NativeHttpRequest) -> Result<NativeHttpRes
     let (method, url, headers, body_text, body_bytes, timeout) = prepare_request(&req)?;
 
     let client = Client::new();
-    let mut request = client.request(method, url).headers(headers).timeout(timeout);
+    let mut request = client
+        .request(method, url)
+        .headers(headers)
+        .timeout(timeout);
     if let Some(body_bytes) = body_bytes {
         request = request.body(body_bytes);
     } else if let Some(body_text) = body_text {
@@ -131,9 +141,12 @@ mod tests {
             url: "https://example.com/dav".into(),
             method: Some("PROPFIND".into()),
             headers: Some(
-                [("Depth".to_string(), "1".to_string()), ("Content-Type".to_string(), "application/xml".to_string())]
-                    .into_iter()
-                    .collect(),
+                [
+                    ("Depth".to_string(), "1".to_string()),
+                    ("Content-Type".to_string(), "application/xml".to_string()),
+                ]
+                .into_iter()
+                .collect(),
             ),
             body_text: Some("<xml />".into()),
             body_bytes: None,
@@ -145,7 +158,10 @@ mod tests {
 
         assert_eq!(method.as_str(), "PROPFIND");
         assert_eq!(url.as_str(), "https://example.com/dav");
-        assert_eq!(headers.get("Depth").and_then(|value| value.to_str().ok()), Some("1"));
+        assert_eq!(
+            headers.get("Depth").and_then(|value| value.to_str().ok()),
+            Some("1")
+        );
         assert_eq!(
             headers
                 .get("Content-Type")

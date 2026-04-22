@@ -1,176 +1,258 @@
-import { describe, expect, it } from 'vitest';
-import { createWorkThread } from './workThreadRuntime.js';
+import { describe, expect, it, vi } from 'vitest';
 import { parseWorkThreadMarkdown, serializeWorkThreadToMarkdown } from './workThreadMarkdown.js';
+import { createWorkThread } from './workThreadRuntime.js';
+
+function createPause(reason: string, thenText: string, updatedAt: number) {
+  const pause = {
+    reason,
+    updatedAt,
+  };
+  // biome-ignore lint/suspicious/noThenProperty: Tests need the real `pause.then` shape.
+  pause.then = thenText;
+  return pause;
+}
 
 describe('workThreadMarkdown', () => {
-  it('serializes and parses container-based markdown', () => {
+  it('serializes and parses plugin-style callout markdown', () => {
     const thread = {
-      ...createWorkThread({ title: 'Gateway', mission: 'Ship gateway' }),
-      rootMarkdown: '先把网关主线说明清楚。',
-      explorationMarkdown: '- [资料] https://example.com',
-      intents: [
+      ...createWorkThread({ title: 'Gateway', docMarkdown: 'Thread body note.' }),
+      status: 'paused' as const,
+      resume: 'Draft matrix',
+      pause: createPause('Waiting for product answer', 'Sync wording after reply', 1713088800000),
+      blocks: [
         {
-          id: 'intent-1',
-          text: '跑通第三方 API 网关',
-          bodyMarkdown: '先确认 Aether 和 cc-switch 怎么接起来。',
-          collapsed: false,
-          parentThreadId: 'thread-1',
-          state: 'active' as const,
+          id: 'mission-1',
+          kind: 'task' as const,
+          taskAlias: 'mission' as const,
+          title: 'Ship the gateway',
+          body: 'Define the completion standard.',
+          status: 'doing' as const,
+          sortKey: 10,
           createdAt: 1,
-          updatedAt: 1,
+          updatedAt: 2,
+          resume: 'Confirm the finish line',
         },
-      ],
-      sparkContainers: [
+        {
+          id: 'task-1',
+          kind: 'task' as const,
+          taskAlias: 'task' as const,
+          title: 'Draft matrix',
+          body: 'Write the concrete action list.',
+          status: 'todo' as const,
+          sortKey: 20,
+          createdAt: 3,
+          updatedAt: 4,
+          linkedTaskId: 'task-123',
+        },
         {
           id: 'spark-1',
-          title: '多 key 切换',
-          bodyMarkdown: '后面单开一条线。',
-          collapsed: true,
-          parentThreadId: 'thread-1',
-          parentIntentId: 'intent-1',
-          createdAt: 2,
-          updatedAt: 2,
+          kind: 'spark' as const,
+          title: 'Release ideas',
+          body: 'Collect side ideas.',
+          sortKey: 30,
+          createdAt: 5,
+          updatedAt: 6,
         },
-      ],
-      nextActions: [
         {
-          id: 'next-1',
-          text: '先装 cc-switch',
-          done: false,
-          source: 'user' as const,
-          parentThreadId: 'thread-1',
-          parentIntentId: 'intent-1',
-          createdAt: 3,
-        },
-      ],
-      waitingFor: [
-        {
-          id: 'block-1',
-          kind: 'external' as const,
-          title: '等 Codex 修插件',
-          detail: '回来再接专利搜索。',
-          parentThreadId: 'thread-1',
-          satisfied: false,
-          createdAt: 4,
-          updatedAt: 4,
+          id: 'log-1',
+          kind: 'log' as const,
+          title: 'Checkpoint',
+          body: 'Saved the latest snapshot.',
+          sortKey: 40,
+          createdAt: 7,
+          updatedAt: 8,
+          promotedStreamEntryId: 'stream-1',
         },
       ],
     };
 
     const markdown = serializeWorkThreadToMarkdown(thread);
-    expect(markdown).toContain('> [!intent]+ 跑通第三方 API 网关');
-    expect(markdown).toContain('> > [!spark]- 多 key 切换');
-    expect(markdown).toContain('> [!explore]- Exploration');
+    expect(markdown).toContain('> [!mission] Ship the gateway');
+    expect(markdown).toContain('> [!task] Draft matrix');
+    expect(markdown).toContain('> [!spark] Release ideas');
+    expect(markdown).toContain('> [!log] Checkpoint');
+    expect(markdown).toContain('<!-- mlt-meta:');
+    expect(markdown).toContain('"sortKey":10');
+    expect(markdown).toContain('"status":"doing"');
+    expect(markdown).toContain('^mission-1');
+    expect(markdown).toContain('^log-1');
 
     const parsed = parseWorkThreadMarkdown(markdown);
-    expect(parsed.rootMarkdown).toContain('先把网关主线说明清楚');
-    expect(parsed.intents[0]?.text).toBe('跑通第三方 API 网关');
-    expect(parsed.intents[0]?.bodyMarkdown).toContain('Aether');
-    expect(parsed.sparkContainers[0]?.title).toBe('多 key 切换');
-    expect(parsed.nextActions[0]?.text).toBe('先装 cc-switch');
-    expect(parsed.waitingFor[0]?.title).toBe('等 Codex 修插件');
-    expect(parsed.explorationMarkdown).toContain('https://example.com');
+    expect(parsed.frontmatter.title).toBe('Gateway');
+    expect(parsed.frontmatter.status).toBe('paused');
+    expect(parsed.frontmatter.resume).toBe('Draft matrix');
+    expect(parsed.frontmatter.pauseReason).toBe('Waiting for product answer');
+    expect(parsed.frontmatter.pauseThen).toBe('Sync wording after reply');
+    expect(parsed.bodyMarkdown).toBe('Thread body note.');
+    expect(parsed.blocks).toHaveLength(4);
+    expect(parsed.blocks[0]).toMatchObject({
+      id: 'mission-1',
+      kind: 'task',
+      taskAlias: 'mission',
+      title: 'Ship the gateway',
+      body: 'Define the completion standard.',
+      status: 'doing',
+      resume: 'Confirm the finish line',
+      sortKey: 10,
+    });
+    expect(parsed.blocks[1]).toMatchObject({
+      id: 'task-1',
+      kind: 'task',
+      taskAlias: 'task',
+      title: 'Draft matrix',
+      body: 'Write the concrete action list.',
+      linkedTaskId: 'task-123',
+      sortKey: 20,
+    });
+    expect(parsed.blocks[2]).toMatchObject({
+      id: 'spark-1',
+      kind: 'spark',
+      title: 'Release ideas',
+      body: 'Collect side ideas.',
+      sortKey: 30,
+    });
+    expect(parsed.blocks[3]).toMatchObject({
+      id: 'log-1',
+      kind: 'log',
+      title: 'Checkpoint',
+      body: 'Saved the latest snapshot.',
+      promotedStreamEntryId: 'stream-1',
+      sortKey: 40,
+    });
   });
 
-  it('migrates handwritten meta-style markdown into usable containers', () => {
-    const markdown = `---
-created: 2026-04-12T23:26
-modified: 2026-04-16T15:36
+  it('detects callout blocks after a normal thread body section', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-14T10:00:00Z'));
+
+    const parsed = parseWorkThreadMarkdown(`---
+title: "Gateway thread"
+status: paused
+resume: "Draft matrix"
+pause.reason: "Waiting for product answer"
+pause.then: "Sync wording after reply"
 ---
-那感觉切换线程也挺有用的
 
-我现在在处理comsol并等待codex的工作结果
+Thread body note.
 
-目标：优先跑通comsol的一个案例
-[COMSOL Multiphysics 全网最清楚讲解视频 帮助大家一天快速上手COMSOL_哔哩哔哩_bilibili](https://www.bilibili.com/video/BV1K44y1v7Vx/)
+> [!mission] Ship the gateway
+> <!-- mlt-meta: {"sortKey":0,"status":"doing"} -->
+>
+> Define the completion standard.
+^mission-1
 
-我先把微型电阻给跑通
+> [!task] Draft matrix
+> <!-- mlt-meta: {"sortKey":1,"status":"todo"} -->
+>
+> Write the concrete action list.
+^task-1
 
-我今晚另一个目标：安装好ccw
-：在开始下一个任务前一定要把ccw装好
+> [!spark] Release ideas
+> <!-- mlt-meta: {"sortKey":2} -->
+>
+> Collect side ideas.
+^spark-1
+`);
 
-~~：断点：卡在了等codex修好现有的插件上~~
-：修好后应该优先加上专利搜索插件
+    expect(parsed.bodyMarkdown).toBe('Thread body note.');
+    expect(parsed.blocks).toHaveLength(3);
+    expect(parsed.blocks[0]).toMatchObject({
+      id: 'mission-1',
+      kind: 'task',
+      taskAlias: 'mission',
+      title: 'Ship the gateway',
+      status: 'doing',
+      sortKey: 0,
+    });
+    expect(parsed.blocks[1]).toMatchObject({
+      id: 'task-1',
+      kind: 'task',
+      taskAlias: 'task',
+      title: 'Draft matrix',
+      status: 'todo',
+      sortKey: 1,
+    });
+    expect(parsed.blocks[2]).toMatchObject({
+      id: 'spark-1',
+      kind: 'spark',
+      title: 'Release ideas',
+      sortKey: 2,
+    });
 
-对于写作，小说写作我也想玩
-想整一个grok
-
-[Obsidian+Claude太强了：拯救你吃灰的收藏夹 - 开发调优 - LINUX DO](https://linux.do/t/topic/1893419)
-`;
-
-    const parsed = parseWorkThreadMarkdown(markdown);
-    expect(parsed.rootMarkdown).toContain('切换线程也挺有用');
-    expect(parsed.intents.some((item) => item.text.includes('跑通comsol'))).toBe(true);
-    expect(parsed.intents.some((item) => item.text.includes('安装好ccw'))).toBe(true);
-    expect(parsed.waitingFor.some((item) => item.title.includes('codex'))).toBe(true);
-    expect(parsed.sparkContainers.some((item) => item.title.includes('grok'))).toBe(true);
-    expect(parsed.nextActions.some((item) => item.text.includes('微型电阻'))).toBe(true);
-    expect(parsed.explorationMarkdown).toContain('linux.do');
+    vi.useRealTimers();
   });
 
-  it('migrates handwritten gateway thread with links into exploration and intent buckets', () => {
-    const markdown = `---
-created: 2026-03-01T18:05
-modified: 2026-04-14T21:07
+  it('treats plain markdown as thread body when no native blocks exist', () => {
+    const parsed = parseWorkThreadMarkdown(`---
+title: "Gateway thread"
+status: active
 ---
-[GitHub - fawney19/Aether](https://github.com/fawney19/Aether/)
 
-简而言之我现在已经有足量的api token了
+Gateway root body
 
-我应该去使用某些工作流
+- plain note
+`);
 
-1. 使用curso+自定义模型
-2. 使用ccx
-3. 使用claude code
-4. 搞定codex
-
-我应该先去安装cc switch
-
-我现在应该去研究ccw/多agent了
-
-多agent显然是一个很重要的方向，尤其是现在的这个很慢很慢
-
-## 我需要多Agent！
-
-[codex 并行multi-agent 踩坑与使用经验 - 开发调优 / 开发调优, Lv1 - LINUX DO](https://linux.do/t/topic/1785189)
-[Vibecoding 入门教程（macOS + Windows | CLI + VS Code | skills、mcp推荐） - 开发调优 - LINUX DO](https://linux.do/t/topic/1615649)
-
-我将要安装
-1. oh-my-codex
-2. ccw
-3. superpower
-`;
-
-    const parsed = parseWorkThreadMarkdown(markdown);
-    expect(parsed.rootMarkdown).toContain('足量的api token');
-    expect(parsed.intents.some((item) => item.text.includes('使用某些工作流'))).toBe(true);
-    expect(parsed.intents.some((item) => item.text.includes('研究ccw'))).toBe(true);
-    expect(parsed.nextActions.some((item) => item.text.includes('安装cc switch'))).toBe(true);
-    expect(parsed.explorationMarkdown).toContain('Aether');
-    expect(parsed.explorationMarkdown).toContain('多Agent');
+    expect(parsed.frontmatter.title).toBe('Gateway thread');
+    expect(parsed.frontmatter.status).toBe('active');
+    expect(parsed.blocks).toEqual([]);
+    expect(parsed.bodyMarkdown).toBe('Gateway root body\n\n- plain note');
+    expect(parsed.rootMarkdown).toBe('Gateway root body\n\n- plain note');
   });
 
-  it('keeps target headings in exploration instead of turning them into intents', () => {
-    const markdown = `---
-created: 2026-04-12T23:23
-modified: 2026-04-13T17:24
----
-我要学comsol！
+  it('still parses legacy slash blocks for backwards compatibility', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-15T08:00:00Z'));
 
-我应该去学如何学comsol
+    const parsed = parseWorkThreadMarkdown(`/task
+id: task-1
+sortKey: 5
+title: Draft matrix
+status: todo
 
-好像上次是直接看到了官网的案例下载
+Update the matrix draft.
+`);
 
-![](attachments/Pasted%20image%2020260413011535.png)
+    expect(parsed.blocks).toHaveLength(1);
+    expect(parsed.blocks[0]).toMatchObject({
+      id: 'task-1',
+      kind: 'task',
+      taskAlias: 'task',
+      title: 'Draft matrix',
+      status: 'todo',
+      sortKey: 5,
+    });
 
-Target：
+    vi.useRealTimers();
+  });
 
-![](attachments/Pasted%20image%2020260413012229.png)
-`;
+  it('keeps task-level pause metadata on parsed callout blocks', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-04-15T08:30:00Z'));
 
-    const parsed = parseWorkThreadMarkdown(markdown);
-    expect(parsed.intents.some((item) => item.text === 'Target：')).toBe(false);
-    expect(parsed.explorationMarkdown).toContain('Target：');
-    expect(parsed.intents.some((item) => item.text.includes('学comsol'))).toBe(true);
+    const parsed = parseWorkThreadMarkdown(`> [!task] Draft matrix
+> <!-- mlt-meta: {"sortKey":5,"status":"doing","resume":"Check open questions","pause":{"reason":"Waiting for design feedback","then":"Resume after the mock is confirmed"}} -->
+>
+> Update the matrix draft.
+^task-1
+`);
+
+    expect(parsed.blocks).toHaveLength(1);
+    expect(parsed.blocks[0]).toMatchObject({
+      id: 'task-1',
+      kind: 'task',
+      taskAlias: 'task',
+      title: 'Draft matrix',
+      status: 'doing',
+      resume: 'Check open questions',
+      sortKey: 5,
+      pause: createPause(
+        'Waiting for design feedback',
+        'Resume after the mock is confirmed',
+        Date.now(),
+      ),
+    });
+
+    vi.useRealTimers();
   });
 });

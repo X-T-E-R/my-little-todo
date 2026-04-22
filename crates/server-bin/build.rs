@@ -1,5 +1,7 @@
 fn main() {
-    let git_hash = std::env::var("GIT_HASH").ok().filter(|s| !s.is_empty())
+    let git_hash = std::env::var("GIT_HASH")
+        .ok()
+        .filter(|s| !s.is_empty())
         .or_else(|| {
             std::process::Command::new("git")
                 .args(["rev-parse", "--short", "HEAD"])

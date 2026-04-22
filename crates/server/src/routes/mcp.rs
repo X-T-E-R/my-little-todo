@@ -676,15 +676,19 @@ fn work_thread_tool_definitions() -> Vec<Value> {
                     "title": { "type": "string" },
                     "mission": { "type": "string" },
                     "lane": { "type": "string", "enum": ["general", "execution", "research", "infrastructure", "meta"] },
-                    "status": { "type": "string", "enum": ["running", "ready", "waiting", "blocked", "sleeping", "done", "archived"] },
+                    "status": { "type": "string", "enum": ["active", "paused", "done", "archived", "running", "ready", "waiting", "blocked", "sleeping"] },
                     "roleId": { "type": "string" },
-                    "docMarkdown": { "type": "string" }
+                    "docMarkdown": { "type": "string" },
+                    "bodyMarkdown": { "type": "string" },
+                    "resume": { "type": "string" },
+                    "pause": { "type": "object" },
+                    "blocks": { "type": "array" }
                 }
             }
         }),
         json!({
             "name": "work_thread.update",
-            "description": "更新工作线程顶层字段与 resumeCard/schedulerMeta/syncMeta。",
+            "description": "更新工作线程顶层字段、resume/pause、blocks 等结构化内容。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -701,7 +705,7 @@ fn work_thread_tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "id": { "type": "string" },
-                    "status": { "type": "string", "enum": ["running", "ready", "waiting", "blocked", "sleeping", "done", "archived"] }
+                    "status": { "type": "string", "enum": ["active", "paused", "done", "archived", "running", "ready", "waiting", "blocked", "sleeping"] }
                 },
                 "required": ["id", "status"]
             }

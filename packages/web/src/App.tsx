@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { CheckSquare, FileText, Focus, Loader2, Settings, Wind } from 'lucide-react';
+import { CheckSquare, Focus, Loader2, Settings, Wind } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreateTaskDialog } from './components/CreateTaskDialog';
@@ -56,9 +56,6 @@ const SettingsView = React.lazy(() =>
 const StreamView = React.lazy(() =>
   import('./views/StreamView').then((m) => ({ default: m.StreamView })),
 );
-const WorkThreadView = React.lazy(() =>
-  import('./components/WorkThreadView').then((m) => ({ default: m.WorkThreadView })),
-);
 const TaskDetailPanel = React.lazy(() =>
   import('./components/TaskDetailPanel').then((m) => ({ default: m.TaskDetailPanel })),
 );
@@ -85,7 +82,6 @@ function LoadingScreen({ label }: { label: string }) {
 
 const TAB_CONFIG = [
   { key: 'now' as const, labelKey: 'Now', icon: Focus },
-  { key: 'thread' as const, labelKey: 'Thread', icon: FileText },
   { key: 'stream' as const, labelKey: 'Stream', icon: Wind },
   { key: 'board' as const, labelKey: 'Tasks', icon: CheckSquare },
   { key: 'settings' as const, labelKey: 'Settings', icon: Settings },
@@ -444,12 +440,20 @@ function AppViewContent({
         )}
         {currentView === 'thread' && (
           <React.Suspense fallback={<LoadingScreen label={t('Loading')} />}>
-            <WorkThreadView onGoNow={() => handleViewChange('now')} />
+            <BoardView
+              workspaceMode="threads"
+              onSwitchWorkspace={(mode) => handleViewChange(mode === 'threads' ? 'thread' : 'board')}
+              onGoNow={() => handleViewChange('now')}
+            />
           </React.Suspense>
         )}
         {currentView === 'board' && (
           <React.Suspense fallback={<LoadingScreen label={t('Loading')} />}>
-            <BoardView />
+            <BoardView
+              workspaceMode="tasks"
+              onSwitchWorkspace={(mode) => handleViewChange(mode === 'threads' ? 'thread' : 'board')}
+              onGoNow={() => handleViewChange('now')}
+            />
           </React.Suspense>
         )}
         {currentView === 'settings' && (
@@ -486,7 +490,7 @@ function BottomNav({
         {energyEnabled && <EnergyIndicator />}
       </div>
       {visibleTabs.map((tab) => {
-        const isActive = currentView === tab.key;
+        const isActive = currentView === tab.key || (tab.key === 'board' && currentView === 'thread');
         return (
           <button
             key={tab.key}
@@ -550,10 +554,9 @@ export function App() {
     () =>
       TAB_CONFIG.filter((tab) => {
         if (tab.key === 'board') return kanbanEnabled;
-        if (tab.key === 'thread') return workThreadEnabled;
         return true;
       }),
-    [kanbanEnabled, workThreadEnabled],
+    [kanbanEnabled],
   );
 
   const { authMode, token, loading: authLoading, checkAuthMode, checkAuth } = useAuthStore();
@@ -581,11 +584,12 @@ export function App() {
       if (newView === previousView) return previousView;
       const tabs = TAB_CONFIG.filter((tab) => {
         if (tab.key === 'board') return useModuleStore.getState().isEnabled('kanban');
-        if (tab.key === 'thread') return useModuleStore.getState().isEnabled('work-thread');
         return true;
       });
-      const currentIndex = tabs.findIndex((tab) => tab.key === previousView);
-      const newIndex = tabs.findIndex((tab) => tab.key === newView);
+      const normalizedPreviousView = previousView === 'thread' ? 'board' : previousView;
+      const normalizedNewView = newView === 'thread' ? 'board' : newView;
+      const currentIndex = tabs.findIndex((tab) => tab.key === normalizedPreviousView);
+      const newIndex = tabs.findIndex((tab) => tab.key === normalizedNewView);
       setDirection(newIndex > currentIndex ? 1 : -1);
       return newView;
     });
@@ -615,7 +619,7 @@ export function App() {
   }, [kanbanEnabled, currentView, handleViewChange]);
 
   useEffect(() => {
-    if (!workThreadEnabled && currentView === 'thread') handleViewChange('now');
+    if (!workThreadEnabled && currentView === 'thread') handleViewChange('board');
   }, [workThreadEnabled, currentView, handleViewChange]);
 
   useEffect(() => {

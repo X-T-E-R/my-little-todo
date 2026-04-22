@@ -12,9 +12,32 @@ function parseValue<T>(value: unknown, fallback: T): T {
 
 export function deserializeWorkThread(raw: unknown): WorkThread {
   const record = raw as Record<string, unknown>;
+  const resumeCard = parseValue<WorkThread['resumeCard']>(
+    record.resume_card ?? record.resumeCard,
+    undefined as never,
+  );
   const thread: WorkThread = {
     id: String(record.id),
     title: String(record.title ?? ''),
+    bodyMarkdown: String(
+      record.body_markdown ??
+        record.bodyMarkdown ??
+        record.root_markdown ??
+        record.rootMarkdown ??
+        record.doc_markdown ??
+        record.docMarkdown ??
+        '',
+    ),
+    resume:
+      record.resume_text != null
+        ? String(record.resume_text)
+        : record.resumeText != null
+          ? String(record.resumeText)
+          : resumeCard?.nextStep
+            ? String(resumeCard.nextStep)
+            : undefined,
+    pause: parseValue<WorkThread['pause']>(record.pause_json ?? record.pauseJson, undefined as never),
+    blocks: parseValue<WorkThread['blocks']>(record.blocks_json ?? record.blocksJson, []),
     mission: String(record.mission ?? ''),
     status: String(record.status ?? 'ready') as WorkThread['status'],
     lane: String(record.lane ?? 'general') as WorkThread['lane'],
@@ -29,7 +52,7 @@ export function deserializeWorkThread(raw: unknown): WorkThread {
       [],
     ),
     nextActions: parseValue<WorkThread['nextActions']>(record.next_actions ?? record.nextActions, []),
-    resumeCard: parseValue<WorkThread['resumeCard']>(record.resume_card ?? record.resumeCard, undefined as never),
+    resumeCard,
     workingSet: parseValue<WorkThread['workingSet']>(record.working_set ?? record.workingSet, []),
     waitingFor: parseValue<WorkThread['waitingFor']>(record.waiting_for ?? record.waitingFor, []),
     interrupts: parseValue<WorkThread['interrupts']>(record.interrupts, []),
@@ -56,6 +79,10 @@ export function serializeWorkThread(thread: WorkThread) {
   return {
     id: thread.id,
     title: thread.title,
+    body_markdown: thread.bodyMarkdown,
+    resume_text: thread.resume ?? null,
+    pause_json: thread.pause ? JSON.stringify(thread.pause) : null,
+    blocks_json: JSON.stringify(thread.blocks),
     mission: thread.mission,
     status: thread.status,
     lane: thread.lane,

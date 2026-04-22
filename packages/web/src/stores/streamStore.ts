@@ -5,24 +5,27 @@ import i18n from '../locales';
 import { getDataStore } from '../storage/dataStore';
 import {
   addStreamEntry,
+  listStreamDates,
   loadRecentDays,
   searchStreamEntries,
   updateStreamEntry,
 } from '../storage/streamRepo';
 import { createTaskForEntry } from '../storage/taskRepo';
+import { getNextStreamWindowDays, STREAM_HISTORY_FETCH_STEP_DAYS } from '../utils/streamPagination';
 import { NO_ROLE_FILTER } from './roleStore';
 
 interface StreamState {
   entries: StreamEntry[];
   /** How many calendar days back `entries` covers (for "load more"). */
   daysLoaded: number;
+  historyExhausted: boolean;
   loading: boolean;
   error: string | null;
   searchQuery: string;
   searchResults: StreamEntry[] | null;
 
   load: () => Promise<void>;
-  loadMore: () => Promise<void>;
+  loadMore: () => Promise<boolean>;
   runSearch: (query: string) => Promise<void>;
   clearSearch: () => void;
   addEntry: (
@@ -64,7 +67,8 @@ function resolveRoleIdForNewEntry(
 
 export const useStreamStore = create<StreamState>((set, get) => ({
   entries: [],
-  daysLoaded: 14,
+  daysLoaded: STREAM_HISTORY_FETCH_STEP_DAYS,
+  historyExhausted: false,
   loading: false,
   error: null,
   searchQuery: '',
@@ -75,9 +79,15 @@ export const useStreamStore = create<StreamState>((set, get) => ({
     _streamLoadPromise = (async () => {
       set({ loading: true, error: null, searchResults: null, searchQuery: '' });
       try {
-        const days = 14;
-        const entries = await loadRecentDays(days);
-        set({ entries, daysLoaded: days, loading: false });
+        const days = STREAM_HISTORY_FETCH_STEP_DAYS;
+        const [entries, dateKeys] = await Promise.all([loadRecentDays(days), listStreamDates()]);
+        const oldestAvailableDateKey = dateKeys.at(-1) ?? null;
+        set({
+          entries,
+          daysLoaded: days,
+          historyExhausted: getNextStreamWindowDays(days, oldestAvailableDateKey) == null,
+          loading: false,
+        });
       } catch (e) {
         if (get().entries.length === 0) {
           set({ error: String(e), loading: false });
@@ -92,14 +102,28 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   },
 
   loadMore: async () => {
-    const prev = get().daysLoaded;
-    const nextDays = prev + 14;
+    if (get().loading) return false;
     set({ loading: true });
     try {
+      const prev = get().daysLoaded;
+      const dateKeys = await listStreamDates();
+      const oldestAvailableDateKey = dateKeys.at(-1) ?? null;
+      const nextDays = getNextStreamWindowDays(prev, oldestAvailableDateKey);
+      if (nextDays == null) {
+        set({ historyExhausted: true, loading: false });
+        return false;
+      }
       const entries = await loadRecentDays(nextDays);
-      set({ entries, daysLoaded: nextDays, loading: false });
+      set({
+        entries,
+        daysLoaded: nextDays,
+        historyExhausted: getNextStreamWindowDays(nextDays, oldestAvailableDateKey) == null,
+        loading: false,
+      });
+      return true;
     } catch {
       set({ loading: false });
+      return false;
     }
   },
 
@@ -233,9 +257,35 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   },
 
   enrichEntry: async (entryId: string) => {
-    const entry = get().entries.find((e) => e.id === entryId);
+    let entry = get().entries.find((e) => e.id === entryId);
     if (!entry) throw new Error('Entry not found');
-    if (entry.extractedTaskId) return entry.extractedTaskId;
+
+    const { useTaskStore } = await import('./taskStore');
+    const linkedTaskId = entry.extractedTaskId;
+    if (linkedTaskId) {
+      const cachedTask = useTaskStore.getState().tasks.find((task) => task.id === linkedTaskId);
+      if (cachedTask) {
+        return linkedTaskId;
+      }
+
+      const { loadTask } = await import('../storage/taskRepo');
+      const persistedTask = await loadTask(linkedTaskId);
+      if (persistedTask) {
+        useTaskStore.setState((state) =>
+          state.tasks.find((task) => task.id === persistedTask.id)
+            ? state
+            : { tasks: [...state.tasks, persistedTask] },
+        );
+        return persistedTask.id;
+      }
+
+      entry = {
+        ...entry,
+        extractedTaskId: undefined,
+        entryType: entry.entryType === 'task' ? 'spark' : entry.entryType,
+      };
+      await get().updateEntry(entry);
+    }
 
     const task = await createTaskForEntry(
       {
@@ -253,7 +303,6 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       ),
     }));
 
-    const { useTaskStore } = await import('./taskStore');
     const ts = useTaskStore.getState();
     if (!ts.tasks.find((t) => t.id === task.id)) {
       useTaskStore.setState({ tasks: [...ts.tasks, task] });

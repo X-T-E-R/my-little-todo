@@ -23,10 +23,12 @@ function makeTask(id: string, ddlMs?: number): Task {
 }
 
 describe('createWorkThread', () => {
-  it('creates a ready thread with mission and resume card defaults', () => {
+  it('creates an active thread with body/block defaults', () => {
     const thread = createWorkThread({ title: 'COMSOL case' });
-    expect(thread.status).toBe('ready');
+    expect(thread.status).toBe('active');
     expect(thread.mission).toBe('COMSOL case');
+    expect(thread.bodyMarkdown).toBe('');
+    expect(thread.blocks).toEqual([]);
     expect(thread.resumeCard.nextStep).toBe('');
     expect(thread.workingSet).toEqual([]);
   });
@@ -48,29 +50,24 @@ describe('deriveWorkingSet', () => {
 });
 
 describe('pickWorkThreadForNow', () => {
-  it('returns running thread first regardless of policy', () => {
-    const running = createWorkThread({ title: 'Run me', status: 'running' });
-    const ready = createWorkThread({ title: 'Ready thread' });
-    const out = pickWorkThreadForNow([ready, running], 'manual');
-    expect(out?.thread.id).toBe(running.id);
+  it('returns active thread first regardless of policy', () => {
+    const active = createWorkThread({ title: 'Run me', status: 'active' });
+    const paused = createWorkThread({ title: 'Paused thread', status: 'paused' });
+    const out = pickWorkThreadForNow([paused, active], 'manual');
+    expect(out?.thread.id).toBe(active.id);
   });
 
-  it('returns null in manual mode when nothing is already running', () => {
-    const ready = createWorkThread({ title: 'Ready thread' });
-    const out = pickWorkThreadForNow([ready], 'manual');
+  it('returns null in manual mode when nothing is already active', () => {
+    const paused = createWorkThread({ title: 'Paused thread', status: 'paused' });
+    const out = pickWorkThreadForNow([paused], 'manual');
     expect(out).toBeNull();
   });
 
-  it('prefers ready threads with a concrete next step', () => {
-    const plain = createWorkThread({ title: 'Plain' });
+  it('prefers paused threads with a concrete resume cue', () => {
+    const plain = createWorkThread({ title: 'Plain', status: 'paused' });
     const ready = {
-      ...createWorkThread({ title: 'Resume me' }),
-      resumeCard: {
-        summary: 'We already know the path.',
-        nextStep: 'Run the benchmark again.',
-        guardrails: [],
-        updatedAt: Date.now(),
-      },
+      ...createWorkThread({ title: 'Resume me', status: 'paused' }),
+      resume: 'Run the benchmark again.',
     };
     const out = pickWorkThreadForNow([plain, ready], 'coach');
     expect(out?.thread.id).toBe(ready.id);
@@ -78,25 +75,24 @@ describe('pickWorkThreadForNow', () => {
 
   it('boosts threads linked to urgent tasks', () => {
     const urgent = {
-      ...createWorkThread({ title: 'Need attention' }),
-      nextActions: [
+      ...createWorkThread({ title: 'Need attention', status: 'paused' }),
+      blocks: [
         {
-          id: 'a-1',
-          text: 'Submit draft',
-          done: false,
-          source: 'user' as const,
+          id: 'b-1',
+          kind: 'task' as const,
+          taskAlias: 'task' as const,
+          title: 'Submit draft',
+          body: 'Submit the draft.',
+          status: 'todo' as const,
           linkedTaskId: 'task-1',
+          sortKey: 1,
           createdAt: Date.now(),
+          updatedAt: Date.now(),
         },
       ],
-      resumeCard: {
-        summary: 'Draft is almost there.',
-        nextStep: 'Submit the draft.',
-        guardrails: [],
-        updatedAt: Date.now(),
-      },
+      resume: 'Submit the draft.',
     };
-    const casual = createWorkThread({ title: 'Casual read' });
+    const casual = createWorkThread({ title: 'Casual read', status: 'paused' });
     const out = pickWorkThreadForNow(
       [casual, urgent],
       'semi_auto',

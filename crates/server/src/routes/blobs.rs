@@ -468,9 +468,10 @@ pub async fn get_attachment_config(
     axum::Extension(_user_id): axum::Extension<String>,
 ) -> ApiResult<serde_json::Value> {
     let config = load_effective_file_host_config(&state).await?;
-    Ok(Json(serde_json::to_value(file_host_config_response(&config)).map_err(|e| {
-        internal_error(&e.to_string())
-    })?))
+    Ok(Json(
+        serde_json::to_value(file_host_config_response(&config))
+            .map_err(|e| internal_error(&e.to_string()))?,
+    ))
 }
 
 pub async fn get_file_host_config(
@@ -522,7 +523,9 @@ pub async fn put_admin_file_host_config(
 
     if let Some(provider) = body.default_provider.as_deref() {
         if !matches!(provider, "local-files" | "mlt-server" | "webdav" | "local") {
-            return Err(bad_request("default_provider must be local-files, mlt-server, or webdav"));
+            return Err(bad_request(
+                "default_provider must be local-files, mlt-server, or webdav",
+            ));
         }
     }
 
@@ -534,9 +537,7 @@ pub async fn put_admin_file_host_config(
     let next_max_size = body.max_size.unwrap_or(current.max_size);
     let next_provider =
         normalize_default_provider(body.default_provider.or(Some(current.default_provider)));
-    let next_public_base_url = body
-        .public_base_url
-        .unwrap_or(current.public_base_url);
+    let next_public_base_url = body.public_base_url.unwrap_or(current.public_base_url);
 
     state
         .db
@@ -604,11 +605,7 @@ pub async fn put_admin_file_host_config(
         .map_err(|e| internal_error(&e.to_string()))?;
     state
         .db
-        .put_setting(
-            &admin_id,
-            "admin:image-host-url",
-            &next_public_base_url,
-        )
+        .put_setting(&admin_id, "admin:image-host-url", &next_public_base_url)
         .await
         .map_err(|e| internal_error(&e.to_string()))?;
 

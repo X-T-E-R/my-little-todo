@@ -7,6 +7,6 @@ pub mod history;
 pub mod mcp;
 pub mod plugins;
 pub mod session;
-pub mod sync;
 pub mod stream;
+pub mod sync;
 pub mod tasks;

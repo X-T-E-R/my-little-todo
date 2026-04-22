@@ -90,11 +90,8 @@ function KanbanCard({
       layout
       className="cursor-grab rounded-[var(--radius-card)] px-3 py-3 active:cursor-grabbing"
       onDoubleClick={() => selectTask(task.id)}
-      onPointerDown={(event) => {
+      onPointerDown={() => {
         setKanbanFocusTaskId(task.id);
-        if (event.pointerType === 'mouse') {
-          event.preventDefault();
-        }
       }}
     >
       <div className="flex items-start gap-2.5">

@@ -170,8 +170,8 @@ fn generate_runner_token(plugin_id: &str, port: u16) -> String {
 }
 
 fn allocate_loopback_port() -> Result<u16, String> {
-    let listener =
-        TcpListener::bind("127.0.0.1:0").map_err(|error| format!("Failed to bind runner port: {}", error))?;
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("Failed to bind runner port: {}", error))?;
     let port = listener
         .local_addr()
         .map_err(|error| format!("Failed to read runner port: {}", error))?
@@ -255,7 +255,11 @@ fn executable_suffix() -> &'static str {
     }
 }
 
-async fn wait_for_runner_health(base_url: &str, token: &str, child: &mut Child) -> Result<(), String> {
+async fn wait_for_runner_health(
+    base_url: &str,
+    token: &str,
+    child: &mut Child,
+) -> Result<(), String> {
     let client = reqwest::Client::new();
     let health_url = format!("{}/health", base_url);
     for _ in 0..20 {
@@ -263,7 +267,10 @@ async fn wait_for_runner_health(base_url: &str, token: &str, child: &mut Child) 
             Ok(Some(status)) => {
                 return Err(match status.code() {
                     Some(code) => {
-                        format!("Plugin runner exited before health check with code {}.", code)
+                        format!(
+                            "Plugin runner exited before health check with code {}.",
+                            code
+                        )
                     }
                     None => "Plugin runner exited before health check.".to_string(),
                 });
@@ -384,13 +391,7 @@ pub async fn plugin_runner_start(
         if current.status == RUNNER_STATUS_RUNNING {
             return Ok(current);
         }
-        manager.set_state(
-            &request.plugin_id,
-            RUNNER_STATUS_STARTING,
-            None,
-            None,
-            None,
-        );
+        manager.set_state(&request.plugin_id, RUNNER_STATUS_STARTING, None, None, None);
     }
 
     match spawn_plugin_runner(&app, &request).await {
@@ -449,7 +450,10 @@ mod tests {
     fn plugin_storage_paths_match_tauri_plugin_fs_layout() {
         let app_data = PathBuf::from("/tmp/mlt-app");
         let root = plugin_root(&app_data, "demo");
-        assert_eq!(root, PathBuf::from("/tmp/mlt-app/my-little-todo/plugins/demo"));
+        assert_eq!(
+            root,
+            PathBuf::from("/tmp/mlt-app/my-little-todo/plugins/demo")
+        );
         assert_eq!(
             plugin_entry_path(&root, "server/index.js"),
             PathBuf::from("/tmp/mlt-app/my-little-todo/plugins/demo/server/index.js")

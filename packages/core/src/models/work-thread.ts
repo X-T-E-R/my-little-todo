@@ -1,11 +1,13 @@
 export type WorkThreadStatus =
+  | 'active'
+  | 'paused'
+  | 'done'
+  | 'archived'
   | 'running'
   | 'ready'
   | 'waiting'
   | 'blocked'
-  | 'sleeping'
-  | 'done'
-  | 'archived';
+  | 'sleeping';
 
 export type WorkThreadLane =
   | 'general'
@@ -200,6 +202,49 @@ export interface WorkThreadSuggestion {
   applied: boolean;
 }
 
+export interface WorkThreadPause {
+  reason: string;
+  then?: string;
+  updatedAt: number;
+}
+
+export type WorkThreadTaskBlockStatus = 'todo' | 'doing' | 'done';
+export type WorkThreadBlockKind = 'task' | 'spark' | 'log';
+export type WorkThreadTaskAlias = 'task' | 'mission';
+
+export interface WorkThreadBlockBase {
+  id: string;
+  kind: WorkThreadBlockKind;
+  title?: string;
+  body: string;
+  sortKey: number;
+  linkedTaskId?: string;
+  promotedStreamEntryId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkThreadTaskBlock extends WorkThreadBlockBase {
+  kind: 'task';
+  taskAlias?: WorkThreadTaskAlias;
+  status?: WorkThreadTaskBlockStatus;
+  resume?: string;
+  pause?: WorkThreadPause;
+}
+
+export interface WorkThreadSparkBlock extends WorkThreadBlockBase {
+  kind: 'spark';
+}
+
+export interface WorkThreadLogBlock extends WorkThreadBlockBase {
+  kind: 'log';
+}
+
+export type WorkThreadBlock =
+  | WorkThreadTaskBlock
+  | WorkThreadSparkBlock
+  | WorkThreadLogBlock;
+
 export type WorkThreadEventType =
   | 'created'
   | 'renamed'
@@ -228,7 +273,12 @@ export type WorkThreadEventType =
   | 'interrupt_captured'
   | 'waiting_updated'
   | 'thread_dispatched'
-  | 'thread_resumed';
+  | 'thread_resumed'
+  | 'resume_updated'
+  | 'pause_updated'
+  | 'block_added'
+  | 'block_updated'
+  | 'block_promoted';
 
 export interface WorkThreadEvent {
   id: string;
@@ -244,8 +294,15 @@ export interface WorkThreadEvent {
 export interface WorkThread {
   id: string;
   title: string;
+  bodyMarkdown: string;
+  resume?: string;
+  pause?: WorkThreadPause;
+  blocks: WorkThreadBlock[];
+
+  /** Legacy compatibility field. New model uses task/mission blocks instead. */
   mission: string;
   status: WorkThreadStatus;
+  /** Legacy compatibility field kept to avoid breaking older entry points. */
   lane: WorkThreadLane;
   roleId?: string;
   rootMarkdown: string;

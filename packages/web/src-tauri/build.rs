@@ -1,6 +1,5 @@
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Command,
 };
@@ -43,11 +42,7 @@ fn prepare_embedded_host_sidecar() -> Result<(), String> {
     let sidecar_target_dir = manifest_dir.join("target").join("embedded-host-sidecar");
     let binaries_dir = manifest_dir.join("binaries");
     fs::create_dir_all(&binaries_dir).map_err(|e| e.to_string())?;
-    let destination = binaries_dir.join(format!(
-        "mlt-server-{}{}",
-        target,
-        executable_suffix()
-    ));
+    let destination = binaries_dir.join(format!("mlt-server-{}{}", target, executable_suffix()));
 
     if profile != "release" {
         if destination.exists() {
@@ -111,12 +106,7 @@ fn prepare_plugin_runner_artifacts() -> Result<(), String> {
 
     run_pnpm(
         &workspace_root,
-        &[
-            "--filter",
-            "@my-little-todo/plugin-runner",
-            "run",
-            "build",
-        ],
+        &["--filter", "@my-little-todo/plugin-runner", "run", "build"],
     )?;
     run_node(
         &workspace_root,
@@ -163,7 +153,11 @@ fn run_pnpm(workspace_root: &Path, args: &[&str]) -> Result<(), String> {
         .status()
         .map_err(|e| e.to_string())?;
     if !status.success() {
-        return Err(format!("pnpm {} exited with status {}", args.join(" "), status));
+        return Err(format!(
+            "pnpm {} exited with status {}",
+            args.join(" "),
+            status
+        ));
     }
     Ok(())
 }
@@ -176,7 +170,11 @@ fn run_node(workspace_root: &Path, args: &[&str]) -> Result<(), String> {
         .status()
         .map_err(|e| e.to_string())?;
     if !status.success() {
-        return Err(format!("node {} exited with status {}", args.join(" "), status));
+        return Err(format!(
+            "node {} exited with status {}",
+            args.join(" "),
+            status
+        ));
     }
     Ok(())
 }

@@ -117,8 +117,7 @@ fn process_name_for_pid(pid: u32) -> Option<String> {
         let path = OsString::from_wide(&buf[..size as usize])
             .to_string_lossy()
             .into_owned();
-        path
-            .rsplit(['\\', '/'])
+        path.rsplit(['\\', '/'])
             .next()
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty())

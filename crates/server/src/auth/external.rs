@@ -1,10 +1,6 @@
 use std::collections::HashMap;
 
-use jsonwebtoken::{
-    decode, decode_header,
-    jwk::JwkSet,
-    Algorithm, DecodingKey, Validation,
-};
+use jsonwebtoken::{decode, decode_header, jwk::JwkSet, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -79,9 +75,11 @@ pub fn discovery_url(config: &ServerConfig) -> Option<String> {
     ))
 }
 
-pub async fn fetch_openid_configuration(config: &ServerConfig) -> anyhow::Result<OpenIdConfiguration> {
-    let discovery = discovery_url(config)
-        .ok_or_else(|| anyhow::anyhow!("Zitadel/OIDC is not configured"))?;
+pub async fn fetch_openid_configuration(
+    config: &ServerConfig,
+) -> anyhow::Result<OpenIdConfiguration> {
+    let discovery =
+        discovery_url(config).ok_or_else(|| anyhow::anyhow!("Zitadel/OIDC is not configured"))?;
     let response = reqwest::Client::new()
         .get(&discovery)
         .send()
@@ -123,7 +121,11 @@ fn extract_roles(extra: &HashMap<String, Value>) -> Vec<String> {
 fn validation_for(config: &ServerConfig, algorithm: Algorithm) -> Validation {
     let mut validation = Validation::new(algorithm);
     validation.set_issuer(&[normalize_issuer(&config.zitadel_issuer)]);
-    if let Some(audience) = config.zitadel_audience.as_deref().filter(|value| !value.is_empty()) {
+    if let Some(audience) = config
+        .zitadel_audience
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
         validation.set_audience(&[audience]);
     }
     validation
@@ -152,7 +154,11 @@ pub async fn verify_access_token(
     let key = DecodingKey::from_jwk(jwk)?;
     let claims = decode::<VerifiedClaims>(token, &key, &validation_for(config, algorithm))?.claims;
 
-    if let Some(expected) = config.zitadel_audience.as_deref().filter(|value| !value.is_empty()) {
+    if let Some(expected) = config
+        .zitadel_audience
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
         if !claims.aud.contains(expected) {
             anyhow::bail!("OIDC token audience does not include expected audience");
         }

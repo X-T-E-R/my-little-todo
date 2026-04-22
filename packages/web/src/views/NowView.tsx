@@ -577,7 +577,7 @@ export function NowView({
                           {thread.title}
                         </div>
                         <div className="mt-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-                          {t(`thread_status_${thread.status}`, { ns: 'think' })} · {thread.lane}
+                          {(thread.status === 'active' ? '运行中' : thread.status === 'paused' ? '暂停中' : thread.status === 'done' ? '已完成' : '已归档')}
                         </div>
                       </div>
                       <button
@@ -590,13 +590,13 @@ export function NowView({
                       </button>
                     </div>
                     <p className="mt-3 text-sm leading-7" style={{ color: 'var(--color-text-secondary)' }}>
-                      {thread.resumeCard.summary || thread.mission || t('thread_resume_summary_empty', { ns: 'think' })}
+                      {thread.pause?.reason || thread.bodyMarkdown || thread.mission || t('thread_resume_summary_empty', { ns: 'think' })}
                     </p>
                     <div className="mt-3 rounded-xl bg-[var(--color-bg)] px-3 py-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                       <span className="font-medium" style={{ color: 'var(--color-text)' }}>
-                        {t('thread_resume_next_step_label', { ns: 'think' })}
+                        继续
                       </span>{' '}
-                      {thread.resumeCard.nextStep || t('thread_resume_next_step_empty', { ns: 'think' })}
+                      {thread.resume || thread.resumeCard.nextStep || t('thread_resume_next_step_empty', { ns: 'think' })}
                     </div>
                   </article>
                 ))
@@ -665,13 +665,7 @@ export function NowView({
                 className="rounded-full px-2.5 py-1 text-[11px]"
                 style={{ background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}
               >
-                {t(`thread_status_${thread.status}`, { ns: 'think' })}
-              </span>
-              <span
-                className="rounded-full px-2.5 py-1 text-[11px]"
-                style={{ background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}
-              >
-                {thread.lane}
+                {thread.status === 'active' ? '运行中' : thread.status === 'paused' ? '暂停中' : thread.status === 'done' ? '已完成' : '已归档'}
               </span>
             </div>
 
@@ -695,26 +689,26 @@ export function NowView({
             <div className="mt-6 grid gap-3 md:grid-cols-3">
               <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)' }}>
                 <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {t('thread_resume_summary_label', { ns: 'think' })}
+                  当前上下文
                 </p>
                 <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
-                  {thread.resumeCard.summary || t('thread_resume_summary_empty', { ns: 'think' })}
+                  {thread.bodyMarkdown || thread.resumeCard.summary || t('thread_resume_summary_empty', { ns: 'think' })}
                 </p>
               </div>
               <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)' }}>
                 <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {t('thread_resume_next_step_label', { ns: 'think' })}
+                  继续
                 </p>
                 <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
-                  {thread.resumeCard.nextStep || t('thread_resume_next_step_empty', { ns: 'think' })}
+                  {thread.resume || thread.resumeCard.nextStep || t('thread_resume_next_step_empty', { ns: 'think' })}
                 </p>
               </div>
               <div className="rounded-2xl border p-4" style={{ borderColor: 'var(--color-border)' }}>
                 <p className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {t('thread_waiting_summary_label', { ns: 'think' })}
+                  暂停
                 </p>
                 <p className="mt-2 text-sm leading-7" style={{ color: 'var(--color-text)' }}>
-                  {thread.resumeCard.blockSummary || thread.resumeCard.waitingSummary || t('thread_waiting_summary_empty', { ns: 'think' })}
+                  {thread.pause?.reason || thread.resumeCard.blockSummary || thread.resumeCard.waitingSummary || t('thread_waiting_summary_empty', { ns: 'think' })}
                 </p>
               </div>
             </div>

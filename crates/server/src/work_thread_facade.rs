@@ -56,15 +56,48 @@ pub async fn create_thread(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(title);
+    let resume = args
+        .get("resume")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    let pause_reason = args
+        .get("pause")
+        .and_then(|value| value.get("reason"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let pause_then = args
+        .get("pause")
+        .and_then(|value| value.get("then"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let doc_markdown = string_or_default(args.get("docMarkdown"), "");
+    let body_markdown = args
+        .get("bodyMarkdown")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .unwrap_or(doc_markdown.as_str())
+        .to_string();
 
     let thread = json!({
         "id": format!("thread-{}", Uuid::new_v4()),
         "title": title,
+        "bodyMarkdown": body_markdown,
+        "resume": resume,
+        "pause": pause_reason.map(|reason| json!({
+            "reason": reason,
+            "then": pause_then,
+            "updatedAt": now
+        })).unwrap_or(Value::Null),
+        "blocks": value_array_or_empty(args.get("blocks")),
         "mission": mission,
-        "status": string_or_default(args.get("status"), "ready"),
+        "status": string_or_default(args.get("status"), "active"),
         "lane": string_or_default(args.get("lane"), "general"),
         "roleId": args.get("roleId").cloned().unwrap_or(Value::Null),
-        "docMarkdown": string_or_default(args.get("docMarkdown"), ""),
+        "docMarkdown": doc_markdown,
         "contextItems": value_array_or_empty(args.get("contextItems")),
         "nextActions": value_array_or_empty(args.get("nextActions")),
         "resumeCard": default_resume_card(args.get("resumeCard"), now),
@@ -114,7 +147,7 @@ pub async fn set_thread_status(
 ) -> Result<Value, String> {
     if !matches!(
         status,
-        "running" | "ready" | "waiting" | "blocked" | "sleeping" | "done" | "archived"
+        "active" | "paused" | "done" | "archived" | "running" | "ready" | "waiting" | "blocked" | "sleeping"
     ) {
         return Err(format!("Invalid work thread status: {}", status));
     }
@@ -146,8 +179,9 @@ pub async fn checkpoint_thread(
         scheduler_obj.insert("lastCheckpointAt".into(), json!(now));
         obj.insert("schedulerMeta".into(), Value::Object(scheduler_obj));
 
-        let resume = default_resume_card(obj.get("resumeCard"), now);
-        obj.insert("resumeCard".into(), resume);
+        if let Some(resume) = obj.get("resume").and_then(|value| value.as_str()) {
+            obj.insert("resume".into(), Value::String(resume.to_string()));
+        }
         obj.insert("updatedAt".into(), json!(now));
     }
 
@@ -314,7 +348,7 @@ fn merge_thread_patch(target: &mut Value, patch: &Value) {
 
     for (key, value) in patch_obj {
         match key.as_str() {
-            "resumeCard" | "schedulerMeta" | "syncMeta" => {
+            "pause" | "resumeCard" | "schedulerMeta" | "syncMeta" => {
                 let merged = merge_objects(target_obj.get(key), value);
                 target_obj.insert(key.clone(), merged);
             }

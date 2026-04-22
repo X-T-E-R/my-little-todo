@@ -29,6 +29,9 @@ export interface TaskDbRow {
   role_id: string | null;
   /** JSON string array of role ids; when set, supersedes single role_id for multi-role tasks. */
   role_ids: string | null;
+  thread_id: string | null;
+  resume_text: string | null;
+  pause_json: string | null;
   parent_id: string | null;
   source_stream_id: string | null;
   priority: number | null;
@@ -117,6 +120,22 @@ function reviveProgressLog(raw: unknown): ProgressLog {
   };
 }
 
+function reviveTaskPause(raw: unknown): Task['pause'] {
+  const o = raw as Record<string, unknown>;
+  const reason = String(o.reason ?? '').trim();
+  if (!reason) return undefined;
+  const pause: NonNullable<Task['pause']> = {
+    reason,
+    updatedAt: new Date(String(o.updatedAt ?? Date.now())),
+  };
+  const thenText = o.then != null ? String(o.then).trim() || undefined : undefined;
+  if (thenText) {
+    // biome-ignore lint/suspicious/noThenProperty: `pause.then` is a persisted domain field.
+    pause.then = thenText;
+  }
+  return pause;
+}
+
 function roleFieldsFromDbRow(row: TaskDbRow): Pick<Task, 'roleId' | 'roleIds'> {
   let roleIdsParsed = row.role_ids ? parseJson<string[]>(row.role_ids, []) : [];
   if (!Array.isArray(roleIdsParsed)) roleIdsParsed = [];
@@ -165,6 +184,9 @@ export function taskFromDbRow(row: TaskDbRow): Task {
     ddlType: (row.ddl_type as Task['ddlType']) ?? undefined,
     plannedAt: row.planned_at != null ? new Date(row.planned_at) : undefined,
     ...roleFieldsFromDbRow(row),
+    threadId: row.thread_id ?? undefined,
+    resume: row.resume_text ?? undefined,
+    pause: row.pause_json ? reviveTaskPause(parseJson(row.pause_json, {})) : undefined,
     parentId: row.parent_id ?? undefined,
     sourceStreamId: row.source_stream_id ?? undefined,
     priority: row.priority ?? undefined,
@@ -193,6 +215,19 @@ function serializeDate<T extends object, K extends keyof T & string>(
 }
 
 function serializeTaskCollections(task: Task) {
+  const pauseJson = (() => {
+    if (!task.pause) return null;
+    const payload: { reason: string; updatedAt: string; then?: string } = {
+      reason: task.pause.reason,
+      updatedAt: task.pause.updatedAt.toISOString(),
+    };
+    if (task.pause.then) {
+      // biome-ignore lint/suspicious/noThenProperty: `pause.then` is a persisted domain field.
+      payload.then = task.pause.then;
+    }
+    return toJson(payload);
+  })();
+
   return {
     tags: toJson(task.tags),
     subtask_ids: toJson(task.subtaskIds),
@@ -224,6 +259,7 @@ function serializeTaskCollections(task: Task) {
         serializeDate(progressLog, 'timestamp', progressLog.timestamp),
       ),
     ),
+    pause_json: pauseJson,
   };
 }
 
@@ -246,6 +282,8 @@ export function taskToDbRow(task: Task, version: number, deletedAt: number | nul
     planned_at: task.plannedAt?.getTime() ?? null,
     role_id: task.roleId ?? null,
     role_ids: ids.length > 1 ? JSON.stringify(ids) : null,
+    thread_id: task.threadId ?? null,
+    resume_text: task.resume ?? null,
     parent_id: task.parentId ?? null,
     source_stream_id: task.sourceStreamId ?? null,
     priority: task.priority ?? null,

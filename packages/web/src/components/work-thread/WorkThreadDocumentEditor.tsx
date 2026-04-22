@@ -1,19 +1,8 @@
-import type { StreamEntry, WorkThread } from '@my-little-todo/core';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useTranslation } from 'react-i18next';
-import { useWorkThreadStore } from '../../stores';
-import {
-  type MarkdownSlashCommandSelection,
-  type MarkdownWorkThreadFocusContext,
-} from '../RichMarkdownEditor';
+import { buildWorkThreadBlockStats, type StreamEntry, type WorkThread } from '@my-little-todo/core';
+import { useMemo, useRef } from 'react';
+import { type MarkdownSlashCommandSelection } from '../RichMarkdownEditor';
 import { ThinkSessionEditor, type ThinkSessionEditorHandle } from '../ThinkSessionEditor';
-import {
-  getWorkThreadFocusLabel,
-  normalizeWorkThreadFocus,
-  resolveWorkThreadFocusByContainerPath,
-  type WorkThreadWorkspaceFocus,
-} from '../../utils/workThreadFocus';
-import { insertIntoWorkThreadDoc, type WorkThreadDocInsertKind } from '../../utils/workThreadDocInsert';
+import { buildWorkThreadSlashInsertion } from '../../utils/workThreadSlash';
 import { WorkThreadInlineMenu, getWorkThreadSlashCommands } from './WorkThreadInlineMenu';
 
 interface WorkThreadDocumentEditorProps {
@@ -21,64 +10,7 @@ interface WorkThreadDocumentEditorProps {
   relatedSparks: StreamEntry[];
   onUpdateDoc: (markdown: string) => void;
   onOpenSparkInStream: (entryId: string) => void;
-}
-
-function resolveDocumentFocus(
-  thread: WorkThread,
-  focus: MarkdownWorkThreadFocusContext,
-): WorkThreadWorkspaceFocus {
-  if (focus.kind === 'exploration') {
-    return normalizeWorkThreadFocus(thread, {
-      kind: 'exploration',
-      containerPath: focus.containerPath,
-      title: focus.title,
-    });
-  }
-  if (focus.kind === 'intent') {
-    return resolveWorkThreadFocusByContainerPath(thread, {
-      kind: 'intent',
-      containerPath: focus.containerPath,
-      title: focus.title,
-    });
-  }
-  if (focus.kind === 'spark') {
-    return resolveWorkThreadFocusByContainerPath(thread, {
-      kind: 'spark',
-      containerPath: focus.containerPath,
-      title: focus.title,
-    });
-  }
-  return { kind: 'root' };
-}
-
-function resolveCommandInsert(
-  commandId: string,
-): { kind: WorkThreadDocInsertKind; seed: string } | null {
-  if (commandId === 'intent') {
-    return {
-      kind: 'intent',
-      seed: '意图标题\n在这里继续推进这条意图',
-    };
-  }
-  if (commandId === 'spark') {
-    return {
-      kind: 'spark',
-      seed: 'Spark 标题\n在这里展开这个分支想法',
-    };
-  }
-  if (commandId === 'next-action') {
-    return {
-      kind: 'next',
-      seed: '下一步',
-    };
-  }
-  if (commandId === 'block') {
-    return {
-      kind: 'block',
-      seed: '卡点标题\n补充卡住原因或前置条件',
-    };
-  }
-  return null;
+  onOpenThreadState: (focus: 'pause' | 'next') => void;
 }
 
 export function WorkThreadDocumentEditor({
@@ -86,65 +18,29 @@ export function WorkThreadDocumentEditor({
   relatedSparks,
   onUpdateDoc,
   onOpenSparkInStream,
+  onOpenThreadState,
 }: WorkThreadDocumentEditorProps) {
-  const { t } = useTranslation('think');
   const editorRef = useRef<ThinkSessionEditorHandle>(null);
-  const slashCommands = useMemo(() => getWorkThreadSlashCommands(t), [t]);
-  const workspaceFocus = useWorkThreadStore((s) => s.workspaceFocus);
-  const setWorkspaceFocus = useWorkThreadStore((s) => s.setWorkspaceFocus);
-  const workspaceAutoFocusId = useWorkThreadStore((s) => s.workspaceAutoFocusId);
-  const requestWorkspaceAutoFocus = useWorkThreadStore((s) => s.requestWorkspaceAutoFocus);
+  const slashCommands = useMemo(() => getWorkThreadSlashCommands(), []);
+  const stats = useMemo(() => buildWorkThreadBlockStats(thread), [thread]);
 
-  const applyDocCommand = useCallback(
-    (commandId: string) => {
-      const command = resolveCommandInsert(commandId);
-      if (!command) return;
-      const currentMarkdown = editorRef.current?.getMarkdown() ?? thread.docMarkdown;
-      const nextDoc = insertIntoWorkThreadDoc(
-        { ...thread, docMarkdown: currentMarkdown },
-        workspaceFocus,
-        command.kind,
-        command.seed,
-      );
-      onUpdateDoc(nextDoc);
-      window.setTimeout(() => editorRef.current?.focus(), 0);
-    },
-    [onUpdateDoc, thread, workspaceFocus],
-  );
+  const handleInsertCommand = (commandId: string) => {
+    const snippet = buildWorkThreadSlashInsertion(commandId);
+    if (!snippet) return;
+    editorRef.current?.insertMarkdown(snippet.markdown, {
+      text: snippet.selectionText,
+      fallback: 'end',
+    });
+  };
 
-  const handleInsertCommand = useCallback((commandId: string) => {
-    applyDocCommand(commandId);
-  }, [applyDocCommand]);
-
-  const handleSlashCommand = useCallback((payload: MarkdownSlashCommandSelection) => {
-    if (!resolveCommandInsert(payload.command.id)) return;
-    editorRef.current?.replaceTextRange(payload.replaceFrom, payload.replaceTo, '');
-    window.setTimeout(() => applyDocCommand(payload.command.id), 0);
-  }, [applyDocCommand]);
-
-  const handleFocusChange = useCallback(
-    (focus: MarkdownWorkThreadFocusContext) => {
-      setWorkspaceFocus(resolveDocumentFocus(thread, focus));
-    },
-    [setWorkspaceFocus, thread],
-  );
-
-  useEffect(() => {
-    if (!workspaceAutoFocusId) return;
-    const timer = window.setTimeout(() => requestWorkspaceAutoFocus(null), 300);
-    if (thread.intents.some((item) => item.id === workspaceAutoFocusId)) {
-      setWorkspaceFocus({ kind: 'intent', id: workspaceAutoFocusId });
-      editorRef.current?.focus();
-      return () => window.clearTimeout(timer);
-    }
-    if (thread.sparkContainers.some((item) => item.id === workspaceAutoFocusId)) {
-      setWorkspaceFocus({ kind: 'spark', id: workspaceAutoFocusId });
-      editorRef.current?.focus();
-      return () => window.clearTimeout(timer);
-    }
-    editorRef.current?.focus();
-    return () => window.clearTimeout(timer);
-  }, [requestWorkspaceAutoFocus, setWorkspaceFocus, thread, workspaceAutoFocusId]);
+  const handleSlashCommand = (payload: MarkdownSlashCommandSelection) => {
+    const snippet = buildWorkThreadSlashInsertion(payload.command.id);
+    if (!snippet) return;
+    editorRef.current?.replaceMarkdownRange(payload.replaceFrom, payload.replaceTo, snippet.markdown, {
+      text: snippet.selectionText,
+      fallback: 'end',
+    });
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -153,9 +49,35 @@ export function WorkThreadDocumentEditor({
         style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <WorkThreadInlineMenu onOpenCommand={handleInsertCommand} />
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onOpenThreadState('pause')}
+              className="rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors"
+              style={{
+                borderColor: 'var(--color-border)',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              Pause
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenThreadState('next')}
+              className="rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors"
+              style={{
+                borderColor: 'color-mix(in srgb, var(--color-accent) 18%, var(--color-border))',
+                background: 'var(--color-accent-soft)',
+                color: 'var(--color-accent)',
+              }}
+            >
+              Next
+            </button>
+            <WorkThreadInlineMenu onOpenCommand={handleInsertCommand} />
+          </div>
           <div className="min-w-0 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-            {`当前落点：${getWorkThreadFocusLabel(thread, workspaceFocus)} · 已关联 sparks：${relatedSparks.length}`}
+            {`正文 ${thread.bodyMarkdown.trim() ? '已写' : '为空'} · Mission ${stats.missions} · Task ${stats.tasks} · Spark ${stats.sparks} · Log ${stats.logs} · 关联 sparks ${relatedSparks.length}`}
           </div>
         </div>
       </div>
@@ -170,11 +92,7 @@ export function WorkThreadDocumentEditor({
           onSlashCommand={handleSlashCommand}
           nativeSlashUi="off"
           onSparkRefOpen={onOpenSparkInStream}
-          intentRefs
-          nextRefs
-          blockRefs
           threadCallouts
-          onWorkThreadFocusChange={handleFocusChange}
           editorClassName="work-thread-document-editor"
         />
       </div>

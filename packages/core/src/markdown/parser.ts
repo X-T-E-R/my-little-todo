@@ -278,6 +278,21 @@ function buildTaskFromMeta(
     ddl: meta.ddl ? new Date(meta.ddl as string) : undefined,
     ddlType: meta.ddl_type as DdlType | undefined,
     plannedAt: meta.planned ? new Date(meta.planned as string) : undefined,
+    threadId: meta.thread_id as string | undefined,
+    resume: meta.resume as string | undefined,
+    pause: meta.pause_reason
+      ? (() => {
+          const pause: NonNullable<Task['pause']> = {
+            reason: meta.pause_reason as string,
+            updatedAt: new Date((meta.updated as string) ?? Date.now()),
+          };
+          if (meta.pause_then) {
+            // biome-ignore lint/suspicious/noThenProperty: `pause.then` is a persisted domain field.
+            pause.then = meta.pause_then as string;
+          }
+          return pause;
+        })()
+      : undefined,
     ...roleFieldsFromMeta(meta),
     tags,
     priority: meta.priority ? Number(meta.priority) : undefined,

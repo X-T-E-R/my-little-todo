@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 export function WorkThreadEditorShell({
   title,
   onBackToBoard,
+  backLabel,
   onGoNow,
   materialSidebarOpen,
   runtimeSidebarOpen,
@@ -18,6 +19,7 @@ export function WorkThreadEditorShell({
 }: {
   title: string;
   onBackToBoard: () => void;
+  backLabel?: string;
   onGoNow: () => void;
   materialSidebarOpen: boolean;
   runtimeSidebarOpen: boolean;
@@ -85,7 +87,7 @@ export function WorkThreadEditorShell({
           style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
         >
           <Rows3 size={14} />
-          {t('thread_shell_back_to_board')}
+          {backLabel ?? t('thread_shell_back_to_board')}
         </button>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-semibold" style={{ color: 'var(--color-text)' }}>

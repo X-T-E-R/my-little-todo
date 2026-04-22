@@ -2,8 +2,9 @@ import type { StreamEntry, Task } from '@my-little-todo/core';
 import { describe, expect, it } from 'vitest';
 import { buildMaterialSidebarSections } from './materialSidebarModel';
 
+const TEST_NOW = new Date('2026-04-14T10:00:00+08:00');
+
 function createTask(partial: Partial<Task> & Pick<Task, 'id'>): Task {
-  const now = new Date('2026-04-14T10:00:00+08:00');
   return {
     id: partial.id,
     title: partial.title ?? '',
@@ -13,8 +14,8 @@ function createTask(partial: Partial<Task> & Pick<Task, 'id'>): Task {
     taskType: partial.taskType ?? 'task',
     roleId: partial.roleId,
     roleIds: partial.roleIds ?? [],
-    updatedAt: partial.updatedAt ?? now,
-    createdAt: partial.createdAt ?? now,
+    updatedAt: partial.updatedAt ?? TEST_NOW,
+    createdAt: partial.createdAt ?? TEST_NOW,
     ddl: partial.ddl,
     priority: partial.priority ?? 5,
     tags: partial.tags ?? [],
@@ -30,11 +31,13 @@ function createTask(partial: Partial<Task> & Pick<Task, 'id'>): Task {
   };
 }
 
-function createStreamEntry(partial: Partial<StreamEntry> & Pick<StreamEntry, 'id' | 'content'>): StreamEntry {
+function createStreamEntry(
+  partial: Partial<StreamEntry> & Pick<StreamEntry, 'id' | 'content'>,
+): StreamEntry {
   return {
     id: partial.id,
     content: partial.content,
-    timestamp: partial.timestamp ?? new Date('2026-04-14T10:00:00+08:00'),
+    timestamp: partial.timestamp ?? TEST_NOW,
     entryType: partial.entryType ?? 'spark',
     roleId: partial.roleId,
     extractedTaskId: partial.extractedTaskId,
@@ -78,6 +81,7 @@ describe('buildMaterialSidebarSections', () => {
       streamEntries,
       currentRoleId: 'dev',
       query: '',
+      now: TEST_NOW,
     });
 
     expect(sections.map((section) => section.id)).toEqual([
@@ -112,6 +116,7 @@ describe('buildMaterialSidebarSections', () => {
       ],
       currentRoleId: null,
       query: 'runtime',
+      now: TEST_NOW,
     });
 
     expect(sections.flatMap((section) => section.items.map((item) => item.id))).toEqual([
@@ -131,6 +136,7 @@ describe('buildMaterialSidebarSections', () => {
       streamEntries: [],
       currentRoleId: null,
       query: 'needle',
+      now: TEST_NOW,
     });
 
     expect(sections).toEqual([]);

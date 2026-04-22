@@ -1,11 +1,11 @@
 //! System tray, global shortcut, and annotator webview window (desktop shell).
 
+use tauri::WebviewWindowBuilder;
 use tauri::{
     menu::{Menu, MenuEvent, MenuItem},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, Runtime, WebviewUrl,
 };
-use tauri::WebviewWindowBuilder;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use crate::foreground;
@@ -14,13 +14,13 @@ const ANNOTATOR_LABEL: &str = "mlt-annotator";
 
 /// Opens or focuses the annotator panel and emits the current foreground window payload.
 pub fn open_annotator_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
-    let payload = foreground::capture_foreground().unwrap_or(None).unwrap_or_else(|| {
-        foreground::ForegroundWindowPayload {
+    let payload = foreground::capture_foreground()
+        .unwrap_or(None)
+        .unwrap_or_else(|| foreground::ForegroundWindowPayload {
             title: String::new(),
             process_name: None,
             process_id: 0,
-        }
-    });
+        });
 
     if let Some(w) = app.get_webview_window(ANNOTATOR_LABEL) {
         let visible = w.is_visible().unwrap_or(false);
@@ -75,10 +75,19 @@ pub fn show_annotator_window(app: AppHandle) -> Result<(), String> {
 }
 
 pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::error::Error>> {
-    let icon = app.default_window_icon().ok_or("missing default window icon")?.clone();
+    let icon = app
+        .default_window_icon()
+        .ok_or("missing default window icon")?
+        .clone();
 
     let annotate = MenuItem::with_id(app, "tray-annotate", "Annotate window", true, None::<&str>)?;
-    let widget = MenuItem::with_id(app, "tray-widget", "Open desktop widget", true, None::<&str>)?;
+    let widget = MenuItem::with_id(
+        app,
+        "tray-widget",
+        "Open desktop widget",
+        true,
+        None::<&str>,
+    )?;
     let main = MenuItem::with_id(app, "tray-main", "Open main window", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "tray-quit", "Quit", true, None::<&str>)?;
 
@@ -88,19 +97,17 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), Box<dyn std::err
         .icon(icon)
         .tooltip("My Little Todo")
         .menu(&menu)
-        .on_menu_event(|app, event: MenuEvent| {
-            match event.id.as_ref() {
-                "tray-annotate" => {
-                    let h = app.clone();
-                    let _ = app.run_on_main_thread(move || {
-                        let _ = open_annotator_window(&h);
-                    });
-                }
-                "tray-widget" => tray_emit_widget(app),
-                "tray-main" => tray_open_main(app),
-                "tray-quit" => app.exit(0),
-                _ => {}
+        .on_menu_event(|app, event: MenuEvent| match event.id.as_ref() {
+            "tray-annotate" => {
+                let h = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    let _ = open_annotator_window(&h);
+                });
             }
+            "tray-widget" => tray_emit_widget(app),
+            "tray-main" => tray_open_main(app),
+            "tray-quit" => app.exit(0),
+            _ => {}
         })
         .build(app)?;
 

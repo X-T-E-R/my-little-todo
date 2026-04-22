@@ -1,31 +1,30 @@
 import type { MarkdownSlashCommand } from '../RichMarkdownEditor';
-import { useTranslation } from 'react-i18next';
 
-export function getWorkThreadSlashCommands(t: (key: string) => string): MarkdownSlashCommand[] {
+export function getWorkThreadSlashCommands(): MarkdownSlashCommand[] {
   return [
     {
-      id: 'intent',
-      title: t('thread_slash_intent_title'),
-      description: t('thread_slash_intent_description'),
-      keywords: ['intent', 'plan', 'direction'],
+      id: 'mission',
+      title: '/mission',
+      description: '任务块别名，用来写线程里的 mission。',
+      keywords: ['mission', 'goal', 'project'],
+    },
+    {
+      id: 'task',
+      title: '/task',
+      description: '明确动作或步骤。',
+      keywords: ['task', 'todo', 'action'],
     },
     {
       id: 'spark',
-      title: t('thread_slash_spark_title'),
-      description: t('thread_slash_spark_description'),
+      title: '/spark',
+      description: '保留分支想法或待发散材料。',
       keywords: ['spark', 'idea', 'branch'],
     },
     {
-      id: 'next-action',
-      title: t('thread_slash_next_action_title'),
-      description: t('thread_slash_next_action_description'),
-      keywords: ['todo', 'step', 'action'],
-    },
-    {
-      id: 'block',
-      title: t('thread_slash_block_title'),
-      description: t('thread_slash_block_description'),
-      keywords: ['block', 'stuck', 'blocked'],
+      id: 'log',
+      title: '/log',
+      description: '线程内记录，可再提升到 Stream.log。',
+      keywords: ['log', 'note', 'capture'],
     },
   ];
 }
@@ -35,8 +34,7 @@ export function WorkThreadInlineMenu({
 }: {
   onOpenCommand: (commandId: string) => void;
 }) {
-  const { t } = useTranslation('think');
-  const commands = getWorkThreadSlashCommands(t);
+  const commands = getWorkThreadSlashCommands();
 
   return (
     <div
@@ -47,9 +45,9 @@ export function WorkThreadInlineMenu({
       }}
     >
       <span className="text-[11px] font-semibold" style={{ color: 'var(--color-text-tertiary)' }}>
-        {t('thread_inline_menu_label')}
+        插入块
       </span>
-      {commands.slice(0, 4).map((command) => (
+      {commands.map((command) => (
         <button
           key={command.id}
           type="button"
@@ -65,7 +63,7 @@ export function WorkThreadInlineMenu({
         </button>
       ))}
       <span className="text-[10px]" style={{ color: 'var(--color-text-tertiary)' }}>
-        {t('thread_inline_task_ref_hint')}
+        结构化块走 callout 语法
       </span>
     </div>
   );

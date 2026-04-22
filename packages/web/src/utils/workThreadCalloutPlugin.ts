@@ -13,8 +13,11 @@ const calloutHighlightKey = new PluginKey<WorkThreadCalloutDescriptor[]>(
 function clearEnhancedCallouts(root: HTMLElement) {
   root.querySelectorAll<HTMLElement>('[data-thread-callout-enhanced="true"]').forEach((node) => {
     node.classList.remove(
+      'milkdown-callout--mission',
+      'milkdown-callout--task',
       'milkdown-callout',
       'milkdown-callout--intent',
+      'milkdown-callout--log',
       'milkdown-callout--spark',
       'milkdown-callout--block',
       'milkdown-callout--explore',

@@ -5,6 +5,7 @@ import {
   formatDesktopHostCompatibilityRepairMessage,
   needsDesktopHostCompatibilityRepair,
 } from './sqliteDesktopHostCompatibility';
+import { SCHEMA_VERSION } from './sqliteSchema';
 
 describe('sqliteDesktopHostCompatibility', () => {
   it('detects missing user-scoped columns on upgraded local databases', () => {
@@ -33,6 +34,6 @@ describe('sqliteDesktopHostCompatibility', () => {
   });
 
   it('skips repair only when schema_version is current and columns are present', () => {
-    expect(needsDesktopHostCompatibilityRepair(17, [])).toBe(false);
+    expect(needsDesktopHostCompatibilityRepair(SCHEMA_VERSION, [])).toBe(false);
   });
 });

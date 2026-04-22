@@ -1,5 +1,8 @@
 # 版本管理
 
+> 这份文档讲的是 **产品发布版本号**。
+> 如果你要看的是任务/设置/流记录的 **数据版本历史与审计日志**，请看：[docs/architecture/05-version-history-and-audit.md](../architecture/05-version-history-and-audit.md)
+
 ## 策略
 
 My Little Todo 采用 **统一版本号**（unified versioning）：所有包（前端、后端、桌面端）共享同一个语义化版本号。

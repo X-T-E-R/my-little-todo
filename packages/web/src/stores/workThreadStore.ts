@@ -2,16 +2,18 @@ import type {
   StreamEntry,
   Task,
   WorkThread,
+  WorkThreadBlock,
   WorkThreadContextItem,
   WorkThreadEvent,
   WorkThreadIntent,
+  WorkThreadInterruptSource,
   WorkThreadNextAction,
+  WorkThreadPause,
   WorkThreadResumeCard,
   WorkThreadSchedulerPolicy,
   WorkThreadSparkContainer,
   WorkThreadStatus,
   WorkThreadSuggestionKind,
-  WorkThreadInterruptSource,
   WorkThreadWaitingCondition,
   WorkThreadWorkingSetItem,
 } from '@my-little-todo/core';
@@ -32,39 +34,35 @@ import { formatBlockRefMarkdown } from '../utils/blockRefs';
 import { formatIntentRefMarkdown } from '../utils/intentRefs';
 import { formatNextRefMarkdown } from '../utils/nextRefs';
 import { formatSparkRefMarkdown } from '../utils/sparkRefs';
-import { formatTaskRefMarkdown } from '../utils/taskRefs';
+import { generateWorkThreadSuggestion, parseSuggestedNextSteps } from '../utils/workThreadAi';
 import {
+  type WorkThreadRawCaptureSource,
+  buildRawCaptureEvent,
+  buildRawCaptureEvents,
+} from '../utils/workThreadCaptures';
+import { insertIntoWorkThreadDoc } from '../utils/workThreadDocInsert';
+import { type WorkThreadWorkspaceFocus, normalizeWorkThreadFocus } from '../utils/workThreadFocus';
+import {
+  WORK_THREAD_MARKDOWN_AUTO_IMPORT_KEY,
+  WORK_THREAD_MARKDOWN_SYNC_ENABLED_KEY,
+  WORK_THREAD_MARKDOWN_SYNC_ROOT_KEY,
+  type WorkThreadSyncPrefs,
+  applyMarkdownPatchToThread,
+  checkWorkThreadExternalChanges,
+  exportWorkThreadToMarkdownFile,
+} from '../utils/workThreadSync';
+import {
+  LAST_OPENED_THREAD_ID_KEY,
   LEGACY_LAST_OPENED_THREAD_ID_KEY,
   LEGACY_MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY,
   LEGACY_THREAD_OPEN_MODE_KEY,
   LEGACY_THREAD_RUNTIME_SIDEBAR_DEFAULT_KEY,
-  LAST_OPENED_THREAD_ID_KEY,
   MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY,
+  type RuntimeSidebarDefault,
   THREAD_OPEN_MODE_KEY,
   THREAD_RUNTIME_SIDEBAR_DEFAULT_KEY,
-  type RuntimeSidebarDefault,
   type ThreadOpenMode,
 } from '../utils/workThreadUiPrefs';
-import { generateWorkThreadSuggestion, parseSuggestedNextSteps } from '../utils/workThreadAi';
-import {
-  applyMarkdownPatchToThread,
-  checkWorkThreadExternalChanges,
-  exportWorkThreadToMarkdownFile,
-  type WorkThreadSyncPrefs,
-  WORK_THREAD_MARKDOWN_AUTO_IMPORT_KEY,
-  WORK_THREAD_MARKDOWN_SYNC_ENABLED_KEY,
-  WORK_THREAD_MARKDOWN_SYNC_ROOT_KEY,
-} from '../utils/workThreadSync';
-import {
-  buildRawCaptureEvent,
-  buildRawCaptureEvents,
-  type WorkThreadRawCaptureSource,
-} from '../utils/workThreadCaptures';
-import {
-  normalizeWorkThreadFocus,
-  type WorkThreadWorkspaceFocus,
-} from '../utils/workThreadFocus';
-import { insertIntoWorkThreadDoc } from '../utils/workThreadDocInsert';
 import { useStreamStore } from './streamStore';
 import { useTaskStore } from './taskStore';
 
@@ -115,6 +113,8 @@ interface CreateThreadOptions {
   docMarkdown?: string;
   status?: WorkThreadStatus;
 }
+
+type ThreadBlockInputKind = 'task' | 'mission' | 'spark' | 'log';
 
 interface WorkThreadState {
   threads: WorkThread[];
@@ -178,6 +178,20 @@ interface WorkThreadState {
   addLinkContext: (title: string, url: string) => Promise<void>;
   addTaskToThread: (task: Task, mode?: ExternalTargetMode) => Promise<void>;
   addStreamToThread: (entry: StreamEntry, mode?: ExternalTargetMode) => Promise<void>;
+  addThreadBlock: (
+    kind: ThreadBlockInputKind,
+    body: string,
+    options?: { title?: string; linkedTaskId?: string },
+  ) => Promise<WorkThreadBlock | null>;
+  updateThreadState: (patch: {
+    title?: string;
+    status?: WorkThreadStatus;
+    resume?: string;
+    pauseReason?: string;
+    pauseThen?: string;
+  }) => Promise<void>;
+  promoteBlockToStream: (blockId: string) => Promise<void>;
+  createTaskFromBlock: (blockId: string) => Promise<void>;
   addIntent: (
     text: string,
     options?: {
@@ -192,7 +206,9 @@ interface WorkThreadState {
   ) => Promise<WorkThreadIntent | null>;
   updateIntent: (
     id: string,
-    patch: Partial<Pick<WorkThreadIntent, 'text' | 'detail' | 'bodyMarkdown' | 'collapsed' | 'state'>>,
+    patch: Partial<
+      Pick<WorkThreadIntent, 'text' | 'detail' | 'bodyMarkdown' | 'collapsed' | 'state'>
+    >,
   ) => Promise<void>;
   addSparkContainer: (
     title: string,
@@ -217,7 +233,10 @@ interface WorkThreadState {
       recordEvent?: boolean;
     },
   ) => Promise<WorkThreadWaitingCondition | null>;
-  updateBlock: (id: string, patch: Partial<Pick<WorkThreadWaitingCondition, 'title' | 'detail'>>) => Promise<void>;
+  updateBlock: (
+    id: string,
+    patch: Partial<Pick<WorkThreadWaitingCondition, 'title' | 'detail'>>,
+  ) => Promise<void>;
   captureSelectionAsIntent: (
     content: string,
     nextDocMarkdown: string,
@@ -248,13 +267,13 @@ interface WorkThreadState {
   addDecision: (title: string, detailMarkdown?: string) => Promise<void>;
   addNextAction: (
     text: string,
-    source?: 'user' | 'ai',
     options?: {
       parentIntentId?: string;
       parentSparkId?: string;
       insertIntoDoc?: boolean;
       recordEvent?: boolean;
     },
+    source?: 'user' | 'ai',
   ) => Promise<WorkThreadNextAction | null>;
   updateNextAction: (
     id: string,
@@ -350,7 +369,7 @@ async function readRuntimeSidebarDefault(): Promise<RuntimeSidebarDefault> {
     LEGACY_THREAD_RUNTIME_SIDEBAR_DEFAULT_KEY,
   );
   if (raw === 'open' || raw === 'closed') return raw;
-  return 'remember';
+  return 'closed';
 }
 
 async function rememberThreadOpenState(threadId: string | null): Promise<void> {
@@ -422,7 +441,11 @@ function buildSparkExplorationBlock(entry: StreamEntry) {
   };
 }
 
-function buildIntent(text: string, detail?: string, state: WorkThreadIntent['state'] = 'active'): WorkThreadIntent {
+function buildIntent(
+  text: string,
+  detail?: string,
+  state: WorkThreadIntent['state'] = 'active',
+): WorkThreadIntent {
   const now = Date.now();
   return {
     id: crypto.randomUUID(),
@@ -448,10 +471,7 @@ function buildIntentAnchor(intent: WorkThreadIntent) {
   };
 }
 
-function buildNextAction(
-  text: string,
-  source: 'user' | 'ai' = 'user',
-): WorkThreadNextAction {
+function buildNextAction(text: string, source: 'user' | 'ai' = 'user'): WorkThreadNextAction {
   return {
     id: crypto.randomUUID(),
     text: text.trim(),
@@ -578,7 +598,10 @@ function resolveDocInsertionFocus(
   fallbackFocus: WorkThreadWorkspaceFocus,
   parent?: { parentIntentId?: string; parentSparkId?: string },
 ): WorkThreadWorkspaceFocus {
-  if (parent?.parentSparkId && thread.sparkContainers.some((item) => item.id === parent.parentSparkId)) {
+  if (
+    parent?.parentSparkId &&
+    thread.sparkContainers.some((item) => item.id === parent.parentSparkId)
+  ) {
     return { kind: 'spark', id: parent.parentSparkId };
   }
   if (parent?.parentIntentId && thread.intents.some((item) => item.id === parent.parentIntentId)) {
@@ -593,8 +616,100 @@ function materializeStructuredThread(thread: WorkThread): WorkThread {
   const patch = parseWorkThreadMarkdown(markdown);
   return ensureWorkThreadRuntime({
     ...normalized,
+    bodyMarkdown: patch.bodyMarkdown,
+    blocks: patch.blocks,
+    rootMarkdown: patch.bodyMarkdown,
     docMarkdown: patch.docMarkdown,
   });
+}
+
+function summarizeBlockTitle(block: Pick<WorkThreadBlock, 'title' | 'body' | 'kind'>): string {
+  const explicit = block.title?.trim();
+  if (explicit) return explicit;
+  const firstLine = block.body
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (firstLine) return summarizeText(firstLine, 72);
+  if (block.kind === 'spark') return 'Spark';
+  if (block.kind === 'log') return 'Log';
+  return 'Task';
+}
+
+function buildThreadBlock(
+  kind: ThreadBlockInputKind,
+  body: string,
+  options?: { title?: string; linkedTaskId?: string },
+): WorkThreadBlock {
+  const now = Date.now();
+  const base = {
+    id: crypto.randomUUID(),
+    title: options?.title?.trim() || undefined,
+    body: body.trim(),
+    sortKey: now,
+    linkedTaskId: options?.linkedTaskId,
+    createdAt: now,
+    updatedAt: now,
+  };
+  if (kind === 'task' || kind === 'mission') {
+    return {
+      ...base,
+      kind: 'task',
+      taskAlias: kind === 'mission' ? 'mission' : 'task',
+      status: 'todo',
+    };
+  }
+  if (kind === 'spark') {
+    return {
+      ...base,
+      kind: 'spark',
+    };
+  }
+  return {
+    ...base,
+    kind: 'log',
+  };
+}
+
+function normalizeThreadStatusPatch(
+  status: WorkThreadStatus | undefined,
+): WorkThreadStatus | undefined {
+  if (!status) return undefined;
+  if (status === 'running' || status === 'ready') return 'active';
+  if (status === 'waiting' || status === 'blocked' || status === 'sleeping') return 'paused';
+  return status;
+}
+
+function clonePauseToTaskPause(pause: WorkThreadPause | undefined): Task['pause'] {
+  if (!pause?.reason.trim()) return undefined;
+  const nextPause: NonNullable<Task['pause']> = {
+    reason: pause.reason,
+    updatedAt: new Date(pause.updatedAt),
+  };
+  const thenText = pause.then?.trim();
+  if (thenText) {
+    // biome-ignore lint/suspicious/noThenProperty: `pause.then` is a persisted domain field.
+    nextPause.then = thenText;
+  }
+  return nextPause;
+}
+
+function createThreadPause(
+  reason: string | undefined,
+  thenText?: string,
+): WorkThreadPause | undefined {
+  const normalizedReason = reason?.trim();
+  if (!normalizedReason) return undefined;
+  const pause: WorkThreadPause = {
+    reason: normalizedReason,
+    updatedAt: Date.now(),
+  };
+  const normalizedThen = thenText?.trim();
+  if (normalizedThen) {
+    // biome-ignore lint/suspicious/noThenProperty: `pause.then` is a persisted domain field.
+    pause.then = normalizedThen;
+  }
+  return pause;
 }
 
 function buildBlockAnchor(block: WorkThreadWaitingCondition) {
@@ -613,27 +728,32 @@ async function createSparkFromIntent(
   thread: WorkThread,
   intent: WorkThreadIntent,
 ): Promise<StreamEntry> {
-  return useStreamStore.getState().addEntry(
-    intent.bodyMarkdown?.trim() ? `${intent.text}\n\n${intent.bodyMarkdown.trim()}` : intent.text,
-    false,
-    {
-    roleId: thread.roleId,
-    entryType: 'spark',
-    threadMeta: {
-      sourceThreadId: thread.id,
-      sparkState: 'open',
-      originIntentId: intent.id,
-      parentIntentId: intent.id,
-      parentSparkId: intent.parentSparkId,
-    },
-  });
+  return useStreamStore
+    .getState()
+    .addEntry(
+      intent.bodyMarkdown?.trim() ? `${intent.text}\n\n${intent.bodyMarkdown.trim()}` : intent.text,
+      false,
+      {
+        roleId: thread.roleId,
+        entryType: 'spark',
+        threadMeta: {
+          sourceThreadId: thread.id,
+          sparkState: 'open',
+          originIntentId: intent.id,
+          parentIntentId: intent.id,
+          parentSparkId: intent.parentSparkId,
+        },
+      },
+    );
 }
 
 async function syncSparkEntryContent(
   thread: WorkThread,
   spark: WorkThreadSparkContainer,
 ): Promise<StreamEntry | null> {
-  const content = spark.bodyMarkdown.trim() ? `${spark.title}\n\n${spark.bodyMarkdown.trim()}` : spark.title;
+  const content = spark.bodyMarkdown.trim()
+    ? `${spark.title}\n\n${spark.bodyMarkdown.trim()}`
+    : spark.title;
   if (!spark.streamEntryId) {
     const entry = await useStreamStore.getState().addEntry(content, false, {
       roleId: thread.roleId,
@@ -647,7 +767,9 @@ async function syncSparkEntryContent(
     });
     return entry;
   }
-  const currentEntry = useStreamStore.getState().entries.find((item) => item.id === spark.streamEntryId);
+  const currentEntry = useStreamStore
+    .getState()
+    .entries.find((item) => item.id === spark.streamEntryId);
   if (!currentEntry) return null;
   const nextEntry: StreamEntry = {
     ...currentEntry,
@@ -673,11 +795,11 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
   schedulerPolicy: DEFAULT_WORK_THREAD_SCHEDULER_POLICY,
   lastOpenedThreadId: null,
   threadListOpen: false,
-  materialSidebarOpen: true,
-  runtimeSidebarOpen: true,
-  runtimeSidebarRemembered: true,
+  materialSidebarOpen: false,
+  runtimeSidebarOpen: false,
+  runtimeSidebarRemembered: false,
   threadOpenMode: 'resume-last',
-  runtimeSidebarDefault: 'remember',
+  runtimeSidebarDefault: 'closed',
   markdownSyncEnabled: false,
   markdownSyncRoot: '',
   markdownAutoImport: true,
@@ -726,12 +848,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     ] = await Promise.all([
       readBooleanSetting(
         MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY,
-        true,
+        false,
         LEGACY_MATERIAL_SIDEBAR_DEFAULT_OPEN_KEY,
       ),
       readBooleanSetting(
         WORK_THREAD_RUNTIME_SIDEBAR_REMEMBERED_KEY,
-        true,
+        false,
         LEGACY_WORK_THREAD_RUNTIME_SIDEBAR_REMEMBERED_KEY,
       ),
       readThreadOpenMode(),
@@ -756,8 +878,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       markdownSyncEnabled,
       markdownSyncRoot: markdownSyncRoot?.trim() || '',
       markdownAutoImport,
-      syncStatus:
-        markdownSyncEnabled && markdownSyncRoot?.trim() ? 'idle' : 'disabled',
+      syncStatus: markdownSyncEnabled && markdownSyncRoot?.trim() ? 'idle' : 'disabled',
     });
   },
 
@@ -774,6 +895,9 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
 
   showThreadList: async () => {
     await get().saveCheckpoint('Saved checkpoint');
+    if (get().currentThread?.status === 'active') {
+      await get().setStatus('paused');
+    }
     await get().loadThreads();
     set({ threadListOpen: true });
   },
@@ -838,12 +962,13 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const existing =
       state.currentThread?.id === id
         ? state.currentThread
-        : state.threads.find((thread) => thread.id === id) ?? (await getDataStore().getWorkThread(id));
+        : (state.threads.find((thread) => thread.id === id) ??
+          (await getDataStore().getWorkThread(id)));
     if (!existing) return;
     const current = ensureWorkThreadRuntime(existing);
     const next: WorkThread = {
       ...current,
-      status: 'running',
+      status: 'active',
       schedulerMeta: {
         ...current.schedulerMeta,
         lastActivatedAt: Date.now(),
@@ -863,14 +988,9 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     await persistEvent(resumeEvent);
     const dispatchEvent =
       source === 'now'
-        ? createEvent(
-            saved.id,
-            'thread_dispatched',
-            'system',
-            'Dispatched from Now',
-            undefined,
-            { source },
-          )
+        ? createEvent(saved.id, 'thread_dispatched', 'system', 'Dispatched from Now', undefined, {
+            source,
+          })
         : null;
     if (dispatchEvent) {
       await persistEvent(dispatchEvent);
@@ -881,9 +1001,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       currentEvents: [
         ...(dispatchEvent ? [dispatchEvent] : []),
         resumeEvent,
-        ...events.filter(
-          (item) => item.id !== resumeEvent.id && item.id !== dispatchEvent?.id,
-        ),
+        ...events.filter((item) => item.id !== resumeEvent.id && item.id !== dispatchEvent?.id),
       ],
       threads: updateThreadInList(store.threads, saved),
       lastOpenedThreadId: saved.id,
@@ -942,10 +1060,16 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
 
   setStatus: async (status) => {
     const current = get().currentThread;
-    if (!current || current.status === status) return;
-    const next = { ...current, status, updatedAt: Date.now() };
+    const normalizedStatus = normalizeThreadStatusPatch(status);
+    if (!current || !normalizedStatus || current.status === normalizedStatus) return;
+    const next = { ...current, status: normalizedStatus, updatedAt: Date.now() };
     const saved = await persistThread(next);
-    const event = createEvent(saved.id, 'status_changed', 'user', `Status changed to ${status}`);
+    const event = createEvent(
+      saved.id,
+      'status_changed',
+      'user',
+      `Status changed to ${normalizedStatus}`,
+    );
     await persistEvent(event);
     set((state) => ({
       currentThread: saved,
@@ -969,8 +1093,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
         ...patch,
         blockSummary: nextBlockSummary,
         waitingSummary: nextBlockSummary,
-        guardrails:
-          patch.guardrails ?? current.resumeCard.guardrails ?? [],
+        guardrails: patch.guardrails ?? current.resumeCard.guardrails ?? [],
         updatedAt: Date.now(),
       },
       updatedAt: Date.now(),
@@ -1037,7 +1160,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       updatedAt: Date.now(),
     });
     const saved = await persistThread(next);
-    const event = createEvent(saved.id, 'waiting_updated', 'user', `Added waiting condition: ${condition.title}`);
+    const event = createEvent(
+      saved.id,
+      'waiting_updated',
+      'user',
+      `Added waiting condition: ${condition.title}`,
+    );
     await persistEvent(event);
     set((state) => ({
       currentThread: saved,
@@ -1159,8 +1287,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       threads: updateThreadInList(state.threads, saved),
       persistedDocMarkdown: saved.docMarkdown,
       docDirty: false,
-      syncStatus:
-        state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
+      syncStatus: state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
       syncMessage: null,
     }));
   },
@@ -1179,8 +1306,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       threads: updateThreadInList(state.threads, saved),
       persistedDocMarkdown: saved.docMarkdown,
       docDirty: false,
-      syncStatus:
-        state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
+      syncStatus: state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
       syncMessage: null,
     }));
   },
@@ -1191,20 +1317,53 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     try {
       const previousMarkdown = get().persistedDocMarkdown;
       const nextResume =
-        current.resumeCard.summary || current.resumeCard.nextStep ? current.resumeCard : autoResumeCard(current);
+        current.resumeCard.summary || current.resumeCard.nextStep
+          ? current.resumeCard
+          : autoResumeCard(current);
       const next = {
         ...current,
         resumeCard: nextResume,
         updatedAt: Date.now(),
       };
       const saved = await persistThread(next);
-      const rawCaptureEvents = buildRawCaptureEvents(
-        saved.id,
-        previousMarkdown,
-        saved.docMarkdown,
+      const taskStore = useTaskStore.getState();
+      await Promise.all(
+        saved.blocks
+          .filter(
+            (block): block is Extract<WorkThreadBlock, { kind: 'task' }> =>
+              block.kind === 'task' && Boolean(block.linkedTaskId),
+          )
+          .map(async (block) => {
+            const linkedTask = taskStore.tasks.find((task) => task.id === block.linkedTaskId);
+            if (!linkedTask) return;
+            const taskType: Task['taskType'] = block.taskAlias === 'mission' ? 'project' : 'task';
+            const nextTask = {
+              ...linkedTask,
+              title: summarizeBlockTitle(block),
+              body: block.body,
+              threadId: saved.id,
+              resume: block.resume,
+              pause: clonePauseToTaskPause(block.pause),
+              taskType,
+              updatedAt: new Date(),
+            };
+            const unchanged =
+              linkedTask.title === nextTask.title &&
+              linkedTask.body === nextTask.body &&
+              linkedTask.threadId === nextTask.threadId &&
+              linkedTask.resume === nextTask.resume &&
+              linkedTask.taskType === nextTask.taskType &&
+              (linkedTask.pause?.reason ?? '') === (nextTask.pause?.reason ?? '') &&
+              (linkedTask.pause?.then ?? '') === (nextTask.pause?.then ?? '');
+            if (unchanged) return;
+            await taskStore.updateTask(nextTask);
+          }),
       );
+      const rawCaptureEvents = buildRawCaptureEvents(saved.id, previousMarkdown, saved.docMarkdown);
       await Promise.all(rawCaptureEvents.map((event) => persistEvent(event)));
-      const newestEvents = [...rawCaptureEvents].sort((left, right) => right.createdAt - left.createdAt);
+      const newestEvents = [...rawCaptureEvents].sort(
+        (left, right) => right.createdAt - left.createdAt,
+      );
       set((state) => ({
         currentThread: saved,
         threads: updateThreadInList(state.threads, saved),
@@ -1212,8 +1371,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
         saveError: null,
         docDirty: false,
         persistedDocMarkdown: saved.docMarkdown,
-        syncStatus:
-          state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
+        syncStatus: state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
         syncMessage: null,
       }));
     } catch (error) {
@@ -1224,8 +1382,14 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
   saveCheckpoint: async (title) => {
     const current = get().currentThread;
     if (!current) return;
+    const nextResume =
+      current.resume ||
+      current.blocks.find((block) => block.kind === 'task' && block.status !== 'done')?.title ||
+      current.resumeCard.nextStep ||
+      '';
     const next = {
       ...current,
+      resume: nextResume || undefined,
       resumeCard: autoResumeCard(current),
       schedulerMeta: {
         ...current.schedulerMeta,
@@ -1263,7 +1427,13 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     };
     const next = withContextItem(current, item);
     const saved = await persistThread(next);
-    const event = createEvent(current.id, 'context_added', 'user', `Added note context: ${item.title}`, item.content);
+    const event = createEvent(
+      current.id,
+      'context_added',
+      'user',
+      `Added note context: ${item.title}`,
+      item.content,
+    );
     await persistEvent(event);
     set((state) => ({
       currentThread: saved,
@@ -1284,7 +1454,13 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     };
     const next = withContextItem(current, item);
     const saved = await persistThread(next);
-    const event = createEvent(current.id, 'context_added', 'user', `Added link context: ${item.title}`, item.content);
+    const event = createEvent(
+      current.id,
+      'context_added',
+      'user',
+      `Added link context: ${item.title}`,
+      item.content,
+    );
     await persistEvent(event);
     set((state) => ({
       currentThread: saved,
@@ -1519,14 +1695,11 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
         : undefined;
     if (options?.insertIntoDoc) {
       const insertionFocus = resolveDocInsertionFocus(current, get().workspaceFocus, parent);
-      const rawBlockText = options?.detail?.trim() ? `${trimmed}\n${options.detail.trim()}` : trimmed;
+      const rawBlockText = options?.detail?.trim()
+        ? `${trimmed}\n${options.detail.trim()}`
+        : trimmed;
       const next = {
-        ...applyDocInsertion(
-          current,
-          insertionFocus,
-          'block',
-          rawBlockText,
-        ),
+        ...applyDocInsertion(current, insertionFocus, 'block', rawBlockText),
         status: current.status === 'running' ? 'waiting' : current.status,
         updatedAt: Date.now(),
       };
@@ -1671,7 +1844,10 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const current = get().currentThread;
     const trimmed = content.replace(/\r\n/g, '\n').trim();
     if (!current || !trimmed) return null;
-    const lines = trimmed.split('\n').map((line) => line.trim()).filter(Boolean);
+    const lines = trimmed
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
     const title = lines[0] ?? trimmed;
     const detail = lines.slice(1).join('\n').trim() || blockOverride?.detail;
     const block = blockOverride ?? buildBlock(title, detail);
@@ -1692,7 +1868,10 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
               }
             : item,
         )
-      : [buildBlockAnchor({ ...block, title, detail: detail || undefined }), ...current.inlineAnchors];
+      : [
+          buildBlockAnchor({ ...block, title, detail: detail || undefined }),
+          ...current.inlineAnchors,
+        ];
     const next = ensureWorkThreadRuntime({
       ...current,
       docMarkdown: nextDocMarkdown,
@@ -1848,7 +2027,10 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     set((store) => ({
       currentThread: saved,
       threads: updateThreadInList(store.threads, saved),
-      currentEvents: [event, ...store.currentEvents.filter((entryItem) => entryItem.threadId === saved.id)],
+      currentEvents: [
+        event,
+        ...store.currentEvents.filter((entryItem) => entryItem.threadId === saved.id),
+      ],
     }));
   },
 
@@ -1861,8 +2043,11 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const refreshedEntry =
       useStreamStore
         .getState()
-        .entries.find((item) => item.threadMeta?.originIntentId === id && item.threadMeta?.sourceThreadId === current.id) ??
-      useStreamStore.getState().entries.find((item) => item.id === target.linkedSparkId);
+        .entries.find(
+          (item) =>
+            item.threadMeta?.originIntentId === id &&
+            item.threadMeta?.sourceThreadId === current.id,
+        ) ?? useStreamStore.getState().entries.find((item) => item.id === target.linkedSparkId);
     if (!refreshedEntry) return;
     await get().createThreadFromSpark(refreshedEntry.id);
   },
@@ -1877,10 +2062,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
             mission: `Push "${displayTaskTitle(task)}" forward.`,
             lane: 'execution',
             roleId,
-            docMarkdown: `## Focus\n\n${formatTaskRefMarkdown(task)}\n`,
+            docMarkdown: '',
           })
         : current;
-    const existing = thread.contextItems.find((item) => item.kind === 'task' && item.refId === task.id);
+    const existing = thread.blocks.find(
+      (block) => block.kind === 'task' && block.linkedTaskId === task.id,
+    );
     if (existing) {
       await get().openThread(thread.id);
       return;
@@ -1896,16 +2083,34 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const next = withContextItem(
       {
         ...thread,
+        blocks: [
+          ...thread.blocks,
+          {
+            id: crypto.randomUUID(),
+            kind: 'task',
+            taskAlias: mode === 'new' ? 'mission' : 'task',
+            title: displayTaskTitle(task),
+            body: task.body ?? '',
+            linkedTaskId: task.id,
+            sortKey: Date.now(),
+            status:
+              task.status === 'completed'
+                ? 'done'
+                : task.status === 'active' || task.status === 'today'
+                  ? 'doing'
+                  : 'todo',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+        bodyMarkdown: thread.bodyMarkdown,
         mission: thread.mission || `Push "${displayTaskTitle(task)}" forward.`,
         lane: thread.lane === 'general' ? 'execution' : thread.lane,
-        docMarkdown:
-          mode === 'new' && thread.docMarkdown.includes(formatTaskRefMarkdown(task))
-            ? thread.docMarkdown
-            : `${thread.docMarkdown.trim()}\n\n${formatTaskRefMarkdown(task)}`.trim(),
+        resume: thread.resume || displayTaskTitle(task),
       },
       item,
     );
-    const saved = await persistThread(next);
+    const saved = await persistThread(materializeStructuredThread(next));
     const event = createEvent(thread.id, 'task_linked', 'user', `Linked task: ${item.title}`);
     await persistEvent(event);
     set((state) => ({
@@ -1918,10 +2123,6 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
   addStreamToThread: async (entry, mode = 'current') => {
     const current = get().currentThread;
     const title = summarizeText(entry.content, 64) || 'Stream note';
-    const entryRefMarkdown =
-      entry.entryType === 'spark'
-        ? formatSparkRefMarkdown(entry)
-        : `> ${summarizeText(entry.content, 220)}`;
     const thread =
       mode === 'new' || !current
         ? await get().createThread({
@@ -1929,10 +2130,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
             mission: `Organize and move "${title}" forward.`,
             lane: 'research',
             roleId: entry.roleId,
-            docMarkdown: `## Notes from stream\n\n${entryRefMarkdown}\n`,
+            docMarkdown: '',
           })
         : current;
-    const existing = thread.contextItems.find((item) => item.kind === 'stream' && item.refId === entry.id);
+    const existing = thread.contextItems.find(
+      (item) => item.kind === 'stream' && item.refId === entry.id,
+    );
     if (existing) {
       await get().openThread(thread.id);
       return;
@@ -1945,14 +2148,235 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       content: summarizeText(entry.content, 220),
       addedAt: Date.now(),
     };
-    const next = withContextItem(thread, item);
+    const next = withContextItem(
+      materializeStructuredThread({
+        ...thread,
+        blocks: [
+          ...thread.blocks,
+          {
+            id: crypto.randomUUID(),
+            kind: entry.entryType === 'spark' ? 'spark' : 'log',
+            title,
+            body: entry.content,
+            promotedStreamEntryId: entry.id,
+            sortKey: Date.now(),
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+        resume: thread.resume || (entry.entryType === 'spark' ? title : thread.resume),
+        updatedAt: Date.now(),
+      }),
+      item,
+    );
     const saved = await persistThread(next);
-    const event = createEvent(thread.id, 'context_added', 'user', `Added stream context: ${item.title}`);
+    const event = createEvent(
+      thread.id,
+      'context_added',
+      'user',
+      `Added stream context: ${item.title}`,
+    );
     await persistEvent(event);
     set((state) => ({
       currentThread: saved,
       threads: updateThreadInList(state.threads, saved),
-      currentEvents: [event, ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id)],
+      currentEvents: [
+        event,
+        ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id),
+      ],
+    }));
+  },
+
+  addThreadBlock: async (kind, body, options) => {
+    const current = get().currentThread;
+    const trimmed = body.trim();
+    if (!current || !trimmed) return null;
+    const block = buildThreadBlock(kind, trimmed, options);
+    const next = materializeStructuredThread({
+      ...current,
+      blocks: [...current.blocks, block],
+      resume:
+        current.resume || (block.kind === 'task' ? summarizeBlockTitle(block) : current.resume),
+      updatedAt: Date.now(),
+    });
+    const saved = await persistThread(next);
+    const event = createEvent(
+      saved.id,
+      'block_added',
+      'user',
+      `Added ${kind} block: ${summarizeBlockTitle(block)}`,
+      trimmed,
+      { blockId: block.id, kind },
+    );
+    await persistEvent(event);
+    set((state) => ({
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
+      currentEvents: [
+        event,
+        ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id),
+      ],
+      persistedDocMarkdown: saved.docMarkdown,
+      docDirty: false,
+    }));
+    return saved.blocks.find((item) => item.id === block.id) ?? block;
+  },
+
+  updateThreadState: async (patch) => {
+    const current = get().currentThread;
+    if (!current) return;
+    const nextPause = createThreadPause(patch.pauseReason, patch.pauseThen);
+    const next = materializeStructuredThread({
+      ...current,
+      title: patch.title?.trim() || current.title,
+      status: normalizeThreadStatusPatch(patch.status) ?? current.status,
+      resume: patch.resume?.trim() || undefined,
+      pause: nextPause,
+      updatedAt: Date.now(),
+    });
+    const saved = await persistThread(next);
+    const events: WorkThreadEvent[] = [];
+    if (patch.status && normalizeThreadStatusPatch(patch.status) !== current.status) {
+      events.push(
+        createEvent(saved.id, 'status_changed', 'user', `Status changed to ${saved.status}`),
+      );
+    }
+    if (patch.resume !== undefined && (patch.resume?.trim() || '') !== (current.resume ?? '')) {
+      events.push(createEvent(saved.id, 'resume_updated', 'user', 'Updated thread resume cue'));
+    }
+    if (
+      patch.pauseReason !== undefined &&
+      (patch.pauseReason?.trim() || '') !== (current.pause?.reason ?? '')
+    ) {
+      events.push(createEvent(saved.id, 'pause_updated', 'user', 'Updated thread pause state'));
+    }
+    await Promise.all(events.map((event) => persistEvent(event)));
+    set((state) => ({
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
+      currentEvents: [
+        ...events,
+        ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id),
+      ],
+      persistedDocMarkdown: saved.docMarkdown,
+      docDirty: false,
+    }));
+  },
+
+  promoteBlockToStream: async (blockId) => {
+    const current = get().currentThread;
+    if (!current) return;
+    const block = current.blocks.find((item) => item.id === blockId);
+    if (!block || block.promotedStreamEntryId) return;
+    const content = block.title?.trim()
+      ? `${block.title.trim()}${block.body.trim() ? `\n\n${block.body.trim()}` : ''}`
+      : block.body.trim();
+    if (!content) return;
+    const entry = await useStreamStore.getState().addEntry(content, false, {
+      roleId: current.roleId,
+      entryType: block.kind === 'spark' ? 'spark' : 'log',
+      threadMeta: {
+        sourceThreadId: current.id,
+        sparkState: block.kind === 'spark' ? 'open' : undefined,
+      },
+    });
+    const next = materializeStructuredThread({
+      ...current,
+      blocks: current.blocks.map((item) =>
+        item.id === blockId
+          ? { ...item, promotedStreamEntryId: entry.id, updatedAt: Date.now() }
+          : item,
+      ),
+      updatedAt: Date.now(),
+    });
+    const saved = await persistThread(next);
+    const event = createEvent(
+      saved.id,
+      'block_promoted',
+      'user',
+      `Promoted ${block.kind} block to stream`,
+      undefined,
+      { blockId, streamEntryId: entry.id },
+    );
+    await persistEvent(event);
+    set((state) => ({
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
+      currentEvents: [
+        event,
+        ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id),
+      ],
+      persistedDocMarkdown: saved.docMarkdown,
+      docDirty: false,
+    }));
+  },
+
+  createTaskFromBlock: async (blockId) => {
+    const current = get().currentThread;
+    if (!current) return;
+    const block = current.blocks.find(
+      (item): item is Extract<WorkThreadBlock, { kind: 'task' }> =>
+        item.id === blockId && item.kind === 'task',
+    );
+    if (!block) return;
+    const title = summarizeBlockTitle(block);
+    const taskStore = useTaskStore.getState();
+    const existing = block.linkedTaskId
+      ? (taskStore.tasks.find((task) => task.id === block.linkedTaskId) ?? undefined)
+      : undefined;
+    let linkedTaskId = block.linkedTaskId;
+    if (existing) {
+      await taskStore.updateTask({
+        ...existing,
+        title,
+        body: block.body,
+        threadId: current.id,
+        resume: block.resume,
+        pause: clonePauseToTaskPause(block.pause),
+        taskType: block.taskAlias === 'mission' ? 'project' : 'task',
+        updatedAt: new Date(),
+      });
+    } else {
+      const created = await taskStore.createTask(title, {
+        body: block.body,
+        roleId: current.roleId,
+      });
+      linkedTaskId = created.id;
+      await taskStore.updateTask({
+        ...created,
+        threadId: current.id,
+        resume: block.resume,
+        pause: clonePauseToTaskPause(block.pause),
+        taskType: block.taskAlias === 'mission' ? 'project' : 'task',
+        updatedAt: new Date(),
+      });
+    }
+    const next = materializeStructuredThread({
+      ...current,
+      blocks: current.blocks.map((item) =>
+        item.id === blockId ? { ...item, linkedTaskId, updatedAt: Date.now() } : item,
+      ),
+      updatedAt: Date.now(),
+    });
+    const saved = await persistThread(next);
+    const event = createEvent(
+      saved.id,
+      'task_created',
+      'user',
+      `Linked ${block.taskAlias === 'mission' ? 'mission' : 'task'} block to task`,
+      undefined,
+      { blockId, taskId: linkedTaskId },
+    );
+    await persistEvent(event);
+    set((state) => ({
+      currentThread: saved,
+      threads: updateThreadInList(state.threads, saved),
+      currentEvents: [
+        event,
+        ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id),
+      ],
+      persistedDocMarkdown: saved.docMarkdown,
+      docDirty: false,
     }));
   },
 
@@ -1996,12 +2420,14 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     set((state) => ({
       currentThread: saved,
       threads: updateThreadInList(state.threads, saved),
-      currentEvents: [event, ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id)],
+      currentEvents: [
+        event,
+        ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id),
+      ],
       saveError: null,
       docDirty: false,
       persistedDocMarkdown: saved.docMarkdown,
-      syncStatus:
-        state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
+      syncStatus: state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
       syncMessage: null,
     }));
     return entry;
@@ -2052,8 +2478,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       );
       await persistEvent(event);
       set((state) => ({
-        currentThread:
-          state.currentThread?.id === saved.id ? saved : state.currentThread,
+        currentThread: state.currentThread?.id === saved.id ? saved : state.currentThread,
         threads: updateThreadInList(state.threads, saved),
         currentEvents:
           state.currentThread?.id === saved.id
@@ -2111,7 +2536,10 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     set((state) => ({
       currentThread: saved,
       threads: updateThreadInList(state.threads, saved),
-      currentEvents: [event, ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id)],
+      currentEvents: [
+        event,
+        ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id),
+      ],
     }));
   },
 
@@ -2151,7 +2579,10 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     set((state) => ({
       currentThread: saved,
       threads: updateThreadInList(state.threads, saved),
-      currentEvents: [event, ...state.currentEvents.filter((timeline) => timeline.threadId === current.id)],
+      currentEvents: [
+        event,
+        ...state.currentEvents.filter((timeline) => timeline.threadId === current.id),
+      ],
     }));
   },
 
@@ -2171,7 +2602,9 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const next = {
       ...draft,
       resumeCard:
-        draft.resumeCard.summary || draft.resumeCard.nextStep ? draft.resumeCard : autoResumeCard(draft),
+        draft.resumeCard.summary || draft.resumeCard.nextStep
+          ? draft.resumeCard
+          : autoResumeCard(draft),
       updatedAt: Date.now(),
     };
     if (saveTimer) {
@@ -2187,12 +2620,14 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     set((state) => ({
       currentThread: saved,
       threads: updateThreadInList(state.threads, saved),
-      currentEvents: [event, ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id)],
+      currentEvents: [
+        event,
+        ...state.currentEvents.filter((timeline) => timeline.threadId === saved.id),
+      ],
       saveError: null,
       docDirty: false,
       persistedDocMarkdown: saved.docMarkdown,
-      syncStatus:
-        state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
+      syncStatus: state.markdownSyncEnabled && state.markdownSyncRoot ? 'synced' : 'disabled',
       syncMessage: null,
     }));
     return true;
@@ -2201,12 +2636,18 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
   addDecision: async (title, detailMarkdown) => {
     const current = get().currentThread;
     if (!current || !title.trim()) return;
-    const event = createEvent(current.id, 'decision_recorded', 'user', title.trim(), detailMarkdown?.trim() || undefined);
+    const event = createEvent(
+      current.id,
+      'decision_recorded',
+      'user',
+      title.trim(),
+      detailMarkdown?.trim() || undefined,
+    );
     await persistEvent(event);
     set((state) => ({ currentEvents: [event, ...state.currentEvents] }));
   },
 
-  addNextAction: async (text, source = 'user', options) => {
+  addNextAction: async (text, options, source = 'user') => {
     const current = get().currentThread;
     if (!current || !text.trim()) return null;
     const parent =
@@ -2219,12 +2660,7 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     if (options?.insertIntoDoc) {
       const insertionFocus = resolveDocInsertionFocus(current, get().workspaceFocus, parent);
       const next = {
-        ...applyDocInsertion(
-          current,
-          insertionFocus,
-          'next',
-          text,
-        ),
+        ...applyDocInsertion(current, insertionFocus, 'next', text),
         updatedAt: Date.now(),
       };
       const created = pickNewestNextAction(next, text, parent);
@@ -2242,7 +2678,12 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       const event =
         options?.recordEvent === false || !created
           ? null
-          : createEvent(current.id, 'next_action_added', source, `Added next action: ${created.text}`);
+          : createEvent(
+              current.id,
+              'next_action_added',
+              source,
+              `Added next action: ${created.text}`,
+            );
       if (event) {
         await persistEvent(event);
       }
@@ -2264,14 +2705,13 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const next = materializeStructuredThread({
       ...current,
       nextActions: [action, ...current.nextActions],
-      resumeCard:
-        current.resumeCard.nextStep
-          ? current.resumeCard
-          : {
-              ...current.resumeCard,
-              nextStep: action.text,
-              updatedAt: Date.now(),
-            },
+      resumeCard: current.resumeCard.nextStep
+        ? current.resumeCard
+        : {
+            ...current.resumeCard,
+            nextStep: action.text,
+            updatedAt: Date.now(),
+          },
       updatedAt: Date.now(),
     });
     const saved = await persistThread(next);
@@ -2340,14 +2780,13 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
       docMarkdown: nextDocMarkdown,
       nextActions: existingActions,
       inlineAnchors: existingAnchors,
-      resumeCard:
-        current.resumeCard.nextStep
-          ? current.resumeCard
-          : {
-              ...current.resumeCard,
-              nextStep: trimmed,
-              updatedAt: Date.now(),
-            },
+      resumeCard: current.resumeCard.nextStep
+        ? current.resumeCard
+        : {
+            ...current.resumeCard,
+            nextStep: trimmed,
+            updatedAt: Date.now(),
+          },
       updatedAt: Date.now(),
     });
     if (saveTimer) {
@@ -2447,7 +2886,11 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
   checkExternalSync: async () => {
     const current = get().currentThread;
     if (!current) return;
-    const check = await checkWorkThreadExternalChanges(current, getCurrentSyncPrefs(), get().docDirty);
+    const check = await checkWorkThreadExternalChanges(
+      current,
+      getCurrentSyncPrefs(),
+      get().docDirty,
+    );
     if (check.kind === 'disabled' || check.kind === 'missing' || check.kind === 'unsupported') {
       set({
         syncStatus: check.kind === 'disabled' ? 'disabled' : 'idle',
@@ -2507,14 +2950,25 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     if (!current) return;
     set({ aiBusy: true });
     try {
-      const suggestion = await generateWorkThreadSuggestion(kind, current, useTaskStore.getState().tasks);
+      const suggestion = await generateWorkThreadSuggestion(
+        kind,
+        current,
+        useTaskStore.getState().tasks,
+      );
       const next = {
         ...current,
         suggestions: [suggestion, ...(current.suggestions ?? [])],
         updatedAt: Date.now(),
       };
       const saved = await persistThread(next);
-      const event = createEvent(current.id, 'ai_suggested', 'ai', suggestion.title, suggestion.content, { kind });
+      const event = createEvent(
+        current.id,
+        'ai_suggested',
+        'ai',
+        suggestion.title,
+        suggestion.content,
+        { kind },
+      );
       await persistEvent(event);
       set((state) => ({
         currentThread: saved,
@@ -2535,11 +2989,18 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const next = {
       ...current,
       docMarkdown: `${current.docMarkdown.trim()}\n\n${suggestion.content}`.trim(),
-      suggestions: (current.suggestions ?? []).map((item) => (item.id === id ? { ...item, applied: true } : item)),
+      suggestions: (current.suggestions ?? []).map((item) =>
+        item.id === id ? { ...item, applied: true } : item,
+      ),
       updatedAt: Date.now(),
     };
     const saved = await persistThread(next);
-    const event = createEvent(current.id, 'ai_applied', 'user', `Inserted AI suggestion: ${suggestion.title}`);
+    const event = createEvent(
+      current.id,
+      'ai_applied',
+      'user',
+      `Inserted AI suggestion: ${suggestion.title}`,
+    );
     await persistEvent(event);
     set((state) => ({
       currentThread: saved,
@@ -2565,11 +3026,18 @@ export const useWorkThreadStore = create<WorkThreadState>((set, get) => ({
     const next = {
       ...current,
       nextActions: [...appended, ...current.nextActions],
-      suggestions: (current.suggestions ?? []).map((item) => (item.id === id ? { ...item, applied: true } : item)),
+      suggestions: (current.suggestions ?? []).map((item) =>
+        item.id === id ? { ...item, applied: true } : item,
+      ),
       updatedAt: Date.now(),
     };
     const saved = await persistThread(next);
-    const event = createEvent(current.id, 'ai_applied', 'user', `Applied AI next steps: ${suggestion.title}`);
+    const event = createEvent(
+      current.id,
+      'ai_applied',
+      'user',
+      `Applied AI next steps: ${suggestion.title}`,
+    );
     await persistEvent(event);
     set((state) => ({
       currentThread: saved,

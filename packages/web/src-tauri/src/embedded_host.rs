@@ -169,19 +169,15 @@ fn resolve_dev_sidecar_path() -> Option<PathBuf> {
         "mlt-server"
     };
     let candidates = [
-        manifest_dir
-            .join("binaries")
-            .join(format!("mlt-server-{}{}", env!("MLT_TAURI_TARGET"), executable_suffix())),
+        manifest_dir.join("binaries").join(format!(
+            "mlt-server-{}{}",
+            env!("MLT_TAURI_TARGET"),
+            executable_suffix()
+        )),
         repo_root.join("target").join("debug").join(filename),
         repo_root.join("target").join("release").join(filename),
-        manifest_dir
-            .join("target")
-            .join("debug")
-            .join(filename),
-        manifest_dir
-            .join("target")
-            .join("release")
-            .join(filename),
+        manifest_dir.join("target").join("debug").join(filename),
+        manifest_dir.join("target").join("release").join(filename),
     ];
     candidates.into_iter().find(|candidate| candidate.exists())
 }
@@ -226,7 +222,10 @@ async fn wait_for_health(base_url: &str, child: &mut Child) -> Result<(), String
         match child.try_wait() {
             Ok(Some(status)) => {
                 return Err(match status.code() {
-                    Some(code) => format!("Embedded host exited before health check with code {}.", code),
+                    Some(code) => format!(
+                        "Embedded host exited before health check with code {}.",
+                        code
+                    ),
                     None => "Embedded host exited before health check.".to_string(),
                 });
             }

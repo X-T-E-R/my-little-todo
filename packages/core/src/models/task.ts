@@ -39,6 +39,12 @@ export interface StatusChange {
   timestamp: Date;
 }
 
+export interface TaskPause {
+  reason: string;
+  then?: string;
+  updatedAt: Date;
+}
+
 /** Multi-step progress for ADHD-friendly execution coaching (orthogonal to TaskStatus). */
 export type TaskPhase = 'understood' | 'exploring' | 'working' | 'core_done' | 'wrapping_up';
 
@@ -54,7 +60,7 @@ export interface ProgressLog {
 /** Optional Kanban column placement (Board planning view). */
 export type KanbanColumn = 'ideas' | 'planned' | 'doing' | 'finishing' | 'done_recent';
 
-/** When `project`, the task is treated as a goal container (Things-style project); UI may show progress and grouping. */
+/** When `project`, the task is treated as a mission-like goal container. */
 export type TaskType = 'task' | 'project';
 
 export interface Task {
@@ -82,6 +88,12 @@ export interface Task {
 
   /** Free-form markdown content: notes, checklists, anything. */
   body: string;
+  /** Thread-level linkage for mission/task blocks. */
+  threadId?: string;
+  /** Where to continue if this task is resumed directly. */
+  resume?: string;
+  /** Why this task is paused and what should happen after unblock. */
+  pause?: TaskPause;
   /** IDs of child Task objects that are subtasks of this task. */
   subtaskIds: string[];
   /** If this task is a subtask, points to the parent task ID. */

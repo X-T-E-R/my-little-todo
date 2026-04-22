@@ -1,11 +1,11 @@
-import { exists, mkdir, readTextFile, stat, writeTextFile } from '@tauri-apps/plugin-fs';
 import {
+  type WorkThread,
   ensureWorkThreadRuntime,
   hashWorkThreadMarkdown,
   parseWorkThreadMarkdown,
   serializeWorkThreadToMarkdown,
-  type WorkThread,
 } from '@my-little-todo/core';
+import { exists, mkdir, readTextFile, stat, writeTextFile } from '@tauri-apps/plugin-fs';
 import { isTauriEnv } from './platform';
 
 export const WORK_THREAD_MARKDOWN_SYNC_ENABLED_KEY = 'work-thread:markdown-sync-enabled';
@@ -31,7 +31,28 @@ export type WorkThreadExternalCheck =
   | { kind: 'external-change'; thread: WorkThread; snapshot: WorkThreadExternalSnapshot };
 
 function normalizePath(path: string): string {
-  return path.trim().replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+  return path
+    .trim()
+    .replace(/[\\/]+/g, '/')
+    .replace(/\/+$/, '');
+}
+
+function buildImportedPause(
+  reason: string | undefined,
+  thenText?: string,
+): NonNullable<WorkThread['pause']> | undefined {
+  const normalizedReason = reason?.trim();
+  if (!normalizedReason) return undefined;
+  const pause: NonNullable<WorkThread['pause']> = {
+    reason: normalizedReason,
+    updatedAt: Date.now(),
+  };
+  const normalizedThen = thenText?.trim();
+  if (normalizedThen) {
+    // biome-ignore lint/suspicious/noThenProperty: `pause.then` is a persisted domain field.
+    pause.then = normalizedThen;
+  }
+  return pause;
 }
 
 function dirname(path: string): string {
@@ -41,7 +62,11 @@ function dirname(path: string): string {
 }
 
 export function slugifyWorkThreadTitle(title: string): string {
-  const base = title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const base = title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
   return base || 'thread';
 }
 
@@ -72,150 +97,23 @@ export function applyMarkdownPatchToThread(
   modifiedAt?: number | null,
 ): WorkThread {
   const patch = parseWorkThreadMarkdown(markdown);
-  const preserveLegacyIntents = patch.intents.length === 0 && /\[\[intent:/i.test(markdown);
-  const preserveLegacySparks = patch.sparkContainers.length === 0 && /\[\[spark:/i.test(markdown);
-  const preserveLegacyNextActions = patch.nextActions.length === 0 && /\[\[next:/i.test(markdown);
-  const preserveLegacyBlocks = patch.waitingFor.length === 0 && /\[\[block:/i.test(markdown);
-  const existingIntents = [...thread.intents];
-  const existingSparkContainers = [...thread.sparkContainers];
-  const existingActions = [...thread.nextActions];
-  const existingWaiting = [...thread.waitingFor];
-  const existingInterrupts = [...thread.interrupts];
-  const intents =
-    preserveLegacyIntents
-      ? thread.intents
-      : patch.intents.map((item) => {
-          const matchIndex = existingIntents.findIndex(
-            (current) => current.text.trim() === item.text.trim(),
-          );
-          if (matchIndex < 0) {
-            return {
-              ...item,
-              parentThreadId: thread.id,
-            };
-          }
-          const [matched] = existingIntents.splice(matchIndex, 1);
-          return {
-            ...matched,
-            text: item.text,
-            detail: item.detail,
-            bodyMarkdown: item.bodyMarkdown,
-            collapsed: item.collapsed,
-            parentIntentId: item.parentIntentId,
-            parentSparkId: item.parentSparkId,
-            updatedAt: Date.now(),
-          };
-        });
-  const sparkContainers =
-    preserveLegacySparks
-      ? thread.sparkContainers
-      : patch.sparkContainers.map((item) => {
-          const matchIndex = existingSparkContainers.findIndex(
-            (current) => current.title.trim() === item.title.trim(),
-          );
-          if (matchIndex < 0) {
-            return {
-              ...item,
-              parentThreadId: thread.id,
-            };
-          }
-          const [matched] = existingSparkContainers.splice(matchIndex, 1);
-          return {
-            ...matched,
-            title: item.title,
-            bodyMarkdown: item.bodyMarkdown,
-            collapsed: item.collapsed,
-            parentIntentId: item.parentIntentId,
-            parentSparkId: item.parentSparkId,
-            updatedAt: Date.now(),
-          };
-        });
-  const nextActions =
-    preserveLegacyNextActions
-      ? thread.nextActions
-      : patch.nextActions.map((item) => {
-          const matchIndex = existingActions.findIndex(
-            (current) => current.text.trim() === item.text.trim(),
-          );
-          if (matchIndex < 0) {
-            return {
-              ...item,
-              parentThreadId: thread.id,
-            };
-          }
-          const [matched] = existingActions.splice(matchIndex, 1);
-          return {
-            ...matched,
-            done: item.done,
-            parentIntentId: item.parentIntentId,
-            parentSparkId: item.parentSparkId,
-          };
-        });
-  const waitingFor =
-    preserveLegacyBlocks
-      ? thread.waitingFor
-      : patch.waitingFor.map((item) => {
-          const matchIndex = existingWaiting.findIndex(
-            (current) =>
-              current.kind === item.kind &&
-              current.title.trim() === item.title.trim() &&
-              (current.detail ?? '').trim() === (item.detail ?? '').trim(),
-          );
-          if (matchIndex < 0) {
-            return {
-              ...item,
-              parentThreadId: thread.id,
-            };
-          }
-          const [matched] = existingWaiting.splice(matchIndex, 1);
-          return {
-            ...matched,
-            title: item.title,
-            detail: item.detail,
-            parentIntentId: item.parentIntentId,
-            parentSparkId: item.parentSparkId,
-          };
-        });
-  const interrupts =
-    preserveLegacyBlocks
-      ? thread.interrupts
-      : patch.interrupts.map((item) => {
-          const matchIndex = existingInterrupts.findIndex(
-            (current) =>
-              current.source === item.source &&
-              current.title.trim() === item.title.trim() &&
-              (current.content ?? '').trim() === (item.content ?? '').trim(),
-          );
-          if (matchIndex < 0) {
-            return {
-              ...item,
-              parentThreadId: thread.id,
-            };
-          }
-          const [matched] = existingInterrupts.splice(matchIndex, 1);
-          return {
-            ...matched,
-            title: item.title,
-            content: item.content,
-            parentIntentId: item.parentIntentId,
-            parentSparkId: item.parentSparkId,
-          };
-        });
   const next = ensureWorkThreadRuntime({
     ...thread,
     title: patch.frontmatter.title?.trim() || thread.title,
-    mission: patch.frontmatter.mission?.trim() || thread.mission,
+    bodyMarkdown: patch.bodyMarkdown,
+    resume: patch.frontmatter.resume?.trim() || undefined,
+    pause: buildImportedPause(patch.frontmatter.pauseReason, patch.frontmatter.pauseThen),
+    blocks: patch.blocks,
     status: patch.frontmatter.status ?? thread.status,
-    lane: patch.frontmatter.lane ?? thread.lane,
     roleId: patch.frontmatter.roleId?.trim() || thread.roleId,
     docMarkdown: patch.docMarkdown,
-    rootMarkdown: patch.rootMarkdown,
-    explorationMarkdown: patch.explorationMarkdown,
-    intents,
-    sparkContainers,
-    nextActions,
-    waitingFor,
-    interrupts,
+    rootMarkdown: patch.bodyMarkdown,
+    explorationMarkdown: '',
+    intents: thread.intents,
+    sparkContainers: thread.sparkContainers,
+    nextActions: thread.nextActions,
+    waitingFor: thread.waitingFor,
+    interrupts: thread.interrupts,
     updatedAt: Date.now(),
     syncMeta: {
       ...(thread.syncMeta ?? { mode: 'internal' }),
@@ -268,7 +166,9 @@ export async function exportWorkThreadToMarkdownFile(
       mode: 'hybrid',
       filePath,
       lastExportedHash: hashWorkThreadMarkdown(markdown),
-      lastExternalModifiedAt: info.mtime ? info.mtime.getTime() : thread.syncMeta?.lastExternalModifiedAt,
+      lastExternalModifiedAt: info.mtime
+        ? info.mtime.getTime()
+        : thread.syncMeta?.lastExternalModifiedAt,
     },
   });
 }

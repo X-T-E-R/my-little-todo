@@ -1,10 +1,15 @@
 # My Little Todo
 
+![My Little Todo 中文横幅](docs/brand/banner-zh-CN.svg)
+
+> 别只列清单，开始推进。
+>
 > 这不是任务管理器，这是你的外部执行系统。
 
 传统 todo 工具的隐喻是"账本"——忠实记录你的债务。My Little Todo 的隐喻是"教练"——推你一把，然后在旁边看着你跑。
 
 [English](README.md)
+[品牌资产](docs/brand/README.md)
 
 ## 特性
 
@@ -28,6 +33,8 @@
 - 冻结 auth / sync / MCP 的平台化扩张范围
 
 详见 [docs/architecture/03-host-plugin-platform.md](docs/architecture/03-host-plugin-platform.md)。
+
+如果要看运行时数据的版本历史与审计日志，请看 [docs/architecture/05-version-history-and-audit.md](docs/architecture/05-version-history-and-audit.md)。
 
 当前 Stable 能力：
 

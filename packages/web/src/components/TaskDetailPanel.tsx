@@ -688,6 +688,7 @@ const TaskBodyEditorSection = forwardRef<
   const pendingTaskRef = useRef<{ id: string; body: string } | null>(null);
   const localBodyRef = useRef(localBody);
   localBodyRef.current = localBody;
+  const lastHandledBodyRef = useRef(localBody.replace(/\r\n/g, '\n').trimEnd());
   const editorRef = useRef<RichMarkdownEditorHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -736,6 +737,24 @@ const TaskBodyEditorSection = forwardRef<
   }, [task.id, flushPending]);
 
   const handleBodyChange = (body: string) => {
+    const normalizedIncoming = body.replace(/\r\n/g, '\n').trimEnd();
+    const normalizedLocal = localBodyRef.current.replace(/\r\n/g, '\n').trimEnd();
+    const normalizedTaskBody = task.body.replace(/\r\n/g, '\n').trimEnd();
+    if (
+      normalizedIncoming === lastHandledBodyRef.current &&
+      pendingTaskRef.current?.id === task.id
+    ) {
+      return;
+    }
+    if (
+      normalizedIncoming === normalizedLocal &&
+      normalizedIncoming === normalizedTaskBody &&
+      pendingTaskRef.current == null
+    ) {
+      return;
+    }
+    lastHandledBodyRef.current = normalizedIncoming;
+    localBodyRef.current = body;
     setLocalBody(body);
     onBodySaveStatusChange?.('saving');
     pendingTaskRef.current = { id: task.id, body };

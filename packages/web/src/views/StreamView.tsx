@@ -31,7 +31,7 @@ import {
   UserCircle,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { useOpenAiChat } from '../ai/useOpenAiChat';
 import { AdvancedFilterPanel } from '../components/AdvancedFilterPanel';
@@ -66,6 +66,12 @@ import {
 import { useNowOverrideStore, useTaskStore } from '../stores';
 import { useToastStore } from '../stores/toastStore';
 import { ENTRY_TYPE_KEYS, ENTRY_TYPE_META } from '../utils/entryTypeUtils';
+import {
+  clampStreamPageSize,
+  DEFAULT_STREAM_PAGE_SIZE,
+  sliceVisibleStreamEntries,
+  STREAM_PAGE_SIZE_SETTING_KEY,
+} from '../utils/streamPagination';
 import { useIsMobile } from '../utils/useIsMobile';
 
 /* ── Subtask preview inside EntryCard ── */
@@ -706,8 +712,13 @@ export function StreamView() {
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
   const shouldStickToStreamEdgeRef = useRef(true);
   const pendingAutoScrollRef = useRef<'bottom' | 'top' | null>(null);
+  const edgeLoadLockRef = useRef(false);
+  const pendingOlderRevealRef = useRef<{ prevScrollHeight: number; prevScrollTop: number } | null>(
+    null,
+  );
 
   const entries = useStreamStore((s) => s.entries);
+  const historyExhausted = useStreamStore((s) => s.historyExhausted);
   const loading = useStreamStore((s) => s.loading);
   const streamError = useStreamStore((s) => s.error);
   const load = useStreamStore((s) => s.load);
@@ -715,7 +726,6 @@ export function StreamView() {
   const runSearch = useStreamStore((s) => s.runSearch);
   const clearSearch = useStreamStore((s) => s.clearSearch);
   const searchResults = useStreamStore((s) => s.searchResults);
-  const daysLoaded = useStreamStore((s) => s.daysLoaded);
   const addEntry = useStreamStore((s) => s.addEntry);
   const updateEntry = useStreamStore((s) => s.updateEntry);
   const deleteEntry = useStreamStore((s) => s.deleteEntry);
@@ -748,6 +758,8 @@ export function StreamView() {
   const setStreamPanelMode = useThinkSessionStore((s) => s.setStreamMode);
   const addStreamToThread = useWorkThreadStore((s) => s.addStreamToThread);
   const openThread = useWorkThreadStore((s) => s.openThread);
+  const [streamPageSize, setStreamPageSize] = useState(DEFAULT_STREAM_PAGE_SIZE);
+  const [visibleCount, setVisibleCount] = useState(DEFAULT_STREAM_PAGE_SIZE);
 
   useEffect(() => {
     if (!advancedFilterEnabled) resetFilter();
@@ -793,8 +805,18 @@ export function StreamView() {
     return arr;
   }, [roleFiltered, searchResults, typeFilter, filterRoot, sortMode, advancedFilterEnabled]);
 
-  const groups = groupEntriesByDate(displayEntries);
-  const visibleEntryIds = useMemo(() => displayEntries.map((entry) => entry.id), [displayEntries]);
+  const isSearchMode = searchResults !== null;
+  const visibleDisplayEntries = useMemo(
+    () =>
+      isSearchMode ? displayEntries : sliceVisibleStreamEntries(displayEntries, visibleCount),
+    [displayEntries, isSearchMode, visibleCount],
+  );
+  const groups = groupEntriesByDate(visibleDisplayEntries);
+  const visibleEntryIds = useMemo(
+    () => visibleDisplayEntries.map((entry) => entry.id),
+    [visibleDisplayEntries],
+  );
+  const canLoadMoreHistory = !isSearchMode && (displayEntries.length > visibleCount || !historyExhausted);
   const [streamDirection, setStreamDirection] = useState<'bottom-up' | 'top-down'>('bottom-up');
   const initialScrollDone = useRef(false);
 
@@ -806,6 +828,14 @@ export function StreamView() {
   }, []);
 
   /** Scroll to entry after opening Stream from project detail (sessionStorage set by TaskDetailPanel). */
+  useEffect(() => {
+    const id = sessionStorage.getItem('mlt-stream-scroll-to');
+    if (!id || isSearchMode) return;
+    const targetIndex = displayEntries.findIndex((entry) => entry.id === id);
+    if (targetIndex < 0 || targetIndex < visibleCount) return;
+    setVisibleCount(Math.ceil((targetIndex + 1) / streamPageSize) * streamPageSize);
+  }, [displayEntries, isSearchMode, streamPageSize, visibleCount]);
+
   useEffect(() => {
     const id = sessionStorage.getItem('mlt-stream-scroll-to');
     if (!id) return;
@@ -855,6 +885,26 @@ export function StreamView() {
       window.removeEventListener('focus', onFocus);
     };
   }, [applyStreamDirection]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadPageSize = () => {
+      getSetting(STREAM_PAGE_SIZE_SETTING_KEY).then((value) => {
+        if (!cancelled) setStreamPageSize(clampStreamPageSize(value));
+      });
+    };
+    loadPageSize();
+    window.addEventListener('focus', loadPageSize);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', loadPageSize);
+    };
+  }, []);
+
+  useEffect(() => {
+    edgeLoadLockRef.current = false;
+    setVisibleCount(streamPageSize);
+  }, [streamPageSize, currentRoleId, typeFilter, filterRoot, sortMode, isSearchMode]);
 
   const visibleGroups = useMemo(() => {
     if (streamDirection === 'bottom-up') return groups;
@@ -907,6 +957,12 @@ export function StreamView() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (isSearchMode || loading || historyExhausted) return;
+    if (displayEntries.length >= visibleCount) return;
+    void loadMore();
+  }, [displayEntries.length, historyExhausted, isSearchMode, loadMore, loading, visibleCount]);
 
   useEffect(() => {
     if (!filterPanelOpen) return;
@@ -1003,6 +1059,84 @@ export function StreamView() {
     return () => container.removeEventListener('scroll', updateEdgeState);
   }, [streamDirection, isComposerPristine, isFocused, isComposerManuallyCollapsed]);
 
+  const requestNextPage = useCallback(() => {
+    if (!canLoadMoreHistory || loading || isSearchMode) return;
+    const container = scrollRef.current;
+    if (container && streamDirection === 'bottom-up') {
+      pendingOlderRevealRef.current = {
+        prevScrollHeight: container.scrollHeight,
+        prevScrollTop: container.scrollTop,
+      };
+    }
+    edgeLoadLockRef.current = true;
+    setVisibleCount((prev) => prev + streamPageSize);
+  }, [canLoadMoreHistory, isSearchMode, loading, streamDirection, streamPageSize]);
+
+  useLayoutEffect(() => {
+    if (streamDirection !== 'bottom-up') {
+      pendingOlderRevealRef.current = null;
+      return;
+    }
+    const pending = pendingOlderRevealRef.current;
+    const container = scrollRef.current;
+    if (!pending || !container) return;
+    const delta = container.scrollHeight - pending.prevScrollHeight;
+    if (delta > 0) {
+      container.scrollTop = pending.prevScrollTop + delta;
+    }
+    if (container.scrollTop >= 64) {
+      edgeLoadLockRef.current = false;
+    }
+    pendingOlderRevealRef.current = null;
+  }, [streamDirection, visibleDisplayEntries.length]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const nearLoadEdge =
+      streamDirection === 'bottom-up'
+        ? container.scrollTop < 64
+        : container.scrollHeight - container.clientHeight - container.scrollTop < 64;
+    if (!nearLoadEdge) {
+      edgeLoadLockRef.current = false;
+    }
+  }, [loading, streamDirection, visibleDisplayEntries.length]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container || isSearchMode || loading || !canLoadMoreHistory) return;
+    if (container.scrollHeight > container.clientHeight + 8) return;
+    requestNextPage();
+  }, [
+    canLoadMoreHistory,
+    isSearchMode,
+    loading,
+    requestNextPage,
+    visibleDisplayEntries.length,
+  ]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const maybeAutoLoad = () => {
+      const nearLoadEdge =
+        streamDirection === 'bottom-up'
+          ? container.scrollTop < 64
+          : container.scrollHeight - container.clientHeight - container.scrollTop < 64;
+      if (!nearLoadEdge) {
+        edgeLoadLockRef.current = false;
+        return;
+      }
+      if (edgeLoadLockRef.current || !canLoadMoreHistory || loading || isSearchMode) return;
+      requestNextPage();
+    };
+
+    maybeAutoLoad();
+    container.addEventListener('scroll', maybeAutoLoad, { passive: true });
+    return () => container.removeEventListener('scroll', maybeAutoLoad);
+  }, [canLoadMoreHistory, isSearchMode, loading, requestNextPage, streamDirection]);
+
   useEffect(() => {
     const data = { input, selectedEntryType, metaDdlDate, metaDdlType, metaTags };
     if (!input && selectedEntryType === 'spark' && !metaDdlDate && !metaTags) {
@@ -1076,7 +1210,7 @@ export function StreamView() {
   const handleOpenDetail = async (entry: StreamEntry) => {
     let taskId = entry.extractedTaskId;
     try {
-      if (!taskId) {
+      if (!taskId || !taskMap.has(taskId)) {
         taskId = await enrichEntry(entry.id);
         await loadTasks();
       }
@@ -1863,28 +1997,8 @@ export function StreamView() {
                           ? `calc(${isComposerExpanded ? 122 : 58}px + var(--safe-area-bottom))`
                           : undefined,
                     }}
-                  >
-                    <div className="mx-auto max-w-4xl space-y-3 xl:max-w-5xl">
-                      {searchResults === null &&
-                        visibleGroups.length > 0 &&
-                        streamDirection === 'bottom-up' && (
-                          <div className="flex justify-center py-4">
-                            <button
-                              type="button"
-                              onClick={() => loadMore()}
-                              disabled={loading}
-                              className="rounded-full px-4 py-2 text-xs font-medium transition-opacity"
-                              style={{
-                                border: '1px solid var(--color-border)',
-                                color: 'var(--color-text-secondary)',
-                                opacity: loading ? 0.5 : 1,
-                              }}
-                            >
-                              {t('Load more history', { days: daysLoaded })}
-                            </button>
-                          </div>
-                        )}
-
+                    >
+                      <div className="mx-auto max-w-4xl space-y-3 xl:max-w-5xl">
                       {loading && groups.length === 0 && searchResults === null && (
                         <div className="flex items-center justify-center py-32">
                           <span className="text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
@@ -1923,7 +2037,10 @@ export function StreamView() {
                         </div>
                       )}
 
-                      {!loading && displayEntries.length === 0 && searchResults === null && (
+                      {!loading &&
+                        visibleDisplayEntries.length === 0 &&
+                        searchResults === null &&
+                        historyExhausted && (
                         <div className="flex flex-col items-center justify-center py-32 text-center">
                           <Sparkles
                             size={36}
@@ -1976,26 +2093,6 @@ export function StreamView() {
                           </div>
                         </div>
                       ))}
-
-                      {searchResults === null &&
-                        visibleGroups.length > 0 &&
-                        streamDirection === 'top-down' && (
-                          <div className="flex justify-center py-6">
-                            <button
-                              type="button"
-                              onClick={() => loadMore()}
-                              disabled={loading}
-                              className="rounded-full px-4 py-2 text-xs font-medium transition-opacity"
-                              style={{
-                                border: '1px solid var(--color-border)',
-                                color: 'var(--color-text-secondary)',
-                                opacity: loading ? 0.5 : 1,
-                              }}
-                            >
-                              {t('Load more history', { days: daysLoaded })}
-                            </button>
-                          </div>
-                        )}
 
                       <div ref={bottomAnchorRef} />
                     </div>

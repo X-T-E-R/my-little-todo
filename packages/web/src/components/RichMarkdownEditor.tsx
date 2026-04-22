@@ -175,6 +175,8 @@ const EMPTY_SLASH_MENU: SlashCommandState = {
   selectedIndex: 0,
 };
 
+const EMPTY_SLASH_COMMANDS: MarkdownSlashCommand[] = [];
+
 const variantClassMap: Record<MarkdownEditorVariant, string> = {
   compact: 'markdown-editor markdown-editor--compact',
   standard: 'markdown-editor markdown-editor--standard',
@@ -480,7 +482,7 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
       onSubmitShortcut,
       onPasteCapture,
       taskRefAutocomplete = false,
-      slashCommands = [],
+      slashCommands = EMPTY_SLASH_COMMANDS,
       onSlashCommand,
       nativeSlashUi = 'auto',
       onSparkRefOpen,
@@ -510,6 +512,10 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
     const slashMenuRef = useRef<SlashCommandState>(EMPTY_SLASH_MENU);
     const [slashMenu, setSlashMenu] = useState<SlashCommandState>(EMPTY_SLASH_MENU);
     const [isCreatingTask, setIsCreatingTask] = useState(false);
+    const suppressedMarkdownRef = useRef<string | null>(
+      normalizeMarkdownEditorContent(initialMarkdown),
+    );
+    const lastEmittedMarkdownRef = useRef(normalizeMarkdownEditorContent(initialMarkdown));
 
     const tasks = useTaskStore((s) => s.tasks);
     const addEntry = useStreamStore((s) => s.addEntry);
@@ -843,6 +849,32 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
 
         crepe.on((listener) => {
           listener.markdownUpdated((_ctx, markdown) => {
+            const normalizedMarkdown = normalizeMarkdownEditorContent(markdown);
+            if (
+              suppressedMarkdownRef.current != null &&
+              normalizedMarkdown === suppressedMarkdownRef.current
+            ) {
+              suppressedMarkdownRef.current = null;
+              lastEmittedMarkdownRef.current = normalizedMarkdown;
+              if (taskRefAutocomplete) {
+                window.requestAnimationFrame(() => syncAutocompleteRef.current?.());
+              }
+              if (workThreadFocusChangeRef.current) {
+                window.requestAnimationFrame(() => emitWorkThreadFocus());
+              }
+              return;
+            }
+            if (normalizedMarkdown === lastEmittedMarkdownRef.current) {
+              if (taskRefAutocomplete) {
+                window.requestAnimationFrame(() => syncAutocompleteRef.current?.());
+              }
+              if (workThreadFocusChangeRef.current) {
+                window.requestAnimationFrame(() => emitWorkThreadFocus());
+              }
+              return;
+            }
+            suppressedMarkdownRef.current = null;
+            lastEmittedMarkdownRef.current = normalizedMarkdown;
             cbRef.current(markdown);
             if (taskRefAutocomplete) {
               window.requestAnimationFrame(() => syncAutocompleteRef.current?.());
@@ -1114,8 +1146,11 @@ const RichMarkdownEditorInner = forwardRef<RichMarkdownEditorHandle, RichMarkdow
         normalizeMarkdownEditorContent(currentMarkdown) ===
         normalizeMarkdownEditorContent(initialMarkdown)
       ) {
+        lastEmittedMarkdownRef.current = normalizeMarkdownEditorContent(currentMarkdown);
         return;
       }
+      suppressedMarkdownRef.current = normalizeMarkdownEditorContent(initialMarkdown);
+      lastEmittedMarkdownRef.current = normalizeMarkdownEditorContent(initialMarkdown);
       editor.action((ctx) => {
         const view = getEditorView(ctx);
         const slice = markdownToSlice(initialMarkdown || '')(ctx);

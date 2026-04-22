@@ -36,52 +36,52 @@ describe('workThreadSync helpers', () => {
       thread,
       `---
 title: "Gateway thread"
-mission: "Ship the gateway"
-status: ready
-lane: research
+status: paused
+resume: "Draft matrix"
+pause.reason: "Waiting for product answer"
+pause.then: "Sync wording after reply"
 ---
 
-## Focus
+Thread body note.
 
-[[task:gw|Gateway]]
+/mission
+title: Ship the gateway
+status: doing
 
-## Next Actions
+Define the completion standard.
 
-- [ ] Draft matrix
+/task
+title: Draft matrix
+status: todo
 
-## Waiting
+Write the concrete action list.
 
-> [!waiting:person] Product answer
-> Need final wording
+/spark
+title: Release ideas
+
+Collect side ideas.
 `,
       123,
     );
     expect(next.title).toBe('Gateway thread');
-    expect(next.nextActions[0]?.text).toBe('Draft matrix');
-    expect(next.waitingFor[0]?.kind).toBe('person');
+    expect(next.resume).toBe('Draft matrix');
+    expect(next.pause?.reason).toBe('Waiting for product answer');
+    expect(next.blocks).toHaveLength(3);
     expect(next.syncMeta?.lastExternalModifiedAt).toBe(123);
     vi.useRealTimers();
   });
 
-  it('preserves runtime next actions and blocks when imported markdown uses only inline refs', () => {
+  it('treats plain markdown body as thread body when no native blocks exist', () => {
     const thread = {
       ...createWorkThread({ title: 'Gateway' }),
-      nextActions: [
-        {
-          id: 'next-1',
-          text: 'Draft matrix',
-          done: false,
-          source: 'user' as const,
-          createdAt: 1,
-        },
-      ],
-      waitingFor: [
+      blocks: [
         {
           id: 'block-1',
-          kind: 'external' as const,
-          title: 'Need product answer',
-          detail: 'Keep the current wording on hold',
-          satisfied: false,
+          kind: 'task' as const,
+          taskAlias: 'task' as const,
+          title: 'Old block',
+          body: 'Old body',
+          sortKey: 1,
           createdAt: 1,
           updatedAt: 1,
         },
@@ -92,60 +92,7 @@ lane: research
       thread,
       `---
 title: "Gateway thread"
-mission: "Ship the gateway"
-status: ready
-lane: research
----
-
-## Focus
-
-[[intent:intent-1|Clarify gateway direction]]
-
-[[next:next-1|Draft matrix]]
-
-[[block:block-1|Need product answer]]
-`,
-      123,
-    );
-
-    expect(next.nextActions).toHaveLength(1);
-    expect(next.waitingFor).toHaveLength(1);
-    expect(next.nextActions[0]?.text).toBe('Draft matrix');
-    expect(next.waitingFor[0]?.title).toBe('Need product answer');
-  });
-
-  it('treats callout and checklist markdown as authoritative for doc runtime fields', () => {
-    const thread = {
-      ...createWorkThread({ title: 'Gateway' }),
-      nextActions: [
-        {
-          id: 'next-1',
-          text: 'Draft matrix',
-          done: false,
-          source: 'user' as const,
-          createdAt: 1,
-        },
-      ],
-      waitingFor: [
-        {
-          id: 'block-1',
-          kind: 'external' as const,
-          title: 'Need product answer',
-          detail: 'Keep the current wording on hold',
-          satisfied: false,
-          createdAt: 1,
-          updatedAt: 1,
-        },
-      ],
-    };
-
-    const next = applyMarkdownPatchToThread(
-      thread,
-      `---
-title: "Gateway thread"
-mission: "Ship the gateway"
-status: ready
-lane: research
+status: active
 ---
 
 Gateway root body
@@ -153,8 +100,8 @@ Gateway root body
       123,
     );
 
-    expect(next.nextActions).toHaveLength(0);
-    expect(next.waitingFor).toHaveLength(0);
+    expect(next.blocks).toHaveLength(0);
+    expect(next.bodyMarkdown).toBe('Gateway root body');
     expect(next.rootMarkdown).toBe('Gateway root body');
   });
 });

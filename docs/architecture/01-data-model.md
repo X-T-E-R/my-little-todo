@@ -60,6 +60,8 @@ zitadel_admin_role = "mlt-admin"
 - `settings`
 - `blobs`
 
+历史与审计说明见：[05-version-history-and-audit.md](./05-version-history-and-audit.md)
+
 这些数据通过主项目服务端统一读写，多个客户端直接共享同一份后端数据。
 
 ---
@@ -192,6 +194,20 @@ CREATE TABLE blobs (
   deleted_at TEXT
 );
 ```
+
+### History Tables
+
+当前数据版本历史采用两张通用表：
+
+- `entity_revisions`
+- `audit_events`
+
+其中：
+
+- `entity_revisions` 保存实体快照历史
+- `audit_events` 保存操作上下文
+
+详细字段和运行规则见：[05-version-history-and-audit.md](./05-version-history-and-audit.md)
 
 ---
 

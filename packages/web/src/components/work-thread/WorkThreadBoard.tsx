@@ -1,16 +1,19 @@
-import type { WorkThread, WorkThreadStatus } from '@my-little-todo/core';
+import {
+  buildWorkThreadBlockStats,
+  type WorkThread,
+  type WorkThreadStatus,
+} from '@my-little-todo/core';
 import { ArrowRight, Play, Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-const STATUS_ORDER: WorkThreadStatus[] = [
-  'running',
-  'ready',
-  'waiting',
-  'blocked',
-  'sleeping',
-  'done',
-  'archived',
-];
+const STATUS_ORDER: WorkThreadStatus[] = ['active', 'paused', 'done', 'archived'];
+
+const STATUS_LABEL: Record<string, string> = {
+  active: '运行中',
+  paused: '暂停中',
+  done: '已完成',
+  archived: '已归档',
+};
 
 function formatStamp(ts: number): string {
   return new Date(ts).toLocaleString();
@@ -70,7 +73,10 @@ export function WorkThreadBoard({
       </div>
 
       {loading ? (
-        <div className="flex flex-1 items-center justify-center text-sm" style={{ color: 'var(--color-text-tertiary)' }}>
+        <div
+          className="flex flex-1 items-center justify-center text-sm"
+          style={{ color: 'var(--color-text-tertiary)' }}
+        >
           {t('loading_session')}
         </div>
       ) : threads.length === 0 ? (
@@ -86,8 +92,11 @@ export function WorkThreadBoard({
           {groups.map((group) => (
             <section key={group.status}>
               <div className="mb-2 flex items-center justify-between gap-3">
-                <h3 className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--color-text-tertiary)' }}>
-                  {t(`thread_status_${group.status}`)}
+                <h3
+                  className="text-xs font-semibold uppercase tracking-[0.14em]"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
+                  {STATUS_LABEL[group.status] ?? group.status}
                 </h3>
                 <span className="text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
                   {group.items.length}
@@ -95,21 +104,37 @@ export function WorkThreadBoard({
               </div>
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {group.items.map((thread) => {
-                  const nextStep = compact(thread.resumeCard.nextStep, 72);
-                  const summary = compact(thread.resumeCard.summary || thread.mission, 140);
-                  const resumable = thread.status === 'ready' || thread.status === 'sleeping';
+                  const stats = buildWorkThreadBlockStats(thread);
+                  const nextStep = compact(thread.resume || thread.resumeCard.nextStep, 72);
+                  const summary = compact(
+                    thread.pause?.reason ||
+                      thread.resumeCard.summary ||
+                      thread.bodyMarkdown ||
+                      thread.mission,
+                    140,
+                  );
+                  const resumable = thread.status === 'active' || thread.status === 'paused';
                   return (
                     <article
                       key={thread.id}
                       className="rounded-2xl border p-4"
-                      style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}
+                      style={{
+                        borderColor: 'var(--color-border)',
+                        background: 'var(--color-surface)',
+                      }}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                          <div
+                            className="truncate text-sm font-semibold"
+                            style={{ color: 'var(--color-text)' }}
+                          >
                             {thread.title}
                           </div>
-                          <div className="mt-1 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
+                          <div
+                            className="mt-1 text-[11px]"
+                            style={{ color: 'var(--color-text-tertiary)' }}
+                          >
                             {formatStamp(thread.updatedAt)}
                           </div>
                         </div>
@@ -124,17 +149,28 @@ export function WorkThreadBoard({
                         </button>
                       </div>
 
-                      <p className="mt-3 text-xs leading-6" style={{ color: 'var(--color-text-secondary)' }}>
+                      <p
+                        className="mt-3 text-xs leading-6"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                      >
                         {summary || t('thread_empty_hint')}
                       </p>
 
-                      <div className="mt-3 flex flex-wrap gap-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                        <span className="rounded-full bg-[var(--color-bg)] px-2.5 py-1">{thread.lane}</span>
+                      <div
+                        className="mt-3 flex flex-wrap gap-2 text-[11px]"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                      >
                         <span className="rounded-full bg-[var(--color-bg)] px-2.5 py-1">
-                          {t('thread_context_count', { count: thread.contextItems.length })}
+                          {`Mission ${stats.missions}`}
                         </span>
                         <span className="rounded-full bg-[var(--color-bg)] px-2.5 py-1">
-                          {t('thread_actions_count', { count: thread.nextActions.length })}
+                          {`Task ${stats.tasks}`}
+                        </span>
+                        <span className="rounded-full bg-[var(--color-bg)] px-2.5 py-1">
+                          {`Spark ${stats.sparks}`}
+                        </span>
+                        <span className="rounded-full bg-[var(--color-bg)] px-2.5 py-1">
+                          {`Log ${stats.logs}`}
                         </span>
                       </div>
 
@@ -147,12 +183,30 @@ export function WorkThreadBoard({
                       {nextStep ? (
                         <div
                           className="mt-3 rounded-xl px-3 py-2 text-[11px]"
-                          style={{ background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}
+                          style={{
+                            background: 'var(--color-bg)',
+                            color: 'var(--color-text-secondary)',
+                          }}
                         >
                           <span className="font-medium" style={{ color: 'var(--color-text)' }}>
-                            {t('thread_resume_next_step_label')}
+                            Next
                           </span>{' '}
                           {nextStep}
+                        </div>
+                      ) : null}
+
+                      {thread.pause?.reason ? (
+                        <div
+                          className="mt-2 rounded-xl px-3 py-2 text-[11px]"
+                          style={{
+                            background: 'var(--color-bg)',
+                            color: 'var(--color-text-secondary)',
+                          }}
+                        >
+                          <span className="font-medium" style={{ color: 'var(--color-text)' }}>
+                            Pause
+                          </span>{' '}
+                          {compact(thread.pause.reason, 96)}
                         </div>
                       ) : null}
 
@@ -161,7 +215,10 @@ export function WorkThreadBoard({
                           type="button"
                           onClick={() => onOpen(thread.id)}
                           className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-medium"
-                          style={{ background: 'var(--color-bg)', color: 'var(--color-text-secondary)' }}
+                          style={{
+                            background: 'var(--color-bg)',
+                            color: 'var(--color-text-secondary)',
+                          }}
                         >
                           <ArrowRight size={12} />
                           {t('thread_open_workspace')}
@@ -171,10 +228,13 @@ export function WorkThreadBoard({
                             type="button"
                             onClick={() => onResume(thread.id)}
                             className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-medium"
-                            style={{ background: 'var(--color-accent-soft)', color: 'var(--color-accent)' }}
+                            style={{
+                              background: 'var(--color-accent-soft)',
+                              color: 'var(--color-accent)',
+                            }}
                           >
                             <Play size={12} />
-                            {t('thread_resume_action')}
+                            Resume
                           </button>
                         ) : null}
                       </div>

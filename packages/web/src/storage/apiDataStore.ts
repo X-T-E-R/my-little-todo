@@ -7,9 +7,6 @@ import {
   taskToDbRow,
 } from '@my-little-todo/core';
 import type {
-  AuditEventRecord,
-  EntityRevisionRecord,
-  HistoryEntityType,
   StreamEntry,
   Task,
   ThinkSession,
@@ -19,7 +16,12 @@ import type {
 } from '@my-little-todo/core';
 import { getAuthToken } from '../stores/authStore';
 import type { AttachmentConfig, UploadResult } from './blobApi';
-import type { DataStore } from './dataStore';
+import type {
+  AuditEventRecord,
+  DataStore,
+  EntityRevisionRecord,
+  HistoryEntityType,
+} from './dataStore';
 import { getPrimaryRoleId, hydrateTaskWithEntry } from './taskEntryBridge';
 import { deserializeWorkThread, deserializeWorkThreadEvent } from './workThreadStorage';
 

@@ -238,7 +238,9 @@ async fn sync_routes_support_native_sync_provider_with_embedded_sessions() {
     assert_eq!(changes_response.status(), StatusCode::OK);
     let changes_json = body_json(changes_response.into_body()).await;
     let changes = changes_json["changes"].as_array().unwrap();
-    assert!(changes.iter().any(|change| change["table"] == "settings" && change["key"] == "theme"));
+    assert!(changes
+        .iter()
+        .any(|change| change["table"] == "settings" && change["key"] == "theme"));
 }
 
 #[tokio::test]

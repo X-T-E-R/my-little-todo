@@ -45,6 +45,8 @@ function extractBlockTitle(title: string): string | null {
 
 function translateStatus(status: string, t?: HistoryTranslator): string {
   const fallbackMap: Record<string, string> = {
+    active: 'Active',
+    paused: 'Paused',
     running: 'Running',
     ready: 'Ready',
     waiting: 'Waiting',
@@ -94,8 +96,21 @@ export function getWorkThreadEventMetaLabel(
   if (event.type === 'waiting_updated' || event.type === 'interrupt_captured') {
     return tx(t, 'thread_history_meta_block', 'block');
   }
+  if (
+    event.type === 'block_added' ||
+    event.type === 'block_updated' ||
+    event.type === 'block_promoted'
+  ) {
+    return tx(t, 'thread_history_meta_block', 'block');
+  }
   if (event.type === 'next_action_added') {
     return tx(t, 'thread_history_meta_next_step', 'next step');
+  }
+  if (event.type === 'resume_updated') {
+    return 'resume';
+  }
+  if (event.type === 'pause_updated') {
+    return 'pause';
   }
   if (event.type === 'decision_recorded') {
     return tx(t, 'thread_history_meta_decision', 'decision');
@@ -143,6 +158,22 @@ export function getWorkThreadEventDisplayTitle(
       return tx(t, 'thread_history_event_block_updated', `Block: ${title}`, { title });
     }
     return tx(t, 'thread_history_event_block_generic', 'Updated block');
+  }
+
+  if (event.type === 'block_added') {
+    return 'Added block';
+  }
+
+  if (event.type === 'block_promoted') {
+    return 'Promoted block';
+  }
+
+  if (event.type === 'resume_updated') {
+    return 'Updated resume cue';
+  }
+
+  if (event.type === 'pause_updated') {
+    return 'Updated pause state';
   }
 
   if (event.type === 'next_action_added') {

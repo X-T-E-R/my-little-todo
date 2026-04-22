@@ -36,6 +36,7 @@ import-legacy-data.json
 output/
 coverage/
 .cache/
+.spec-workflow/
 *.log
 pnpm-debug.log*
 *.tmp

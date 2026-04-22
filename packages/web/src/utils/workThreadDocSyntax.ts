@@ -2,7 +2,10 @@ import type { Node as ProseMirrorNode } from '@milkdown/prose/model';
 import type { WorkThreadSlashCommandId } from './workThreadSlash';
 
 export type WorkThreadCalloutKind =
+  | 'mission'
+  | 'task'
   | 'intent'
+  | 'log'
   | 'spark'
   | 'block'
   | 'explore'
@@ -50,7 +53,7 @@ export interface WorkThreadCalloutDescriptor {
 }
 
 const CALLOUT_RE =
-  /^\[!(intent|spark|block|explore|waiting|interrupt)(?::([a-z_]+))?\]([+-])?\s*(.*)$/i;
+  /^\[!(mission|task|intent|log|spark|block|explore|waiting|interrupt)(?::([a-z_]+))?\]([+-])?\s*(.*)$/i;
 
 function buildSelection(markdown: string, target?: string): { selectionStart: number; selectionEnd: number } {
   if (!target) {
@@ -103,7 +106,10 @@ export function parseWorkThreadContainerPath(path?: string): WorkThreadContainer
 }
 
 export function getWorkThreadCalloutBadgeLabel(kind: WorkThreadCalloutKind): string {
+  if (kind === 'mission') return 'Mission';
+  if (kind === 'task') return 'Task';
   if (kind === 'intent') return 'Intent';
+  if (kind === 'log') return 'Log';
   if (kind === 'spark') return 'Spark';
   if (kind === 'explore') return 'Explore';
   return 'Block';
@@ -220,10 +226,20 @@ export interface WorkThreadBlockSnippet {
 }
 
 export function buildWorkThreadBlockSnippet(commandId: WorkThreadSlashCommandId): WorkThreadBlockSnippet | null {
-  if (commandId === 'intent') {
-    const title = '意图标题';
-    const detail = '在这里继续推进这条意图';
-    const markdown = `> [!intent]+ ${title}\n>\n> ${detail}`;
+  const blockId = `mlt-${commandId}-${Math.random().toString(36).slice(2, 10)}`;
+  if (commandId === 'mission') {
+    const title = 'Mission 标题';
+    const markdown = `> [!mission] ${title}\n>\n> 写这个 mission 的目标和完成标准。\n^${blockId}`;
+    return {
+      markdown,
+      ...buildSelection(markdown, title),
+      selectionText: title,
+    };
+  }
+
+  if (commandId === 'task') {
+    const title = 'Task 标题';
+    const markdown = `> [!task] ${title}\n>\n> 写具体动作。\n^${blockId}`;
     return {
       markdown,
       ...buildSelection(markdown, title),
@@ -233,8 +249,7 @@ export function buildWorkThreadBlockSnippet(commandId: WorkThreadSlashCommandId)
 
   if (commandId === 'spark') {
     const title = 'Spark 标题';
-    const detail = '在这里展开这个分支想法';
-    const markdown = `> [!spark]+ ${title}\n>\n> ${detail}`;
+    const markdown = `> [!spark] ${title}\n>\n> 在这里展开这个分支想法。\n^${blockId}`;
     return {
       markdown,
       ...buildSelection(markdown, title),
@@ -242,20 +257,9 @@ export function buildWorkThreadBlockSnippet(commandId: WorkThreadSlashCommandId)
     };
   }
 
-  if (commandId === 'next-action') {
-    const title = '下一步';
-    const markdown = `- [ ] ${title}`;
-    return {
-      markdown,
-      ...buildSelection(markdown, title),
-      selectionText: title,
-    };
-  }
-
-  if (commandId === 'block') {
-    const title = '卡点标题';
-    const detail = '补充卡住原因或前置条件';
-    const markdown = `> [!block] ${title}\n>\n> ${detail}`;
+  if (commandId === 'log') {
+    const title = 'Log 标题';
+    const markdown = `> [!log] ${title}\n>\n> 写过程记录，之后也可以提升到 Stream.log。\n^${blockId}`;
     return {
       markdown,
       ...buildSelection(markdown, title),

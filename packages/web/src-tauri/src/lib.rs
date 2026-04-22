@@ -6,15 +6,15 @@ mod embedded_host;
 mod native_http;
 mod plugin_runner;
 
-#[cfg(windows)]
-mod foreground_win;
 #[cfg(not(windows))]
 mod foreground_stub;
-
 #[cfg(windows)]
-use foreground_win as foreground;
+mod foreground_win;
+
 #[cfg(not(windows))]
 use foreground_stub as foreground;
+#[cfg(windows)]
+use foreground_win as foreground;
 
 const APP_DATA_DIR_FLAG: &str = "--mlt-app-data-dir";
 const E2E_SKIP_ONBOARDING_FLAG: &str = "--mlt-e2e-skip-onboarding";
@@ -43,10 +43,7 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .build(),
-        )
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             foreground::get_foreground_window_info,
             foreground::foreground_listen_start,
@@ -68,8 +65,12 @@ pub fn run() {
             desktop_shell::register_annotator_shortcut(app.handle())?;
             let _ = desktop_shell::setup_tray(app.handle());
             app.manage(runtime_flags.clone());
-            app.manage(std::sync::Mutex::new(embedded_host::EmbeddedHostManager::default()));
-            app.manage(std::sync::Mutex::new(plugin_runner::PluginRunnerManager::default()));
+            app.manage(std::sync::Mutex::new(
+                embedded_host::EmbeddedHostManager::default(),
+            ));
+            app.manage(std::sync::Mutex::new(
+                plugin_runner::PluginRunnerManager::default(),
+            ));
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -90,7 +91,9 @@ fn native_runtime_flags(flags: tauri::State<'_, NativeRuntimeFlags>) -> NativeRu
     flags.inner().clone()
 }
 
-fn parse_native_bootstrap_options(args: impl IntoIterator<Item = OsString>) -> NativeBootstrapOptions {
+fn parse_native_bootstrap_options(
+    args: impl IntoIterator<Item = OsString>,
+) -> NativeBootstrapOptions {
     let args = args.into_iter().collect::<Vec<_>>();
     NativeBootstrapOptions {
         app_data_dir: parse_path_flag(&args, APP_DATA_DIR_FLAG),
@@ -151,9 +154,7 @@ fn configure_process_environment(options: &NativeBootstrapOptions) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        parse_native_bootstrap_options, APP_DATA_DIR_FLAG, E2E_SKIP_ONBOARDING_FLAG,
-    };
+    use super::{parse_native_bootstrap_options, APP_DATA_DIR_FLAG, E2E_SKIP_ONBOARDING_FLAG};
     use std::{ffi::OsString, path::PathBuf};
 
     #[test]

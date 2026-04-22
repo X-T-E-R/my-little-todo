@@ -1000,6 +1000,34 @@ button:focus-visible,
   color: #b45309;
 }
 
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--mission {
+  border-left-color: color-mix(in srgb, #d96c6c 78%, #a61b1b);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-danger-soft) 78%, white),
+    color-mix(in srgb, var(--color-danger-soft) 58%, var(--color-surface))
+  );
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--mission .milkdown-callout-header::before {
+  background: color-mix(in srgb, var(--color-danger-soft) 82%, white);
+  color: color-mix(in srgb, var(--color-danger) 84%, #7f1d1d);
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--task {
+  border-left-color: color-mix(in srgb, var(--color-accent) 78%, #1d4ed8);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-accent-soft) 82%, white),
+    color-mix(in srgb, var(--color-accent-soft) 62%, var(--color-surface))
+  );
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--task .milkdown-callout-header::before {
+  background: color-mix(in srgb, var(--color-accent-soft) 88%, white);
+  color: color-mix(in srgb, var(--color-accent) 88%, #1e3a8a);
+}
+
 .markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--block,
 .markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--waiting,
 .markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--interrupt {
@@ -1030,6 +1058,20 @@ button:focus-visible,
 .markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--explore .milkdown-callout-header::before {
   background: color-mix(in srgb, #cbd5e1 28%, white);
   color: #334155;
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--log {
+  border-left-color: color-mix(in srgb, #fb923c 72%, #c2410c);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #ffedd5 90%, white),
+    color-mix(in srgb, #ffedd5 70%, var(--color-surface))
+  );
+}
+
+.markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--log .milkdown-callout-header::before {
+  background: color-mix(in srgb, #fed7aa 36%, white);
+  color: #9a3412;
 }
 
 .markdown-editor.thread-callout-enabled .milkdown .ProseMirror .milkdown-callout--collapsed > :not(.milkdown-callout-header):not(.milkdown-callout-toggle) {
@@ -1065,6 +1107,10 @@ button:focus-visible,
 
 .work-thread-document-editor {
   min-height: 100%;
+}
+
+.work-thread-document-editor .milkdown .ProseMirror {
+  padding-top: 18px;
 }
 
 .work-thread-document-editor .crepe-placeholder::before {

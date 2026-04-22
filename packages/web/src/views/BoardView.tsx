@@ -30,6 +30,7 @@ import { KanbanBoard } from '../components/KanbanBoard';
 import { ParentTaskPicker } from '../components/ParentTaskPicker';
 import { RolePillMulti } from '../components/RolePickerPopover';
 import { TaskContextMenu } from '../components/TaskContextMenu';
+import { WorkThreadView } from '../components/WorkThreadView';
 import { useModuleStore } from '../modules';
 import {
   filterByRole,
@@ -706,8 +707,21 @@ function TaskCard({
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: main view with many features
-export function BoardView() {
+type BoardWorkspaceMode = 'tasks' | 'threads';
+
+interface BoardViewProps {
+  workspaceMode?: BoardWorkspaceMode;
+  onSwitchWorkspace?: (mode: BoardWorkspaceMode) => void;
+  onGoNow?: () => void;
+}
+
+export function BoardView({
+  workspaceMode = 'tasks',
+  onSwitchWorkspace,
+  onGoNow,
+}: BoardViewProps = {}) {
   const { t } = useTranslation('board');
+  const { t: tNav } = useTranslation('nav');
   const {
     tasks,
     loading,
@@ -725,6 +739,7 @@ export function BoardView() {
   const scheduleBlocks = useTimeAwarenessStore((s) => s.blocks);
   const loadTimeAwareness = useTimeAwarenessStore((s) => s.load);
   const timeAwarenessEnabled = useModuleStore((s) => s.isEnabled('time-awareness'));
+  const workThreadEnabled = useModuleStore((s) => s.isEnabled('work-thread'));
   const currentRoleId = useRoleStore((s) => s.currentRoleId);
   const filtered = useMemo(() => filterByRole(tasks, currentRoleId), [tasks, currentRoleId]);
   const [postponingTask, setPostponingTask] = useState<Task | null>(null);
@@ -733,7 +748,7 @@ export function BoardView() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [showNoDdl, setShowNoDdl] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('kanban');
+  const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
   const [kanbanFullscreen, setKanbanFullscreen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -836,6 +851,59 @@ export function BoardView() {
     t.submissions.length > 0 ? t.submissions[0]?.onTime : true,
   ).length;
   const onTimeRate = completed.length > 0 ? Math.round((onTimeCount / completed.length) * 100) : 0;
+  const resolvedWorkspaceMode: BoardWorkspaceMode =
+    workThreadEnabled && workspaceMode === 'threads' ? 'threads' : 'tasks';
+
+  const workspaceSwitcher = workThreadEnabled ? (
+    <div
+      className="inline-flex items-center rounded-[var(--radius-pill)] p-1"
+      style={{
+        background: 'color-mix(in srgb, var(--color-surface) 94%, var(--color-bg))',
+        border: '1px solid var(--color-border)',
+      }}
+    >
+      {([
+        ['tasks', tNav('Tasks')],
+        ['threads', tNav('Thread')],
+      ] as const).map(([mode, label]) => {
+        const active = resolvedWorkspaceMode === mode;
+        return (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => onSwitchWorkspace?.(mode)}
+            className="rounded-[var(--radius-pill)] px-4 py-2 text-[12px] font-semibold transition-colors"
+            style={{
+              background: active ? 'var(--color-accent-soft)' : 'transparent',
+              color: active ? 'var(--color-accent)' : 'var(--color-text-tertiary)',
+            }}
+            aria-pressed={active}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  ) : null;
+
+  if (resolvedWorkspaceMode === 'threads') {
+    return (
+      <div className="h-full overflow-hidden px-4 py-4" style={{ background: 'var(--color-bg)' }}>
+        <div className="mx-auto flex h-full w-full max-w-[1480px] flex-col gap-4">
+          {workspaceSwitcher}
+          <section
+            className="min-h-0 flex-1 overflow-hidden rounded-[var(--radius-panel)] border"
+            style={{
+              borderColor: 'var(--color-border)',
+              background: 'color-mix(in srgb, var(--color-surface) 96%, var(--color-bg))',
+            }}
+          >
+            <WorkThreadView onGoNow={onGoNow ?? (() => undefined)} />
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <DndReparentProvider enabled={viewMode === 'list'}>
@@ -844,6 +912,7 @@ export function BoardView() {
         style={{ background: 'var(--color-bg)' }}
       >
         <div className="mx-auto max-w-2xl flex flex-col gap-8">
+          {workspaceSwitcher}
           {/* Stats card */}
           <motion.div
             initial={{ opacity: 0, y: -10 }}

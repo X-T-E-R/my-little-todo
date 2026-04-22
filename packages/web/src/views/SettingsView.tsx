@@ -102,6 +102,11 @@ import {
   isTauriEnv,
 } from '../utils/platform';
 import { eventToKeyString } from '../utils/shortcuts';
+import {
+  clampStreamPageSize,
+  DEFAULT_STREAM_PAGE_SIZE,
+  STREAM_PAGE_SIZE_SETTING_KEY,
+} from '../utils/streamPagination';
 import { useIsMobile } from '../utils/useIsMobile';
 
 type SettingsTab =
@@ -505,7 +510,10 @@ function GeneralTab() {
           <Wind size={16} className="text-[var(--color-accent)]" />
           <h3 className="text-sm font-bold text-[var(--color-text)]">{t('Stream')}</h3>
         </div>
-        <StreamDirectionSetting />
+        <div className="space-y-3">
+          <StreamDirectionSetting />
+          <StreamPageSizeSetting />
+        </div>
       </section>
 
       <hr style={{ borderColor: 'var(--color-border)' }} />
@@ -574,6 +582,42 @@ function StreamDirectionSetting() {
         <option value="bottom-up">{t('stream_direction_bottom_up')}</option>
         <option value="top-down">{t('stream_direction_top_down')}</option>
       </select>
+    </div>
+  );
+}
+
+function StreamPageSizeSetting() {
+  const { t } = useTranslation('settings');
+  const [value, setValue] = useState(DEFAULT_STREAM_PAGE_SIZE);
+
+  useEffect(() => {
+    getSetting(STREAM_PAGE_SIZE_SETTING_KEY).then((raw) => {
+      setValue(clampStreamPageSize(raw));
+    });
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p className="text-sm font-medium text-[var(--color-text)]">
+          {t('Stream history page size')}
+        </p>
+        <p className="text-xs text-[var(--color-text-tertiary)]">
+          {t('stream_page_size_hint')}
+        </p>
+      </div>
+      <input
+        type="number"
+        min={1}
+        max={50}
+        value={value}
+        onChange={async (e) => {
+          const next = clampStreamPageSize(e.target.value);
+          setValue(next);
+          await putSetting(STREAM_PAGE_SIZE_SETTING_KEY, String(next));
+        }}
+        className="w-20 rounded-lg border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-center text-sm outline-none focus:border-[var(--color-accent)] shrink-0"
+      />
     </div>
   );
 }

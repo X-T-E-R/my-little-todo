@@ -1,8 +1,8 @@
 import type { StreamEntryDbRow, TaskDbRow } from '@my-little-todo/core';
 import { describe, expect, it } from 'vitest';
+import { type BackupPayload, importPayloadToStore } from '../utils/backupPayload';
 import fixture from './__fixtures__/legacy-task-stream-v053-slice.json';
 import { migrateLegacyTaskStreamRows } from './taskStreamMigration';
-import { importPayloadToStore, type BackupPayload } from '../utils/backupPayload';
 
 function parseRows<T>(rows: string[]): T[] {
   return rows.map((row) => JSON.parse(row) as T);
@@ -37,10 +37,14 @@ describe('migrateLegacyTaskStreamRows', () => {
     expect(canonicalEntry?.extracted_task_id).toBeNull();
     expect(canonicalEntry?.entry_type).toBe('task');
 
-    const syntheticLoserEntry = result.streamEntries.find((entry) => entry.id === 't-20260410-141208239');
+    const syntheticLoserEntry = result.streamEntries.find(
+      (entry) => entry.id === 't-20260410-141208239',
+    );
     expect(syntheticLoserEntry?.content).toBe('发布 mlt 和 zotero');
 
-    const syntheticOrphanEntry = result.streamEntries.find((entry) => entry.id === 't-20260413-103214381');
+    const syntheticOrphanEntry = result.streamEntries.find(
+      (entry) => entry.id === 't-20260413-103214381',
+    );
     expect(syntheticOrphanEntry?.content).toBe('');
   });
 
@@ -69,6 +73,21 @@ describe('migrateLegacyTaskStreamRows', () => {
             planned_at: task.plannedAt?.getTime() ?? null,
             role_id: task.roleId ?? null,
             role_ids: task.roleIds ? JSON.stringify(task.roleIds) : null,
+            thread_id: task.threadId ?? null,
+            resume_text: task.resume ?? null,
+            pause_json: task.pause
+              ? (() => {
+                  const pauseJson: { reason: string; updatedAt: string; then?: string } = {
+                    reason: task.pause.reason,
+                    updatedAt: task.pause.updatedAt.toISOString(),
+                  };
+                  if (task.pause.then) {
+                    // biome-ignore lint/suspicious/noThenProperty: Test payload mirrors persisted field names.
+                    pauseJson.then = task.pause.then;
+                  }
+                  return JSON.stringify(pauseJson);
+                })()
+              : null,
             parent_id: task.parentId ?? null,
             source_stream_id: task.sourceStreamId ?? null,
             priority: task.priority ?? null,

@@ -4,10 +4,10 @@ import {
 } from './workThreadDocSyntax';
 
 export type WorkThreadSlashCommandId =
-  | 'intent'
+  | 'mission'
+  | 'task'
   | 'spark'
-  | 'next-action'
-  | 'block';
+  | 'log';
 
 export type WorkThreadSlashInsertion = WorkThreadBlockSnippet;
 

@@ -5,7 +5,7 @@
 
 import { LOCAL_DESKTOP_USER_ID } from './localUser';
 
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 
 export const CREATE_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS schema_version (
@@ -34,6 +34,9 @@ export const CREATE_TABLES_SQL = [
     planned_at INTEGER,
     role_id TEXT,
     role_ids TEXT,
+    thread_id TEXT,
+    resume_text TEXT,
+    pause_json TEXT,
     parent_id TEXT,
     source_stream_id TEXT,
     priority REAL,
@@ -131,6 +134,10 @@ export const CREATE_TABLES_SQL = [
   `CREATE TABLE IF NOT EXISTS work_threads (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT '',
+    body_markdown TEXT NOT NULL DEFAULT '',
+    resume_text TEXT,
+    pause_json TEXT,
+    blocks_json TEXT NOT NULL DEFAULT '[]',
     mission TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'ready',
     lane TEXT NOT NULL DEFAULT 'general',
