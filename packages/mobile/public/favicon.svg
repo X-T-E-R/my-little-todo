@@ -1,22 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">My Little Todo logo mark</title>
   <desc id="desc">A rounded blue app icon with a white MLT monogram and a green now dot.</desc>
-  <rect x="24" y="24" width="464" height="464" rx="112" fill="#7d94ca" />
+  <rect x="24" y="24" width="464" height="464" rx="108" fill="#8198cd" />
   <path
-    d="M122 352V156l72 68 72-68v196h66"
+    d="M108 350V150l86 82 86-82v190h66"
     fill="none"
-    stroke="#fffaf1"
+    stroke="#fffdf8"
     stroke-linecap="round"
     stroke-linejoin="round"
     stroke-width="30"
   />
   <path
-    d="M322 178h88M366 178v82"
+    d="M320 152h96M368 152v84"
     fill="none"
-    stroke="#fffaf1"
+    stroke="#fffdf8"
     stroke-linecap="round"
     stroke-linejoin="round"
-    stroke-width="30"
+    stroke-width="28"
   />
-  <circle cx="368" cy="352" r="18" fill="#b8cd74" />
+  <circle cx="370" cy="350" r="19" fill="#bbcf72" />
 </svg>

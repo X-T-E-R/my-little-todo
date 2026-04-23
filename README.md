@@ -1,6 +1,6 @@
 # My Little Todo
 
-![My Little Todo banner](docs/brand/banner-en.svg)
+![My Little Todo banner](docs/brand/banner-en.png)
 
 > Move, don't just list.
 >

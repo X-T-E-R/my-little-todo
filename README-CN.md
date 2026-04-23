@@ -1,6 +1,6 @@
 # My Little Todo
 
-![My Little Todo 中文横幅](docs/brand/banner-zh-CN.svg)
+![My Little Todo 中文横幅](docs/brand/banner-zh-CN.png)
 
 > 别只列清单，开始推进。
 >

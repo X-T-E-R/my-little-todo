@@ -2,24 +2,24 @@
   <title id="title">My Little Todo primary logo</title>
   <desc id="desc">The My Little Todo logo mark with an English wordmark and slogan.</desc>
   <g transform="translate(28 40) scale(0.46875)">
-    <rect x="24" y="24" width="464" height="464" rx="112" fill="#7d94ca" />
+    <rect x="24" y="24" width="464" height="464" rx="108" fill="#8198cd" />
     <path
-      d="M122 352V156l72 68 72-68v196h66"
+      d="M108 350V150l86 82 86-82v190h66"
       fill="none"
-      stroke="#fffaf1"
+      stroke="#fffdf8"
       stroke-linecap="round"
       stroke-linejoin="round"
       stroke-width="30"
     />
     <path
-      d="M322 178h88M366 178v82"
+      d="M320 152h96M368 152v84"
       fill="none"
-      stroke="#fffaf1"
+      stroke="#fffdf8"
       stroke-linecap="round"
       stroke-linejoin="round"
-      stroke-width="30"
+      stroke-width="28"
     />
-    <circle cx="368" cy="352" r="18" fill="#b8cd74" />
+    <circle cx="370" cy="350" r="19" fill="#bbcf72" />
   </g>
   <text
     x="294"
@@ -35,7 +35,7 @@
   <text
     x="298"
     y="204"
-    fill="#4f689f"
+    fill="#4b679f"
     font-family="'Avenir Next', 'Segoe UI', Arial, sans-serif"
     font-size="38"
     font-weight="700"
@@ -46,7 +46,7 @@
   <text
     x="298"
     y="250"
-    fill="#5d6678"
+    fill="#5b6476"
     font-family="'Segoe UI', Arial, sans-serif"
     font-size="26"
     font-weight="500"

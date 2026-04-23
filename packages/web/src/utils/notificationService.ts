@@ -66,7 +66,7 @@ async function sendNotification(title: string, body: string): Promise<void> {
   if ('Notification' in window && Notification.permission === 'granted') {
     new Notification(title, {
       body,
-      icon: '/favicon.svg',
+      icon: '/pwa-192.png',
       tag: `reminder-${Date.now()}`,
     });
   }
