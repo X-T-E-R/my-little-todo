@@ -35,16 +35,18 @@ pub fn open_annotator_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), Strin
     }
 
     let url = WebviewUrl::App("index.html?mlt=annotator".into());
-    let w = WebviewWindowBuilder::new(app, ANNOTATOR_LABEL, url)
+    let builder = WebviewWindowBuilder::new(app, ANNOTATOR_LABEL, url)
         .title("Annotate window")
         .inner_size(400.0, 560.0)
         .min_inner_size(280.0, 36.0)
         .decorations(false)
-        .transparent(true)
         .skip_taskbar(true)
         .always_on_top(true)
         .resizable(true)
-        .visible(true)
+        .visible(true);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+    let w = builder
         .build()
         .map_err(|e| e.to_string())?;
 
