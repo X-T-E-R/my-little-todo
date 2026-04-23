@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Shared TS runner skeleton for My Little Todo server plugins",
   "scripts": {
+    "prebuild": "pnpm --filter @my-little-todo/plugin-sdk run build",
     "build": "tsc -p tsconfig.json",
     "build:binary": "node scripts/compile-runner.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
